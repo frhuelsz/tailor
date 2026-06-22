@@ -1,0 +1,352 @@
+//! The per-cell render pipeline: gather matched fragments, resolve `$include`, merge the config and
+//! tailor fields, interpolate `${…}`, and emit one runnable cell (`meta/docs/image-definitions.md` §7,
+//! §9.3). Pure and deterministic, so the emitted config is a stable golden snapshot.
+
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
+
+use indexmap::IndexMap;
+use serde::de::DeserializeOwned;
+use serde_yaml_ng::{Mapping, Value};
+
+use crate::{
+    error::ConfigError,
+    fragment::{self, LoadedFragment},
+    include, interpolate, matrix,
+    matrix::AxisTuple,
+    merge,
+    schema::{BaseSource, ImageDefinition, OutputSpec},
+    types::ParamValue,
+};
+
+const BASE_FIELD: &str = "base";
+const OUTPUTS_FIELD: &str = "outputs";
+const RENDERED_DIR: &str = ".rendered";
+
+/// Write a cell's normalized golden snapshot to `<image_dir>/.rendered/<slug>.yaml` (for review and
+/// CI blast-radius diffing, `meta/docs/image-definitions.md` §9.3). Returns the written path.
+pub fn write_golden(
+    image_dir: &Path,
+    slug: &str,
+    ic_config: &Value,
+) -> Result<PathBuf, ConfigError> {
+    let dir = image_dir.join(RENDERED_DIR);
+    std::fs::create_dir_all(&dir).map_err(|source| ConfigError::Write {
+        path: dir.clone(),
+        source,
+    })?;
+    let path = dir.join(format!("{slug}.yaml"));
+    let text = serde_yaml_ng::to_string(ic_config).map_err(|source| ConfigError::Parse {
+        path: path.clone(),
+        source,
+    })?;
+    std::fs::write(&path, text).map_err(|source| ConfigError::Write {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(path)
+}
+
+/// One fully rendered matrix cell, ready for execution or golden snapshotting.
+#[derive(Debug, Clone)]
+pub struct RenderedCell {
+    /// The cell's axis coordinate (matrix-declared order).
+    pub tuple: AxisTuple,
+    /// The merged, interpolated Image Customizer config (the `config:` tree).
+    pub ic_config: Value,
+    /// The single resolved base image source.
+    pub base: BaseSource,
+    /// The output formats to build for this cell.
+    pub outputs: Vec<OutputSpec>,
+    /// Local RPM sources (directories or `.repo` files) passed to IC as `--rpm-source`.
+    pub rpm_sources: Vec<PathBuf>,
+}
+
+/// Render every cell of an image. `$include` paths resolve relative to `image_dir`.
+pub fn render_image(
+    image: &ImageDefinition,
+    image_dir: impl AsRef<Path>,
+) -> Result<Vec<RenderedCell>, ConfigError> {
+    let image_dir = image_dir.as_ref();
+    let fragments = fragment::discover(image_dir, image.matrix.as_ref(), &image.features)?;
+    let cells = match &image.matrix {
+        Some(matrix) => matrix::expand(matrix)?,
+        None => vec![AxisTuple { values: Vec::new() }],
+    };
+    cells
+        .into_iter()
+        .map(|tuple| render_cell(image, image_dir, &fragments, tuple))
+        .collect()
+}
+
+fn render_cell(
+    image: &ImageDefinition,
+    image_dir: &Path,
+    fragments: &[LoadedFragment],
+    tuple: AxisTuple,
+) -> Result<RenderedCell, ConfigError> {
+    let axes: BTreeMap<String, String> = tuple.values.iter().cloned().collect();
+    let matched: Vec<&LoadedFragment> = fragments
+        .iter()
+        .filter(|f| f.applies(&axes, &image.features))
+        .collect();
+
+    let params = merge_params(&matched)?;
+    let context = interpolate::build_context(&axes, &params)?;
+
+    let mut config = Mapping::new();
+    for fragment in &matched {
+        let Some(delta) = fragment.doc.config.clone() else {
+            continue;
+        };
+        let mut delta = delta;
+        include::resolve_includes(&mut delta, image_dir)?;
+        let Value::Mapping(delta) = delta else {
+            return Err(ConfigError::InvalidField {
+                slug: slug(image, &tuple),
+                field: "config",
+                detail:
+                    "expected a mapping (inline IC config); path-string config is not yet supported"
+                        .to_owned(),
+            });
+        };
+        merge::merge_into(&mut config, delta, &fragment.label)?;
+    }
+    let mut ic_config = Value::Mapping(config);
+    interpolate::interpolate_tree(&mut ic_config, &context)?;
+
+    let base = resolve_base(image, &tuple, &matched, &context)?;
+    let outputs = resolve_outputs(image, &tuple, &matched)?;
+    let rpm_sources = matched
+        .iter()
+        .flat_map(|f| f.doc.rpm_sources.clone())
+        .collect();
+
+    Ok(RenderedCell {
+        tuple,
+        ic_config,
+        base,
+        outputs,
+        rpm_sources,
+    })
+}
+
+fn merge_params(matched: &[&LoadedFragment]) -> Result<IndexMap<String, String>, ConfigError> {
+    let mut params: IndexMap<String, String> = IndexMap::new();
+    for fragment in matched {
+        for (name, value) in &fragment.doc.params {
+            let value = param_string(value);
+            match params.get(name) {
+                Some(existing) if existing != &value => {
+                    return Err(ConfigError::ParamConflict {
+                        name: name.clone(),
+                        existing: existing.clone(),
+                        incoming: value,
+                    });
+                }
+                _ => {
+                    params.insert(name.clone(), value);
+                }
+            }
+        }
+    }
+    Ok(params)
+}
+
+fn resolve_base(
+    image: &ImageDefinition,
+    tuple: &AxisTuple,
+    matched: &[&LoadedFragment],
+    context: &interpolate::Context,
+) -> Result<BaseSource, ConfigError> {
+    let mut base: Option<Value> = None;
+    for fragment in matched {
+        if let Some(value) = fragment.doc.base.clone() {
+            base = Some(merge::merge_field(
+                base,
+                value,
+                BASE_FIELD,
+                &fragment.label,
+            )?);
+        }
+    }
+    let Some(mut base) = base else {
+        return Err(ConfigError::MissingBase {
+            slug: slug(image, tuple),
+        });
+    };
+    interpolate::interpolate_tree(&mut base, context)?;
+    ensure_single_base_kind(&base, image, tuple)?;
+    deserialize_field(base, image, tuple, BASE_FIELD)
+}
+
+/// A base is a `oneOf` (`path` | `oci` | `azureLinux`). Two fragments merging incompatible base
+/// *kinds* without `$set` would otherwise silently keep the first; reject the ambiguity loudly.
+fn ensure_single_base_kind(
+    base: &Value,
+    image: &ImageDefinition,
+    tuple: &AxisTuple,
+) -> Result<(), ConfigError> {
+    const KINDS: [&str; 3] = ["path", "oci", "azureLinux"];
+    let present: Vec<&str> = KINDS
+        .into_iter()
+        .filter(|kind| base.get(kind).is_some())
+        .collect();
+    match present.len() {
+        1 => Ok(()),
+        0 => Err(ConfigError::MissingBase {
+            slug: slug(image, tuple),
+        }),
+        _ => Err(ConfigError::AmbiguousBase {
+            slug: slug(image, tuple),
+            kinds: present.join(", "),
+        }),
+    }
+}
+
+fn resolve_outputs(
+    image: &ImageDefinition,
+    tuple: &AxisTuple,
+    matched: &[&LoadedFragment],
+) -> Result<Vec<OutputSpec>, ConfigError> {
+    let mut outputs: Option<Value> = None;
+    for fragment in matched {
+        if let Some(value) = fragment.doc.outputs.clone() {
+            outputs = Some(merge::merge_field(
+                outputs,
+                value,
+                OUTPUTS_FIELD,
+                &fragment.label,
+            )?);
+        }
+    }
+    match outputs {
+        Some(value) => deserialize_field(value, image, tuple, OUTPUTS_FIELD),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn deserialize_field<T: DeserializeOwned>(
+    value: Value,
+    image: &ImageDefinition,
+    tuple: &AxisTuple,
+    field: &'static str,
+) -> Result<T, ConfigError> {
+    serde_yaml_ng::from_value(value).map_err(|source| ConfigError::InvalidField {
+        slug: slug(image, tuple),
+        field,
+        detail: source.to_string(),
+    })
+}
+
+fn param_string(value: &ParamValue) -> String {
+    match value {
+        ParamValue::Bool(b) => b.to_string(),
+        ParamValue::Int(i) => i.to_string(),
+        ParamValue::Float(f) => f.to_string(),
+        ParamValue::Str(s) => s.clone(),
+    }
+}
+
+fn slug(image: &ImageDefinition, tuple: &AxisTuple) -> String {
+    let coordinate = tuple.coordinate();
+    if coordinate.is_empty() {
+        image.name.clone()
+    } else {
+        format!("{}_{coordinate}", image.name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::BTreeSet;
+
+    use crate::{loader::load_image, matrix::cell_slug};
+
+    fn example_dir(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../meta/docs/examples")
+            .join(name)
+    }
+
+    fn normalize(text: &str) -> String {
+        format!("{}\n", text.trim_end_matches('\n'))
+    }
+
+    #[test]
+    fn reproduces_every_trident_golden() {
+        let dir = example_dir("trident-vm-testimage");
+        let image = load_image(dir.join("image.yaml")).unwrap();
+        let cells = render_image(&image, &dir).unwrap();
+
+        let golden_dir = dir.join("rendered");
+        let mut expected: BTreeSet<String> = std::fs::read_dir(&golden_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| Path::new(n).extension().is_some_and(|ext| ext == "yaml"))
+            .collect();
+        // One golden per cell: variant[4] × arch[2] × release[2] × phase[1].
+        assert_eq!(expected.len(), 16, "expected one committed golden per cell");
+
+        let mut checked = 0;
+        for cell in &cells {
+            for output in &cell.outputs {
+                let slug = cell_slug(&image.name, &cell.tuple, output.format);
+                let file = format!("{slug}.yaml");
+                let golden_path = golden_dir.join(&file);
+                assert!(golden_path.exists(), "missing golden for cell `{slug}`");
+                let rendered = serde_yaml_ng::to_string(&cell.ic_config).unwrap();
+                let golden = std::fs::read_to_string(&golden_path).unwrap();
+                assert_eq!(
+                    normalize(&rendered),
+                    normalize(&golden),
+                    "rendered config for `{file}` does not match its golden"
+                );
+                expected.remove(&file);
+                checked += 1;
+            }
+        }
+        assert_eq!(
+            checked, 16,
+            "every cell should reproduce its golden exactly"
+        );
+        assert!(
+            expected.is_empty(),
+            "goldens not produced by any cell: {expected:?}"
+        );
+    }
+
+    #[test]
+    fn four_dot_oh_cell_resolves_oci_base_and_arch_platform() {
+        let dir = example_dir("trident-vm-testimage");
+        let image = load_image(dir.join("image.yaml")).unwrap();
+        let cells = render_image(&image, &dir).unwrap();
+
+        let cell = cells
+            .iter()
+            .find(|c| {
+                c.tuple.get("variant") == Some("grub")
+                    && c.tuple.get("arch") == Some("arm64")
+                    && c.tuple.get("release") == Some("4.0")
+            })
+            .expect("grub/arm64/4.0 cell");
+
+        // 4.0's `base: { $set: { oci: … } }` overrides by-arch's local path; `${arch}` is resolved.
+        match &cell.base {
+            BaseSource::Oci { oci } => assert_eq!(oci.platform.as_deref(), Some("linux/arm64")),
+            other => panic!("expected an OCI base, got {other:?}"),
+        }
+        // `grubEfiPkg` interpolates `${efiArch}` (aa64 on arm64) to the Fedora-aligned name.
+        let install = cell.ic_config["os"]["packages"]["install"]
+            .as_sequence()
+            .unwrap();
+        assert!(
+            install.iter().any(|p| p.as_str() == Some("grub2-efi-aa64")),
+            "arm64 4.0 install list should contain grub2-efi-aa64"
+        );
+    }
+}

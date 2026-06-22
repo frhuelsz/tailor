@@ -1,0 +1,86 @@
+name: Release
+
+# Triggered by pushing a version tag (e.g. `v0.1.0`), or manually via the Actions
+# tab (provide the tag to release).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+
+# Releases need write access to upload assets / create the release.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    env:
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CC_aarch64_unknown_linux_musl: musl-gcc
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          # GitHub-hosted ARM64 Linux runner (see CI note on availability).
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      - name: Build static binary
+        run: cargo build --release --locked --target ${{ matrix.target }} -p tailor
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          install -Dm755 "target/${{ matrix.target }}/release/tailor" "dist/tailor-${{ matrix.target }}"
+          ( cd dist && sha256sum "tailor-${{ matrix.target }}" > "tailor-${{ matrix.target }}.sha256" )
+      - name: Verify the binary is fully static
+        run: |
+          BIN="dist/tailor-${{ matrix.target }}"
+          file "$BIN"
+          file "$BIN" | grep -qE 'static-pie linked|statically linked'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tailor-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -lR dist
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/tailor-*

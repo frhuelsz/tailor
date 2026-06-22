@@ -1,0 +1,61 @@
+//! Built-in defaults for the Image Customizer (IC) toolchain — the single, obvious source of truth
+//! for *which Image Customizer tailor runs by default*.
+//!
+//! Change the constants below to update the default IC image/version everywhere it matters:
+//! - [`DEFAULT_IC_CONTAINER`] — the image used in standalone mode (no `tailor.yaml`).
+//! - [`DEFAULT_IC_TAG`] — the tag pulled when a toolchain pins neither a `tag` nor a `version`
+//!   (see [`ToolchainEntry::effective_tag`](crate::ToolchainEntry::effective_tag)).
+
+use std::collections::BTreeMap;
+
+use crate::schema::{ToolConfig, ToolchainEntry, Toolchains};
+
+/// The default Image Customizer container image, used in standalone mode when there is no
+/// `tailor.yaml` pinning a toolchain.
+pub const DEFAULT_IC_CONTAINER: &str = "mcr.microsoft.com/azurelinux/imagecustomizer";
+
+/// The registry tag pulled when a toolchain pins neither an explicit `tag` nor a `version`.
+/// MCR publishes unprefixed tags (e.g. `1.3.0`, `latest`).
+pub const DEFAULT_IC_TAG: &str = "latest";
+
+/// The id of the built-in toolchain entry created in standalone mode.
+const DEFAULT_TOOLCHAIN_ID: &str = "ic";
+
+/// The toolchain configuration used in standalone mode (no `tailor.yaml`): a single entry pointing
+/// at [`DEFAULT_IC_CONTAINER`] with no pinned tag/version, so it resolves to [`DEFAULT_IC_TAG`].
+#[must_use]
+pub fn default_tool_config() -> ToolConfig {
+    let mut entries = BTreeMap::new();
+    entries.insert(
+        DEFAULT_TOOLCHAIN_ID.to_owned(),
+        ToolchainEntry {
+            container: DEFAULT_IC_CONTAINER.to_owned(),
+            version: None,
+            tag: None,
+        },
+    );
+    ToolConfig {
+        schema_version: 1,
+        toolchains: Toolchains {
+            default: DEFAULT_TOOLCHAIN_ID.to_owned(),
+            entries,
+        },
+        runtime: None,
+        defaults: None,
+        images: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standalone_default_is_latest_image_customizer() {
+        let tc = default_tool_config();
+        let entry = &tc.toolchains.entries[&tc.toolchains.default];
+        assert_eq!(entry.container, DEFAULT_IC_CONTAINER);
+        assert_eq!(entry.effective_tag(), DEFAULT_IC_TAG);
+        assert_eq!(entry.effective_tag(), "latest");
+    }
+}

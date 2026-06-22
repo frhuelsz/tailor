@@ -1,0 +1,27 @@
+[package]
+name = "tailor-exec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tailor-core = { workspace = true }
+tailor-config = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+bollard = { workspace = true }
+futures-util = { workspace = true }
+reflink-copy = { workspace = true }
+nix = { workspace = true }
+tracing = { workspace = true }
+serde_yaml_ng = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
