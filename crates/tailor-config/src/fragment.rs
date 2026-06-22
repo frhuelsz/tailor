@@ -126,8 +126,11 @@ impl LoadedFragment {
 }
 
 /// Discover the base document and every `by-*/<value>.yaml` fragment for an image, in apply order:
-/// the base document first, then local fragments by normalized path (`meta/docs/image-definitions.md`
-/// §7). Validates that every fragment axis/value is declared (closed-axis check, §9.4).
+/// the base document first, then axis fragments in **matrix axis-declaration order**, then feature
+/// fragments in `features`-declaration order (`meta/docs/image-definitions.md` §7). Apply order is
+/// merge precedence (later fragments win `$set`/scalar overrides and append last), so the user
+/// controls it by ordering axes in the matrix — never by how the `by-*` directories happen to sort.
+/// Validates that every fragment axis/value is declared (closed-axis check, §9.4).
 pub(crate) fn discover(
     image_dir: &Path,
     matrix: Option<&Matrix>,
@@ -165,15 +168,18 @@ pub(crate) fn discover(
                 "{dir_name}/{}",
                 file.file_name().unwrap_or_default().to_string_lossy()
             );
-            let predicate = predicate_for(axis, &value, &label, matrix, features)?;
-            local.push((label, predicate, parse_fragment(&file)?));
+            let (predicate, order) = predicate_for(axis, &value, &label, matrix, features)?;
+            local.push((order, label, predicate, parse_fragment(&file)?));
         }
     }
-    local.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
+    // Order by the axis's matrix position (features after all axes), so merge precedence follows the
+    // declared axis order. A given cell matches exactly one value per axis, so the label tiebreak
+    // only fixes a stable order among the (non-co-applying) values of one axis.
+    local.sort_by(|(oa, la, _, _), (ob, lb, _, _)| oa.cmp(ob).then_with(|| la.cmp(lb)));
     fragments.extend(
         local
             .into_iter()
-            .map(|(label, predicate, doc)| LoadedFragment {
+            .map(|(_, label, predicate, doc)| LoadedFragment {
                 label,
                 predicate,
                 doc,
@@ -182,31 +188,38 @@ pub(crate) fn discover(
     Ok(fragments)
 }
 
+/// Validate a fragment's axis/value and return its path predicate plus its **apply ordinal**: the
+/// axis's index in the matrix-declaration order, or `axes.len() + feature_index` for a feature
+/// fragment (so features apply after every axis, in `features`-declaration order).
 fn predicate_for(
     axis: &str,
     value: &str,
     label: &str,
     matrix: Option<&Matrix>,
     features: &[String],
-) -> Result<Predicate, ConfigError> {
+) -> Result<(Predicate, usize), ConfigError> {
     if axis == FEATURE_AXIS {
-        if !features.iter().any(|f| f == value) {
+        let Some(feature_index) = features.iter().position(|f| f == value) else {
             return Err(ConfigError::UnknownFragmentValue {
                 axis: FEATURE_AXIS.to_owned(),
                 value: value.to_owned(),
                 file: label.to_owned(),
             });
-        }
-        return Ok(Predicate::Feature {
-            name: value.to_owned(),
-        });
+        };
+        let axis_count = matrix.map_or(0, |m| m.axes.len());
+        return Ok((
+            Predicate::Feature {
+                name: value.to_owned(),
+            },
+            axis_count + feature_index,
+        ));
     }
-    let declared =
-        matrix
-            .and_then(|m| m.axes.get(axis))
-            .ok_or_else(|| ConfigError::UnknownFragmentAxis {
+    let (axis_index, _, declared) =
+        matrix.and_then(|m| m.axes.get_full(axis)).ok_or_else(|| {
+            ConfigError::UnknownFragmentAxis {
                 axis: axis.to_owned(),
-            })?;
+            }
+        })?;
     if !declared.iter().any(|v| v == value) {
         return Err(ConfigError::UnknownFragmentValue {
             axis: axis.to_owned(),
@@ -214,10 +227,13 @@ fn predicate_for(
             file: label.to_owned(),
         });
     }
-    Ok(Predicate::Axis {
-        axis: axis.to_owned(),
-        value: value.to_owned(),
-    })
+    Ok((
+        Predicate::Axis {
+            axis: axis.to_owned(),
+            value: value.to_owned(),
+        },
+        axis_index,
+    ))
 }
 
 fn parse_fragment(path: &Path) -> Result<Fragment, ConfigError> {

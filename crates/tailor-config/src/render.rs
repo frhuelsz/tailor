@@ -284,8 +284,8 @@ mod tests {
             indoc! {"
                 name: mini
                 matrix:
-                  edition: [lite, pro]
                   arch: [amd64, arm64]
+                  edition: [lite, pro]
                 outputs:
                   - format: cosi
                 config:
@@ -417,5 +417,43 @@ mod tests {
             matches!(err, ConfigError::MissingBase { .. }),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn merge_precedence_follows_axis_declaration_order_not_directory_names() {
+        // Two axes whose fragments both `$set` the same scalar. The axis declared LAST wins,
+        // regardless of how the `by-*` directories sort on disk (by-aa < by-zz alphabetically).
+        fn rendered_hostname(first_axis: &str, second_axis: &str) -> String {
+            let tmp = TempDir::new().unwrap();
+            write(
+                tmp.path(),
+                "image.yaml",
+                &format!(
+                    "name: ord\nmatrix:\n  {first_axis}: [x]\n  {second_axis}: [x]\n\
+                     outputs:\n  - format: cosi\nbase:\n  path: ./b.img\n\
+                     config:\n  os:\n    hostname: from-base\n"
+                ),
+            );
+            write(
+                tmp.path(),
+                "by-aa/x.yaml",
+                "config:\n  os:\n    hostname:\n      $set: from-aa\n",
+            );
+            write(
+                tmp.path(),
+                "by-zz/x.yaml",
+                "config:\n  os:\n    hostname:\n      $set: from-zz\n",
+            );
+            let image = load_image(tmp.path().join("image.yaml")).unwrap();
+            let cells = render_image(&image, tmp.path()).unwrap();
+            cells[0].ic_config["os"]["hostname"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        }
+        // Declaring `aa` before `zz` makes `zz` win; reversing the declaration flips the winner —
+        // even though the on-disk directory names (by-aa, by-zz) are identical in both cases.
+        assert_eq!(rendered_hostname("aa", "zz"), "from-zz");
+        assert_eq!(rendered_hostname("zz", "aa"), "from-aa");
     }
 }
