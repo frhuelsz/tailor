@@ -1,0 +1,18 @@
+# Synthetic test workspace (NOT a real config) — exercises workspace discovery, per-image toolchain
+# overrides, and defaults inheritance. Member images are auto-discovered (app/, db/).
+schemaVersion: 1
+
+toolchains:
+  default: ic-main
+  entries:
+    ic-main:
+      container: registry.example/imagecustomizer
+      version: "2.0.0"
+    ic-old:
+      container: registry.example/imagecustomizer
+      version: "1.0.0"            # kept so `db` can pin an older toolchain
+
+defaults:
+  architectures: [amd64]
+  outputs:
+    - format: cosi

@@ -160,17 +160,38 @@ fn normalize_member(entry: &str) -> String {
 mod tests {
     use super::*;
 
-    use std::path::PathBuf;
+    use indoc::indoc;
+    use tempfile::TempDir;
 
-    fn example(rel: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../meta/docs/examples")
-            .join(rel)
+    /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
+    fn write(root: &Path, rel: &str, body: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    const TOOL: &str = indoc! {"
+        schemaVersion: 1
+        toolchains:
+          default: ic
+          entries:
+            ic:
+              container: registry.example/imagecustomizer
+              version: 1.0.0
+    "};
+
+    fn image(name: &str) -> String {
+        format!("name: {name}\nbase:\n  path: ./b.img\nconfig:\n  os:\n    hostname: {name}\n")
     }
 
     #[test]
-    fn auto_discovers_workspace_member_images() {
-        let workspace = discover(example("workspace-two-images")).unwrap();
+    fn discovers_the_manifest_and_auto_discovers_member_images() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "tailor.yaml", TOOL);
+        write(tmp.path(), "alpha/image.yaml", &image("alpha"));
+        write(tmp.path(), "beta/image.yaml", &image("beta"));
+
+        let workspace = discover(tmp.path()).unwrap();
         assert!(workspace.tool.is_some());
         let mut names: Vec<&str> = workspace
             .images
@@ -178,21 +199,27 @@ mod tests {
             .map(|i| i.definition.name.as_str())
             .collect();
         names.sort_unstable();
-        assert_eq!(names, ["database", "webserver"]);
-        assert!(workspace.image("webserver").is_some());
+        assert_eq!(names, ["alpha", "beta"]);
+        assert!(workspace.image("beta").is_some());
     }
 
     #[test]
-    fn standalone_image_without_a_manifest() {
-        // Copy the image into a tempdir so the walk-up cannot escape to a parent manifest.
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::copy(
-            example("minimal-single-image/image.yaml"),
-            tmp.path().join("image.yaml"),
-        )
-        .unwrap();
+    fn find_manifest_walks_up_from_a_nested_directory() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "tailor.yaml", TOOL);
+        let nested = tmp.path().join("member/deep/nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(find_manifest(&nested), Some(tmp.path().join("tailor.yaml")));
+    }
+
+    #[test]
+    fn a_lone_image_without_a_manifest_is_standalone() {
+        // No tailor.yaml at or above the tempdir ⇒ standalone mode, one discovered image.
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "image.yaml", &image("solo"));
         let workspace = discover(tmp.path()).unwrap();
         assert!(workspace.tool.is_none());
         assert_eq!(workspace.images.len(), 1);
+        assert_eq!(workspace.images[0].definition.name, "solo");
     }
 }

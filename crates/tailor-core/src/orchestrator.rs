@@ -350,42 +350,67 @@ pub fn artifact_name(slug: &str, format: OutputFormat) -> String {
 mod tests {
     use super::*;
 
-    use std::path::PathBuf;
-
+    use indoc::indoc;
     use tailor_config::load_image;
     use tempfile::TempDir;
 
     use crate::testing::{FakeExecutor, FakeResolver};
 
-    fn trident_target() -> Arc<Target> {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../meta/docs/examples/trident-vm-testimage");
-        let definition = load_image(dir.join("image.yaml")).unwrap();
-        Arc::new(Target {
+    /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
+    fn write(root: &Path, rel: &str, body: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    /// A small two-axis matrix target (edition[2] × arch[2] = 4 cells) backed by a tempdir. The
+    /// returned `TempDir` must be kept alive for as long as the target is used (renders read it).
+    fn mini_target() -> (TempDir, Arc<Target>) {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: mini
+                matrix:
+                  edition: [lite, pro]
+                  arch: [amd64, arm64]
+                outputs:
+                  - format: cosi
+                base:
+                  path: ./b.img
+                config:
+                  os:
+                    hostname: mini
+            "},
+        );
+        let definition = load_image(tmp.path().join("image.yaml")).unwrap();
+        let target = Arc::new(Target {
             definition,
-            dir,
+            dir: tmp.path().to_path_buf(),
             architectures: vec![Arch::Amd64, Arch::Arm64],
             default_outputs: Vec::new(),
-        })
+        });
+        (tmp, target)
     }
 
     fn tool_config() -> ToolConfig {
-        serde_yaml_ng::from_str(indoc::indoc! {"
+        serde_yaml_ng::from_str(indoc! {"
             schemaVersion: 1
             toolchains:
-              default: ic-1.3
+              default: ic
               entries:
-                ic-1.3:
-                  container: mcr.microsoft.com/azurelinux/imagecustomizer
-                  version: 1.3.0
+                ic:
+                  container: registry.example/imagecustomizer
+                  version: 1.0.0
         "})
         .unwrap()
     }
 
     #[tokio::test]
-    async fn plans_all_trident_cells_as_stale() {
+    async fn plans_all_cells_as_stale() {
         let orchestrator = Orchestrator::new(FakeExecutor::default(), FakeResolver);
-        let target = trident_target();
+        let (_tmp, target) = mini_target();
         let tool = tool_config();
         let lock = Lockfile::default();
         let out = TempDir::new().unwrap();
@@ -395,10 +420,10 @@ mod tests {
             .await
             .unwrap();
 
-        // 16 matrix cells, one output format each.
-        assert_eq!(plan.cells.len(), 16);
+        // edition[2] × arch[2] = 4 cells, one output format each.
+        assert_eq!(plan.cells.len(), 4);
         assert!(plan.cells.iter().all(|c| !c.up_to_date));
-        assert_eq!(plan.stale().count(), 16);
+        assert_eq!(plan.stale().count(), 4);
     }
 
     #[tokio::test]
@@ -406,7 +431,7 @@ mod tests {
         let executor = FakeExecutor::default();
         let recorder = executor.recorder();
         let orchestrator = Orchestrator::new(executor, FakeResolver);
-        let target = trident_target();
+        let (_tmp, target) = mini_target();
         let tool = tool_config();
         let lock = Lockfile::default();
         let out = TempDir::new().unwrap();
@@ -427,25 +452,20 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(results.len(), 16);
+        assert_eq!(results.len(), 4);
         assert_eq!(
             recorder.lock().unwrap().len(),
-            16,
+            4,
             "executor invoked once per stale cell"
         );
-        // A second plan now sees the stamps and marks every cell up to date.
+        // A second plan now sees the stamps; but the fake executor wrote no artifacts, so the
+        // up-to-date check fails and every cell stays stale.
+        let (_tmp2, target2) = mini_target();
         let replan = orchestrator
-            .plan(
-                &[trident_target()],
-                &tool,
-                &lock,
-                &Selector::default(),
-                out.path(),
-            )
+            .plan(&[target2], &tool, &lock, &Selector::default(), out.path())
             .await
             .unwrap();
-        // Stamps exist but artifacts do not (fake executor wrote none), so cells stay stale.
-        assert_eq!(replan.cells.len(), 16);
+        assert_eq!(replan.cells.len(), 4);
     }
 
     #[tokio::test]
@@ -454,53 +474,41 @@ mod tests {
         let executor = FakeExecutor::default();
         let recorder = executor.recorder();
         let orchestrator = Orchestrator::new(executor, FakeResolver);
+        let (_tmp, target) = mini_target();
         let out = TempDir::new().unwrap();
 
         let results = orchestrator
-            .dry_run(
-                &[trident_target()],
-                &tool_config(),
-                &Selector::default(),
-                out.path(),
-            )
+            .dry_run(&[target], &tool_config(), &Selector::default(), out.path())
             .await
             .unwrap();
 
-        assert_eq!(results.len(), 16);
-        assert_eq!(recorder.lock().unwrap().len(), 16);
+        assert_eq!(results.len(), 4);
+        assert_eq!(recorder.lock().unwrap().len(), 4);
     }
 
     #[test]
     fn cells_selected_narrows_to_a_slice_and_a_single_cell() {
-        let target = trident_target();
-        // A one-axis slice: every amd64 cell (variant[4] × release[2] × phase[1]).
+        let (_tmp, target) = mini_target();
+        // A one-axis slice: every amd64 cell (edition[2]).
         let slice = Selector::parse(&["arch=amd64".to_owned()], &[], &[]).unwrap();
-        assert_eq!(cells_selected(&target, &slice).unwrap().len(), 8);
+        assert_eq!(cells_selected(&target, &slice).unwrap().len(), 2);
 
         // Pinning every axis yields exactly one cell.
-        let one = Selector::parse(
-            &["variant=grub,arch=amd64,release=3.0,phase=base".to_owned()],
-            &[],
-            &[],
-        )
-        .unwrap();
+        let one = Selector::parse(&["edition=lite,arch=amd64".to_owned()], &[], &[]).unwrap();
         let selected = cells_selected(&target, &one).unwrap();
         assert_eq!(selected.len(), 1);
-        assert_eq!(
-            selected[0].slug.as_ref(),
-            "trident-vm-testimage_grub_amd64_3.0_base_cosi"
-        );
+        assert_eq!(selected[0].slug.as_ref(), "mini_lite_amd64_cosi");
     }
 
     #[test]
     fn cells_selected_rejects_unknown_axis_and_empty_selection() {
-        let target = trident_target();
+        let (_tmp, target) = mini_target();
         let bad_axis = Selector::parse(&["distro=fedora".to_owned()], &[], &[]).unwrap();
         assert!(matches!(
             cells_selected(&target, &bad_axis).unwrap_err(),
             CoreError::UnknownSelectorAxis { .. }
         ));
-        let no_match = Selector::parse(&["variant=does-not-exist".to_owned()], &[], &[]).unwrap();
+        let no_match = Selector::parse(&["edition=does-not-exist".to_owned()], &[], &[]).unwrap();
         assert!(matches!(
             cells_selected(&target, &no_match).unwrap_err(),
             CoreError::NoCellsSelected { .. }

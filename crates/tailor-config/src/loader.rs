@@ -32,42 +32,79 @@ fn parse_yaml<T: DeserializeOwned>(path: &Path) -> Result<T, ConfigError> {
 mod tests {
     use super::*;
 
-    use std::path::PathBuf;
+    use indoc::indoc;
+    use tempfile::TempDir;
 
     use crate::matrix;
 
-    fn example(rel: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../meta/docs/examples")
-            .join(rel)
+    /// Write `body` to `<tmp>/<name>` and return the path.
+    fn write(tmp: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
+        let path = tmp.path().join(name);
+        fs::write(&path, body).unwrap();
+        path
     }
 
     #[test]
-    fn loads_workspace_tool_config() {
-        let tc = load_tool_config(example("workspace-two-images/tailor.yaml")).unwrap();
+    fn loads_a_tool_config_from_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                toolchains:
+                  default: ic-main
+                  entries:
+                    ic-main:
+                      container: registry.example/imagecustomizer
+                      version: 2.0.0
+                    ic-old:
+                      container: registry.example/imagecustomizer
+                      version: 1.0.0
+            "},
+        );
+        let tc = load_tool_config(&path).unwrap();
         assert_eq!(tc.schema_version, 1);
-        assert_eq!(tc.toolchains.default, "ic-1.3");
-        assert!(tc.toolchains.entries.contains_key("ic-1.1"));
+        assert_eq!(tc.toolchains.default, "ic-main");
+        assert!(tc.toolchains.entries.contains_key("ic-old"));
     }
 
     #[test]
-    fn loads_every_example_base_image() {
-        for rel in [
-            "minimal-single-image/image.yaml",
-            "standalone-image/image.yaml",
-            "workspace-two-images/webserver/image.yaml",
-            "workspace-two-images/database/image.yaml",
-            "trident-vm-testimage/image.yaml",
-        ] {
-            load_image(example(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
-        }
+    fn loads_an_image_definition_and_expands_its_matrix() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "image.yaml",
+            indoc! {"
+                name: gizmo
+                matrix:
+                  edition: [lite, pro]
+                  arch: [amd64, arm64]
+                base:
+                  path: ./b.img
+                config:
+                  os:
+                    hostname: gizmo
+            "},
+        );
+        let img = load_image(&path).unwrap();
+        assert_eq!(img.name, "gizmo");
+        let m = img.matrix.expect("declares a matrix");
+        assert_eq!(matrix::expand(&m).unwrap().len(), 4); // edition[2] × arch[2]
     }
 
     #[test]
-    fn trident_matrix_expands_to_16_cells() {
-        let img = load_image(example("trident-vm-testimage/image.yaml")).unwrap();
-        let m = img.matrix.expect("trident-vm-testimage declares a matrix");
-        // variant[4] × arch[2] × release[2] × phase[1]
-        assert_eq!(matrix::expand(&m).unwrap().len(), 16);
+    fn parse_failure_is_reported_as_a_parse_error() {
+        let tmp = TempDir::new().unwrap();
+        // A YAML sequence cannot deserialize into the `ImageDefinition` struct.
+        let path = write(&tmp, "image.yaml", "- not\n- a\n- mapping\n");
+        let err = load_image(&path).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn a_missing_file_is_reported_as_a_read_error() {
+        let err = load_image(std::path::Path::new("/no/such/dir/image.yaml")).unwrap_err();
+        assert!(matches!(err, ConfigError::Read { .. }), "got {err:?}");
     }
 }

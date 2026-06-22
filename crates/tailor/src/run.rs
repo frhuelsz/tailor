@@ -102,7 +102,7 @@ fn list(workspace: &Workspace) {
             .definition
             .matrix
             .as_ref()
-            .map_or(1, |m| expand(m).map(|c| c.len()).unwrap_or(0));
+            .map_or(1, |m| expand(m).map_or(0, |c| c.len()));
         println!("  {:<28} {cells} cell(s)", image.definition.name);
     }
     if let Some(tool) = &workspace.tool {
@@ -132,7 +132,7 @@ fn show(workspace: &Workspace, name: &str, field: Option<&str>) -> Result<(), Ap
     println!("name:    {}", definition.name);
     println!("dir:     {}", image.dir.display());
     if let Some(matrix) = &definition.matrix {
-        let cells = expand(matrix).map(|c| c.len()).unwrap_or(0);
+        let cells = expand(matrix).map_or(0, |c| c.len());
         println!(
             "matrix:  {cells} cell(s) across {} axis(es)",
             matrix.axes.len()

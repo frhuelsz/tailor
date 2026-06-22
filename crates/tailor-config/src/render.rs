@@ -263,90 +263,159 @@ fn slug(image: &ImageDefinition, tuple: &AxisTuple) -> String {
 mod tests {
     use super::*;
 
-    use std::collections::BTreeSet;
+    use indoc::indoc;
+    use tempfile::TempDir;
 
-    use crate::{loader::load_image, matrix::cell_slug};
+    use crate::{loader::load_image, types::OutputFormat};
 
-    fn example_dir(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../meta/docs/examples")
-            .join(name)
+    /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
+    fn write(root: &Path, rel: &str, body: &str) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
     }
 
-    fn normalize(text: &str) -> String {
-        format!("{}\n", text.trim_end_matches('\n'))
-    }
-
-    #[test]
-    fn reproduces_every_trident_golden() {
-        let dir = example_dir("trident-vm-testimage");
-        let image = load_image(dir.join("image.yaml")).unwrap();
-        let cells = render_image(&image, &dir).unwrap();
-
-        let golden_dir = dir.join("rendered");
-        let mut expected: BTreeSet<String> = std::fs::read_dir(&golden_dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|n| Path::new(n).extension().is_some_and(|ext| ext == "yaml"))
-            .collect();
-        // One golden per cell: variant[4] × arch[2] × release[2] × phase[1].
-        assert_eq!(expected.len(), 16, "expected one committed golden per cell");
-
-        let mut checked = 0;
-        for cell in &cells {
-            for output in &cell.outputs {
-                let slug = cell_slug(&image.name, &cell.tuple, output.format);
-                let file = format!("{slug}.yaml");
-                let golden_path = golden_dir.join(&file);
-                assert!(golden_path.exists(), "missing golden for cell `{slug}`");
-                let rendered = serde_yaml_ng::to_string(&cell.ic_config).unwrap();
-                let golden = std::fs::read_to_string(&golden_path).unwrap();
-                assert_eq!(
-                    normalize(&rendered),
-                    normalize(&golden),
-                    "rendered config for `{file}` does not match its golden"
-                );
-                expected.remove(&file);
-                checked += 1;
-            }
-        }
-        assert_eq!(
-            checked, 16,
-            "every cell should reproduce its golden exactly"
+    /// A small matrix image exercising every render operation: list append, `$remove`, `$replace`,
+    /// `$set`, `$include`, and (nested) parameter interpolation across by-arch/by-edition fragments.
+    fn mini_image(root: &Path) -> ImageDefinition {
+        write(
+            root,
+            "image.yaml",
+            indoc! {"
+                name: mini
+                matrix:
+                  edition: [lite, pro]
+                  arch: [amd64, arm64]
+                outputs:
+                  - format: cosi
+                config:
+                  os:
+                    packages:
+                      install:
+                        - core
+                        - \"${bootPkg}\"
+            "},
         );
-        assert!(
-            expected.is_empty(),
-            "goldens not produced by any cell: {expected:?}"
+        write(
+            root,
+            "by-arch/amd64.yaml",
+            "base:\n  path: ./amd64.img\nparams:\n  efiArch: x64\n",
         );
+        write(
+            root,
+            "by-arch/arm64.yaml",
+            "base:\n  path: ./arm64.img\nparams:\n  efiArch: aa64\n",
+        );
+        write(
+            root,
+            "by-edition/lite.yaml",
+            indoc! {"
+                params:
+                  bootPkg: \"boot-${efiArch}\"
+                config:
+                  storage:
+                    $include: layouts/disk.yaml
+            "},
+        );
+        write(
+            root,
+            "by-edition/pro.yaml",
+            indoc! {"
+                outputs:
+                  $replace:
+                    - format: raw
+                params:
+                  bootPkg: boot-pro
+                base:
+                  $set:
+                    oci:
+                      uri: registry.example/mini:pro
+                      platform: \"linux/${arch}\"
+                config:
+                  os:
+                    packages:
+                      install:
+                        $remove:
+                          - core
+            "},
+        );
+        write(root, "layouts/disk.yaml", "bootType: efi\n");
+        load_image(root.join("image.yaml")).unwrap()
     }
 
-    #[test]
-    fn four_dot_oh_cell_resolves_oci_base_and_arch_platform() {
-        let dir = example_dir("trident-vm-testimage");
-        let image = load_image(dir.join("image.yaml")).unwrap();
-        let cells = render_image(&image, &dir).unwrap();
-
-        let cell = cells
+    fn cell<'a>(cells: &'a [RenderedCell], edition: &str, arch: &str) -> &'a RenderedCell {
+        cells
             .iter()
-            .find(|c| {
-                c.tuple.get("variant") == Some("grub")
-                    && c.tuple.get("arch") == Some("arm64")
-                    && c.tuple.get("release") == Some("4.0")
-            })
-            .expect("grub/arm64/4.0 cell");
+            .find(|c| c.tuple.get("edition") == Some(edition) && c.tuple.get("arch") == Some(arch))
+            .unwrap_or_else(|| panic!("no {edition}/{arch} cell"))
+    }
 
-        // 4.0's `base: { $set: { oci: … } }` overrides by-arch's local path; `${arch}` is resolved.
-        match &cell.base {
+    fn install(cell: &RenderedCell) -> Vec<&str> {
+        cell.ic_config["os"]["packages"]["install"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(serde_yaml_ng::Value::as_str)
+            .collect()
+    }
+
+    #[test]
+    fn renders_one_cell_per_matrix_point() {
+        let tmp = TempDir::new().unwrap();
+        let image = mini_image(tmp.path());
+        let cells = render_image(&image, tmp.path()).unwrap();
+        assert_eq!(cells.len(), 4); // edition[2] × arch[2]
+    }
+
+    #[test]
+    fn lite_cell_keeps_path_base_appends_packages_and_resolves_include_and_nested_params() {
+        let tmp = TempDir::new().unwrap();
+        let image = mini_image(tmp.path());
+        let cells = render_image(&image, tmp.path()).unwrap();
+        let lite = cell(&cells, "lite", "amd64");
+
+        // by-arch supplies a local path base; the inherited cosi output is unchanged.
+        assert!(matches!(&lite.base, BaseSource::Path { .. }));
+        assert_eq!(lite.outputs.len(), 1);
+        assert_eq!(lite.outputs[0].format, OutputFormat::Cosi);
+        // List append + nested interpolation: bootPkg = "boot-${efiArch}", efiArch = x64.
+        assert_eq!(install(lite), ["core", "boot-x64"]);
+        // $include splices the storage layout as the value of `storage`.
+        assert_eq!(lite.ic_config["storage"]["bootType"].as_str(), Some("efi"));
+    }
+
+    #[test]
+    fn pro_cell_applies_set_base_replace_outputs_and_remove() {
+        let tmp = TempDir::new().unwrap();
+        let image = mini_image(tmp.path());
+        let cells = render_image(&image, tmp.path()).unwrap();
+        let pro = cell(&cells, "pro", "arm64");
+
+        // $set overrides the by-arch path base wholesale; ${arch} interpolates into the platform.
+        match &pro.base {
             BaseSource::Oci { oci } => assert_eq!(oci.platform.as_deref(), Some("linux/arm64")),
             other => panic!("expected an OCI base, got {other:?}"),
         }
-        // `grubEfiPkg` interpolates `${efiArch}` (aa64 on arm64) to the Fedora-aligned name.
-        let install = cell.ic_config["os"]["packages"]["install"]
-            .as_sequence()
-            .unwrap();
+        // $replace swaps the whole output list.
+        assert_eq!(pro.outputs.len(), 1);
+        assert_eq!(pro.outputs[0].format, OutputFormat::Raw);
+        // $remove drops `core`, leaving only the interpolated boot package.
+        assert_eq!(install(pro), ["boot-pro"]);
+    }
+
+    #[test]
+    fn an_image_with_no_base_is_an_error() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            "name: nobase\nconfig:\n  os:\n    hostname: x\n",
+        );
+        let image = load_image(tmp.path().join("image.yaml")).unwrap();
+        let err = render_image(&image, tmp.path()).unwrap_err();
         assert!(
-            install.iter().any(|p| p.as_str() == Some("grub2-efi-aa64")),
-            "arm64 4.0 install list should contain grub2-efi-aa64"
+            matches!(err, ConfigError::MissingBase { .. }),
+            "got {err:?}"
         );
     }
 }
