@@ -1,0 +1,55 @@
+# image.yaml — TAILOR config at the top level; ALL Image Customizer config namespaced under `config:`.
+# The two never mix: top-level keys are tailor's (name/matrix/outputs/base/...); `config:` is IC's.
+name: trident-vm-testimage
+
+# ── tailor config ────────────────────────────────────────────────────────────────────────────────
+matrix:
+  variant: [grub, root-verity, usr-verity, vm-img]
+  arch:    [amd64, arm64]
+  release: ["3.0", "4.0"]            # 4.0 is the Fedora-aligned hypothetical (see by-release/4.0.yaml)
+  phase:   [base]
+outputs:
+  - format: cosi                     # default for all variants; vm-img overrides this (by-variant/vm-img.yaml)
+
+# ── Image Customizer config (shared part) ────────────────────────────────────────────────────────
+# `config:` is exactly an IC `--config-file`. It may also be a path string: `config: ./baseimg.yaml`.
+# Per-variant `config:` deltas in by-variant/*.yaml deep-merge on top of this.
+config:
+  os:
+    bootloader:
+      resetType: hard-reset
+    selinux:
+      mode: disabled
+    kernelCommandLine:
+      extraCommandLine:
+        - console=tty0
+        - console=tty1
+        - console=ttyS0
+        - rd.debug
+        - loglevel=6
+        - log_buf_len=1M
+        - systemd.journald.forward_to_console=1
+    packages:
+      install:
+        # Only the release-INVARIANT packages live in the shared config. Packages whose NAME differs
+        # between 3.0 and Fedora-aligned 4.0 (dnf, iptables, vim) moved to by-release/*.yaml.
+        - efibootmgr
+        - iproute
+        - jq
+        - openssh-server
+        - trident-service
+        - netplan
+    additionalFiles:
+      - source: files/99-dhcp-eth0.network
+        destination: /etc/systemd/network/99-dhcp-eth0.network
+      - source: files/sudoers-wheel
+        destination: /etc/sudoers.d/wheel
+    users:
+      - name: testuser
+        sshPublicKeyPaths:
+          - files/id_rsa.pub
+        secondaryGroups:
+          - wheel
+    services:
+      enable:
+        - tridentd.socket

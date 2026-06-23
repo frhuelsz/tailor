@@ -1,0 +1,8 @@
+# by-arch/amd64.yaml — base image for amd64 cells + arch-derived constants.
+# The IC config is arch-independent on 3.0 (the variant configs match across arches, exactly as in
+# trident's testimages.py); only the base image differs by arch, so it is set here. `efiArch` is the
+# EFI arch token consumed by 4.0's Fedora-aligned grub package name (grub2-efi-x64) — unused on 3.0.
+base:
+  path: ../../../../artifacts/qemu_guest.vhdx
+params:
+  efiArch: x64

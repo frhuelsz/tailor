@@ -1,0 +1,481 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/frhuelsz/tailor/docs/schemas/tailor.schema.json",
+  "title": "tailor configuration",
+  "description": "Schema for ALL tailor configuration files. tailor wraps the Azure Linux Image Customizer (IC). There are three document kinds, each validated by a definition below:\n  • tailor.yaml (workspace/tool config) -> #/$defs/ToolConfig\n  • image.yaml  (an image definition)   -> #/$defs/ImageDefinition\n  • by-*/<value>.yaml (a fragment)      -> #/$defs/Fragment\nPoint an editor at the file with a fragment, e.g. `# yaml-language-server: $schema=./tailor.schema.json#/$defs/ImageDefinition`.\n\nIMPORTANT: the contents of an image's `config:` key are Image Customizer configuration and are INTENTIONALLY NOT modeled here — tailor treats them as an opaque YAML tree (an inline mapping) or a path string, merges them structurally, and passes them to IC via --config-file. Only the tailor surface is validated.",
+  "oneOf": [
+    { "$ref": "#/$defs/ToolConfig" },
+    { "$ref": "#/$defs/ImageDefinition" }
+  ],
+
+  "$defs": {
+
+    "ToolConfig": {
+      "type": "object",
+      "title": "tailor.yaml — workspace / tool config",
+      "description": "The workspace root. Holds repo-wide settings (toolchains, runtime, defaults) and the image catalogue. Found by walking UP from the cwd, Cargo-style.",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "toolchains"],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1,
+          "description": "tailor manifest schema version. Only tailor.yaml / tailor.lock carry it."
+        },
+        "toolchains": { "$ref": "#/$defs/Toolchains" },
+        "runtime": { "$ref": "#/$defs/Runtime" },
+        "defaults": { "$ref": "#/$defs/Defaults" },
+        "images": { "$ref": "#/$defs/ImageCatalogue" }
+      }
+    },
+
+    "ImageDefinition": {
+      "type": "object",
+      "title": "image.yaml — an image definition",
+      "description": "One buildable image (the base document). May declare a `matrix:` that expands into many cells; per-axis deltas live in sibling by-*/ fragment files. Top-level keys are tailor fields ONLY; all Image Customizer config lives under `config:`.",
+      "additionalProperties": false,
+      "required": ["name"],
+      "not": { "required": ["base", "baseByArch"] },
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]*$",
+          "description": "Unique image id; used in output filenames and on the CLI. No '_' — that is the reserved separator in output cell-slugs (see reference/types.md)."
+        },
+        "toolchain": { "$ref": "#/$defs/ToolchainRef" },
+        "architectures": { "$ref": "#/$defs/Architectures" },
+        "matrix": { "$ref": "#/$defs/Matrix" },
+        "outputs": { "$ref": "#/$defs/OutputsField" },
+        "base": { "$ref": "#/$defs/BaseField" },
+        "baseByArch": { "$ref": "#/$defs/BaseByArch" },
+        "features": { "$ref": "#/$defs/FeatureFlags" },
+        "params": { "$ref": "#/$defs/Params" },
+        "rpmSources": { "$ref": "#/$defs/RpmSourcesField" },
+        "operation": { "$ref": "#/$defs/Operation" },
+        "injectFiles": {
+          "type": "boolean",
+          "description": "Run IC inject-files signing when the IC config sets output.artifacts. Default false."
+        },
+        "extraDependencies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra input paths whose mtime/hash feed the incremental up-to-date check. The only way to track files referenced from INSIDE the (opaque) IC config (scripts, additionalFiles, overlays, repo files, ...)."
+        },
+        "config": { "$ref": "#/$defs/OpaqueICConfig" }
+      }
+    },
+
+    "Fragment": {
+      "type": "object",
+      "title": "by-*/<value>.yaml — a fragment (partial image definition)",
+      "description": "A conditional delta merged onto the image's base document. Selected by its directory path (by-release/4.0.yaml applies when release==4.0) and/or an inline `match:`. Every field is optional, and a field's VALUE may be wrapped in a directive ($set/$replace/$remove/$include/$rename/$select). `$`-prefixed top-level keys (e.g. a whole-document $include) are also allowed.",
+      "properties": {
+        "match": { "$ref": "#/$defs/Match" },
+        "toolchain": { "$ref": "#/$defs/ToolchainRef" },
+        "architectures": { "$ref": "#/$defs/Architectures" },
+        "outputs": { "$ref": "#/$defs/OutputsField" },
+        "base": { "$ref": "#/$defs/BaseField" },
+        "baseByArch": { "$ref": "#/$defs/BaseByArch" },
+        "features": { "$ref": "#/$defs/FeatureFlags" },
+        "params": { "$ref": "#/$defs/Params" },
+        "rpmSources": { "$ref": "#/$defs/RpmSourcesField" },
+        "operation": { "$ref": "#/$defs/Operation" },
+        "injectFiles": { "type": "boolean" },
+        "extraDependencies": { "type": "array", "items": { "type": "string" } },
+        "config": { "$ref": "#/$defs/OpaqueICConfig" }
+      },
+      "patternProperties": {
+        "^\\$": {
+          "$comment": "Permit top-level directives such as $include in a fragment."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Toolchains": {
+      "type": "object",
+      "description": "Repo-wide Image Customizer toolchain(s). Each entry resolves to a registry digest pinned in tailor.lock. This is where the IC VERSION lives.",
+      "additionalProperties": false,
+      "required": ["default", "entries"],
+      "properties": {
+        "default": {
+          "type": "string",
+          "description": "Id (key in `entries`) used by any image that omits `toolchain:`."
+        },
+        "entries": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Map of toolchain id -> pinned IC container. One or more may coexist.",
+          "additionalProperties": { "$ref": "#/$defs/ToolchainEntry" }
+        }
+      }
+    },
+
+    "ToolchainEntry": {
+      "type": "object",
+      "description": "An Image Customizer container. Only `container` is required; the pull tag defaults to `tag`, else `version`, else `latest`.",
+      "additionalProperties": false,
+      "required": ["container"],
+      "properties": {
+        "container": {
+          "type": "string",
+          "description": "Registry path of the IC image, e.g. mcr.microsoft.com/azurelinux/imagecustomizer."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$",
+          "description": "Optional, informational semantic version of IC. tailor does not gate IC versions. When `tag` is absent, this is used as the pull tag."
+        },
+        "tag": {
+          "type": "string",
+          "description": "Registry tag actually pulled. Defaults to `version` (MCR publishes unprefixed tags, e.g. :1.3.0), and to `latest` when neither `tag` nor `version` is set. The resolved DIGEST is authoritative and is written to tailor.lock."
+        }
+      }
+    },
+
+    "ToolchainRef": {
+      "description": "Per-image toolchain selection. EITHER an id referencing tailor.yaml `toolchains.entries` (workspace mode), OR an inline ToolchainEntry (standalone mode, no tailor.yaml). Omit entirely to use the workspace default (or tailor's built-in default when standalone).",
+      "oneOf": [
+        { "type": "string", "description": "Id of a toolchain defined in tailor.yaml." },
+        { "$ref": "#/$defs/ToolchainEntry" }
+      ]
+    },
+
+    "Runtime": {
+      "type": "object",
+      "description": "Container-runtime (bollard/Docker) knobs reproducing IC's invocation contract. Sensible defaults; rarely overridden.",
+      "additionalProperties": false,
+      "properties": {
+        "privileged": { "type": "boolean", "description": "Default true; IC requires a privileged container." },
+        "mounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hostRoot": { "type": "string", "description": "Container-side mount of host '/' and the prefix for ALL host->container path translation. Default /host." },
+            "dev": { "type": "boolean", "description": "Bind /dev:/dev. Default true." }
+          }
+        },
+        "buildDir": { "type": "string", "description": "IC --build-dir (container-internal; NOT host-translated). Default /tmp." },
+        "logLevel": { "$ref": "#/$defs/LogLevel" },
+        "imageCacheDir": {
+          "type": "string",
+          "description": "Host directory for IC's --image-cache-dir (caches base images downloaded from a registry). Resolved relative to the manifest, created on the host, passed host-translated. Needed only when an image uses an `oci`/`azureLinux` base; tailor may auto-default it (e.g. ./.tailor/cache) when a registry base is present."
+        },
+        "janitorImage": {
+          "type": "object",
+          "description": "Digest-pinned minimal image used for sudo-free ownership/cleanup of IC's root-owned outputs (design.md §7.7).",
+          "additionalProperties": false,
+          "required": ["container"],
+          "properties": {
+            "container": { "type": "string" },
+            "tag": { "type": "string", "description": "Default 'latest'; resolved to a digest in tailor.lock." }
+          }
+        }
+      }
+    },
+
+    "LogLevel": {
+      "type": "string",
+      "enum": ["panic", "fatal", "error", "warn", "info", "debug", "trace"],
+      "description": "IC --log-level. Default info."
+    },
+
+    "Defaults": {
+      "type": "object",
+      "description": "Defaults applied to every image that does not set the field itself.",
+      "additionalProperties": false,
+      "properties": {
+        "architectures": { "$ref": "#/$defs/Architectures" },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/OutputSpec" }
+        }
+      }
+    },
+
+    "ImageCatalogue": {
+      "type": "object",
+      "description": "Which images belong to the workspace. OMIT the whole key to auto-discover every */image.yaml at depth 1 (the common case). Provide it to curate the set or inline trivial images.",
+      "additionalProperties": false,
+      "properties": {
+        "members": {
+          "type": "array",
+          "description": "Path/glob strings to member directories (each containing an image.yaml) or directly to image.yaml files, resolved relative to tailor.yaml. Default: [\"*/\"].",
+          "items": { "type": "string" }
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Path/glob strings to exclude from the discovered/listed members.",
+          "items": { "type": "string" }
+        },
+        "inline": {
+          "type": "array",
+          "description": "Images defined directly inside tailor.yaml (for trivial single-file images that don't warrant their own directory).",
+          "items": { "$ref": "#/$defs/ImageDefinition" }
+        }
+      }
+    },
+
+    "Architectures": {
+      "type": "array",
+      "description": "Target architectures (the arch matrix axis). Each is one IC invocation per output.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/Arch" }
+    },
+
+    "Arch": {
+      "type": "string",
+      "enum": ["amd64", "arm64"],
+      "description": "Architecture token. Maps to container platform linux/<arch>."
+    },
+
+    "Matrix": {
+      "type": "object",
+      "description": "The image's axis declaration AND build set: each user-defined axis maps to its CLOSED list of values; the cartesian product (minus `exclude`, plus `include`) is the set of cells built. `arch` may be given here as an axis or via `architectures`. Axis names match ^[A-Za-z][A-Za-z0-9_-]*$ and exclude the reserved keys `include`/`exclude`.",
+      "properties": {
+        "include": {
+          "type": "array",
+          "description": "Extra cells to add beyond the product.",
+          "items": { "$ref": "#/$defs/CellSelector" }
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Cells to remove from the product.",
+          "items": { "$ref": "#/$defs/CellSelector" }
+        }
+      },
+      "patternProperties": {
+        "^(?!include$|exclude$)[A-Za-z][A-Za-z0-9_-]*$": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" },
+          "description": "An axis: its closed set of values. Each value must match [A-Za-z0-9.-]+ (no '_', the reserved cell-slug separator) so it is safe as both a fragment filename and an output-name segment."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "CellSelector": {
+      "type": "object",
+      "description": "A partial cell: a map of axis name -> a single pinned value.",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" }
+    },
+
+    "OutputsField": {
+      "description": "Output matrix for the image. A plain list of OutputSpec, or a list-directive ($replace/$remove/$include) when used in a fragment.",
+      "oneOf": [
+        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/OutputSpec" } },
+        { "$ref": "#/$defs/ReplaceDirective" },
+        { "$ref": "#/$defs/RemoveDirective" },
+        { "$ref": "#/$defs/IncludeDirective" }
+      ]
+    },
+
+    "OutputSpec": {
+      "type": "object",
+      "description": "One output format. Each output x architecture is one IC invocation -> one artifact.",
+      "additionalProperties": false,
+      "required": ["format"],
+      "properties": {
+        "format": { "$ref": "#/$defs/OutputFormat" },
+        "cosiCompressionLevel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 22,
+          "description": "zstd level; only valid for format: cosi (requires IC >= 1.2)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Output-name template that overrides the default cell slug. Supports ${...} interpolation of axis values plus ${name}/${arch}/${format}. The DEFAULT basename is the full cell slug: <image-name>_<each declared axis value in matrix order>_<format>, '_'-separated (see reference/image-yaml.md). tailor computes every output path up front and rejects collisions."
+        }
+      }
+    },
+
+    "OutputFormat": {
+      "type": "string",
+      "enum": ["cosi", "vhd", "vhd-fixed", "vhdx", "qcow2", "raw", "iso", "pxe-dir", "pxe-tar", "baremetal-image"],
+      "description": "IC --output-image-format. The `convert` operation supports only a subset: vhd, vhd-fixed, vhdx, qcow2, raw, cosi, baremetal-image (iso / pxe-* are customize-only)."
+    },
+
+    "BaseField": {
+      "description": "The base image source for the image. A BaseSource, or a directive ($set/$select/$include) when used in a fragment to override an inherited base. Mutually exclusive with `baseByArch`.",
+      "oneOf": [
+        { "$ref": "#/$defs/BaseSource" },
+        { "$ref": "#/$defs/SetDirective" },
+        { "$ref": "#/$defs/SelectDirective" },
+        { "$ref": "#/$defs/IncludeDirective" }
+      ]
+    },
+
+    "BaseSource": {
+      "type": "object",
+      "description": "EXACTLY ONE base source. Drives IC's input image via the command line (overrides any input.image in the IC config).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string", "description": "Local image file (e.g. a .vhdx). Single-arch; for per-arch local files use baseByArch." }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["oci"],
+          "properties": {
+            "oci": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["uri"],
+              "properties": {
+                "uri": { "type": "string", "description": "OCI reference, e.g. registry/repo:tag (the resolved digest is pinned in tailor.lock)." },
+                "platform": { "type": "string", "description": "e.g. linux/amd64. Defaults to linux/<arch> per cell." }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["azureLinux"],
+          "properties": {
+            "azureLinux": {
+              "type": "object",
+              "description": "MCR Azure Linux sugar over `oci`. Multi-arch manifest -> one source covers every arch.",
+              "additionalProperties": false,
+              "required": ["version", "variant"],
+              "properties": {
+                "version": { "type": "string", "description": "Azure Linux release, e.g. \"3.0\"." },
+                "variant": { "type": "string", "description": "Image variant, e.g. minimal-os." }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "BaseByArch": {
+      "type": "object",
+      "description": "Per-architecture base sources (mutually exclusive with `base`). Required when local-file bases differ per arch; every selected architecture MUST have an entry.",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/Arch" },
+      "additionalProperties": { "$ref": "#/$defs/BaseSource" }
+    },
+
+    "FeatureFlags": {
+      "type": "array",
+      "description": "Image-level feature flags (e.g. pcrlock-static-files). Enable by-feature/<name>.yaml fragments and gate optional config. NOTE: this is NOT the design.md `features.operation`/`features.injectFiles` object — those operation flags are the top-level `operation` and `injectFiles` keys (renamed to avoid the collision).",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+
+    "Params": {
+      "type": "object",
+      "description": "Named scalar constants for ${...} interpolation into config string values (and into other params/axis values). Values are scalars only — never structure.",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    },
+
+    "RpmSourcesField": {
+      "description": "Extra RPM sources (each becomes an IC --rpm-source, lowest->highest priority). An entry is a path to a directory of RPMs OR a .repo file. A plain list, or a list-directive in a fragment.",
+      "oneOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "$ref": "#/$defs/ReplaceDirective" },
+        { "$ref": "#/$defs/RemoveDirective" },
+        { "$ref": "#/$defs/IncludeDirective" }
+      ]
+    },
+
+    "Operation": {
+      "type": "string",
+      "enum": ["customize", "convert"],
+      "description": "tailor-level IC operation. Default customize. `convert` forbids `config`, requires a local-file base, forbids rpmSources/injectFiles, and restricts the output-format set."
+    },
+
+    "OpaqueICConfig": {
+      "description": "Image Customizer --config-file content: EITHER an inline mapping (the IC config) OR a string path to an IC config YAML. OPAQUE to tailor — its inner structure is NOT modeled or validated by this schema; tailor merges it structurally (with directives) and passes it through to IC.",
+      "type": ["object", "string"]
+    },
+
+    "Match": {
+      "type": "object",
+      "description": "A fragment condition (ANDed with the fragment's directory-path predicate). Supports axis equality {axis: value}, set membership {axis: [values]}, a {feature: name} test, and the boolean combinators all/any/not.",
+      "properties": {
+        "all": { "type": "array", "items": { "$ref": "#/$defs/Match" } },
+        "any": { "type": "array", "items": { "$ref": "#/$defs/Match" } },
+        "not": { "$ref": "#/$defs/Match" },
+        "feature": { "type": "string" }
+      },
+      "patternProperties": {
+        "^(?!all$|any$|not$|feature$)[A-Za-z][A-Za-z0-9_-]*$": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" },
+            { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9.-]+$" } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IncludeDirective": {
+      "type": "object",
+      "description": "$include — splice the parsed content of a repo-root-relative file as this value (covers mappings, lists, and scalars). Sole key.",
+      "additionalProperties": false,
+      "required": ["$include"],
+      "properties": { "$include": { "type": "string" } }
+    },
+
+    "SetDirective": {
+      "type": "object",
+      "description": "$set — explicit override of an inherited scalar or object value (resolves an otherwise-conflicting double-set).",
+      "additionalProperties": false,
+      "required": ["$set"],
+      "properties": { "$set": true }
+    },
+
+    "ReplaceDirective": {
+      "type": "object",
+      "description": "$replace — replace an inherited list wholesale (instead of the default append).",
+      "additionalProperties": false,
+      "required": ["$replace"],
+      "properties": { "$replace": { "type": "array" } }
+    },
+
+    "RemoveDirective": {
+      "type": "object",
+      "description": "$remove — drop the listed items from an inherited list.",
+      "additionalProperties": false,
+      "required": ["$remove"],
+      "properties": { "$remove": { "type": "array" } }
+    },
+
+    "RenameDirective": {
+      "type": "object",
+      "description": "$rename — rename a keyed list element and fix dependent references.",
+      "additionalProperties": false,
+      "required": ["$rename"],
+      "properties": {
+        "$rename": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": { "type": "string" },
+            "to": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "SelectDirective": {
+      "type": "object",
+      "description": "$select — OPTIONAL co-location sugar: pick this value by an axis. { $select: { <axis>: { <value>: <result>, ..., default: <result> } } }. The primary mechanism is a per-axis file, not this.",
+      "additionalProperties": false,
+      "required": ["$select"],
+      "properties": { "$select": { "type": "object" } }
+    }
+  }
+}

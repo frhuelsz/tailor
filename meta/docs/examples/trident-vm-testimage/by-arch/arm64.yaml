@@ -1,0 +1,7 @@
+# by-arch/arm64.yaml — base image for arm64 cells (trident uses the core_arm64 vhdx for arm64) +
+# arch constants. `efiArch: aa64` feeds 4.0's grub2-efi-aa64 package name; unused on 3.0.
+# Same IC config as amd64; only the base image changes.
+base:
+  path: ../../../../artifacts/core_arm64.vhdx
+params:
+  efiArch: aa64

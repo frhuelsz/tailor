@@ -1,0 +1,47 @@
+# image.yaml — a COMPLETE single-image definition. THIS ONE FILE IS THE WHOLE THING.
+#
+# Top level is TAILOR config only. ALL Image Customizer config is namespaced under `config:` — the
+# two never mix. No matrix, no by-*/ directories, no $select/$include. You add those ONLY when an
+# image grows variants (see ../trident-vm-testimage for the other end of the spectrum).
+
+# ── tailor config ────────────────────────────────────────────────────────────────────────────────
+name: my-image
+base:
+  path: ./artifacts/core.vhdx
+  # alternatives: an `oci:` registry reference or `azureLinux:` (MCR sugar) — see design.md §5.2/§6
+outputs:
+  - format: cosi
+
+# ── Image Customizer config ──────────────────────────────────────────────────────────────────────
+# `config:` is exactly an IC `--config-file`, passed through untouched. (It can also be a path
+# string — `config: ./baseimg.yaml` — to reuse a hand-written IC config as-is.)
+config:
+  os:
+    hostname: my-image
+    bootloader:
+      resetType: hard-reset
+    packages:
+      install: [openssh-server, vim, trident-service]
+    services:
+      enable: [sshd, trident]
+  storage:
+    bootType: efi
+    disks:
+      - partitionTableType: gpt
+        maxSize: 4G
+        partitions:
+          - id: esp
+            type: esp
+            size: 8M
+          - id: rootfs
+            size: grow
+    filesystems:
+      - deviceId: esp
+        type: fat32
+        mountPoint:
+          path: /boot/efi
+          options: "umask=0077"
+      - deviceId: rootfs
+        type: ext4
+        mountPoint:
+          path: /

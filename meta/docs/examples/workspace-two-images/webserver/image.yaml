@@ -1,0 +1,40 @@
+# webserver/image.yaml — a member image, discovered automatically by tailor.yaml one level up.
+#
+# No `toolchain:`  ⇒ uses the workspace default (ic-1.3).
+# No `outputs:`/`architectures:`  ⇒ inherits the workspace `defaults:` (cosi, amd64).
+# So this file is *only* what makes this image this image: its name, base, and IC config.
+name: webserver
+
+base:
+  azureLinux:
+    version: "3.0"                   # the base OS version (independent of the IC toolchain version)
+    variant: minimal-os
+
+config:
+  os:
+    hostname: webserver
+    packages:
+      install: [nginx, openssh-server]
+    services:
+      enable: [nginx, sshd]
+  storage:
+    bootType: efi
+    disks:
+      - partitionTableType: gpt
+        maxSize: 8G
+        partitions:
+          - id: esp
+            type: esp
+            size: 8M
+          - id: rootfs
+            size: grow
+    filesystems:
+      - deviceId: esp
+        type: fat32
+        mountPoint:
+          path: /boot/efi
+          options: "umask=0077"
+      - deviceId: rootfs
+        type: ext4
+        mountPoint:
+          path: /

@@ -1,0 +1,17 @@
+# by-release/3.0.yaml — Azure Linux 3.0: the historical AZL/Mariner package names.
+#
+# The release-divergent SHARED packages live here (NOT in image.yaml's shared config), so each
+# release owns its own names with zero copy-paste. Package NAMES that also vary per variant
+# (the grub EFI package, the systemd-boot package) are exposed as `params` so the variant files can
+# reference a single name regardless of release/arch — see by-variant/*.yaml.
+params:
+  grubEfiPkg: grub2-efi-binary    # 3.0: one arch-independent grub EFI package
+  sdBootPkg:  systemd-boot        # 3.0: systemd-boot (installed by the verity variants)
+
+config:
+  os:
+    packages:
+      install:
+        - dnf
+        - iptables
+        - vim

@@ -1,0 +1,21 @@
+# by-variant/grub.yaml → reproduces base/baseimg-grub.yaml
+# Top level would hold tailor fields (e.g. `base:`); IC deltas go under `config:`.
+config:
+  os:
+    hostname: trident-vm-testimg
+    packages:
+      install:
+        - "${grubEfiPkg}"            # 3.0: grub2-efi-binary · 4.0: grub2-efi-x64/aa64 (by-release + by-arch)
+    additionalFiles:
+      - source: files/sshd-keygen.service
+        destination: /usr/lib/systemd/system/sshd-keygen.service
+  storage:
+    $include: layouts/storage/grub.yaml
+  scripts:
+    postCustomization:
+      - path: scripts/post-install.sh
+      - path: scripts/update-host-status.sh
+      - path: scripts/prepare-update-config.sh
+      - path: scripts/ssh-move-host-keys.sh
+      - path: scripts/create-ssh-dirs.sh
+      - path: scripts/duid-type-to-link-layer.sh

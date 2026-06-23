@@ -1,0 +1,23 @@
+# by-variant/vm-img.yaml — THOUGHT EXPERIMENT: a plain bootable VM image that emits a fixed-size VHD
+# (the format Azure wants) INSTEAD of cosi.
+#
+# Teaching point: the OUTPUT FORMAT is a *tailor* field (`outputs:`), driven by tailor's
+# `--output-image-format`, NOT Image Customizer config. So it sits at the TOP level of this file,
+# cleanly separate from the IC config under `config:`. This is exactly where the namespacing pays off.
+
+# ── tailor field: override the inherited outputs ──────────────────────────────────────────────────
+# image.yaml sets `outputs:` to a single `cosi` entry. Lists APPEND by default, so simply re-listing a
+# `vhd-fixed` entry would build BOTH cosi AND vhd-fixed (legitimate multi-output!).
+# To emit vhd-fixed *instead of* cosi, $replace the inherited list:
+outputs:
+  $replace:
+    - format: vhd-fixed
+
+# ── IC config: a bootable, non-verity VM image (like the grub variant) ────────────────────────────
+config:
+  os:
+    hostname: trident-vm-img
+    packages:
+      install: ["${grubEfiPkg}"]     # non-verity → keeps grub. 3.0: grub2-efi-binary · 4.0: grub2-efi-x64/aa64
+  storage:
+    $include: layouts/storage/grub.yaml   # reuse the simple esp+root layout
