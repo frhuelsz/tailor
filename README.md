@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml/badge.svg)](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml)
 
-**Cargo-style, manifest-driven front-end for the Azure Linux Image Customizer.**
+**Manifest-driven front-end for the Azure Linux Image Customizer.**
 
 tailor lets you describe Azure Linux images in small YAML definitions instead of hand-writing Docker/Image Customizer invocations. It merges layered `image.yaml` fragments, expands matrices into build cells, resolves base images, and runs the Azure Linux Image Customizer (`mcr.microsoft.com/azurelinux/imagecustomizer`) once per cell. The `config:` tree remains Image Customizer YAML: tailor passes it through without modeling the IC schema.
 
@@ -16,6 +16,72 @@ flowchart LR
   C --> IC["Image Customizer container"]
   IC --> O["artifacts"]
 ```
+
+## Why tailor
+
+The Image Customizer is powerful but low-level: building an image means hand-assembling a privileged `docker run` — the right container tag, a `-v /:/host` mount, **host paths rewritten** into that mount, a base image, the output format, RPM sources, and a config YAML — repeated per image, per architecture, per output format. That glue is exactly what teams end up hand-writing around IC; tailor turns it into a reusable, declarative tool — your image set lives in YAML, not in code.
+
+### Manage layered, varied configuration — without copy-paste
+
+Real image sets vary along several axes at once (variant × architecture × release …). tailor expresses that as a `matrix:` and layers small per-axis fragments over a shared base:
+
+- **One base, many cells.** `image.yaml` holds the shared config; each `by-<axis>/<value>.yaml` fragment contributes only its delta. The matrix expands to one **cell** per combination.
+- **Predictable merging.** Maps deep-merge, lists append, and scalars conflict *loudly* unless you opt in with `$set` — so two fragments can't silently clobber each other. `$replace`/`$remove` give precise list control, `$include` splices shared snippets, and `${params}` interpolate per-cell values (e.g. an arch-specific package name).
+- **Add a variant by adding a file.** A new axis value is just a new fragment; existing cells stay identical. Merge precedence follows the order you declare axes — not directory names — so nothing re-orders behind your back.
+
+The nuance lives in a handful of small, reviewable files instead of N copy-pasted full configs.
+
+### Runs Image Customizer for you
+
+You describe *what* you want; tailor handles the *how*. For each cell it assembles and runs the complete IC invocation through the Docker API (no shelling out):
+
+- **Base resolution** — a local file, an `oci:` reference, or `azureLinux:` (MCR) shorthand, resolved to a digest and pinned in `tailor.lock`.
+- **The privileged run** — `--privileged`, the `/:/host` bind, the correct `--platform linux/<arch>`, and **every host path rewritten** into the mount (an easy-to-get-wrong step you'd otherwise script by hand).
+- **Output & cleanup** — per-format `--output-image-format`, streamed logs, exit/output verification, and **sudo-free cleanup** of the root-owned files IC leaves behind.
+- **Reproducibility** — `tailor build --locked` pins the IC container and base digests; `tailor build --dry-run` prints the exact `docker run …` first.
+
+### Just an `image.yaml`
+
+You don't need a workspace to start. This standalone definition — no `tailor.yaml`, no toolchain to pin — is a complete, buildable image:
+
+```yaml
+# image.yaml
+name: hello
+base:
+  azureLinux:
+    version: "3.0"
+    variant: minimal-os
+config:
+  os:
+    hostname: hello
+    packages:
+      install: [openssh-server, vim]
+```
+
+Build it (add `--dry-run` to preview without launching the container):
+
+```bash
+tailor build
+```
+
+From those few lines tailor resolves the base image, assembles the full privileged Image Customizer invocation — host paths rewritten into the `/host` mount, the platform set, the output format applied — and runs it:
+
+```text
+docker run \
+  --rm \
+  --privileged \
+  --platform linux/amd64 \
+  -v /:/host \
+  -v /dev:/dev \
+  mcr.microsoft.com/azurelinux/imagecustomizer:latest \
+  customize \
+  --config-file /host/home/you/hello/.tailor-render.hello_amd64_cosi.ic.yaml \
+  --image oci:mcr.microsoft.com/azurelinux/3.0/image/minimal-os \
+  --output-image-format cosi \
+  --output-image-file /host/home/you/hello/artifacts/hello_amd64_cosi.cosi
+```
+
+The result is `artifacts/hello_amd64_cosi.cosi`. You wrote no `outputs:` (so it defaulted to `cosi`) and pinned no toolchain (so it used the latest Image Customizer). Grow into a workspace — a shared toolchain, defaults, and many images — only when you need it.
 
 ## Installation
 
@@ -37,7 +103,7 @@ sudo install -m 0755 "tailor-${target}" /usr/local/bin/tailor
 tailor --version
 ```
 
-### Cargo
+### From source
 
 The crate is not published to crates.io yet.
 
@@ -72,7 +138,7 @@ The `advanced` scaffold creates a workspace `tailor.yaml`, a `myimage/image.yaml
 
 ## Documentation
 
-Start with the [documentation hub](docs/README.md), organized with Diátaxis:
+Start with the [documentation hub](docs/README.md):
 
 - [Tutorials](docs/tutorials/README.md): learn tailor hands-on.
 - [How-to guides](docs/how-to/README.md): accomplish specific tasks.

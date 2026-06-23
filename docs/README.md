@@ -1,6 +1,6 @@
 # tailor documentation
 
-This documentation follows the [Diátaxis](https://diataxis.fr/) framework: each section has a different job.
+This documentation is organized into four sections, each with a different job.
 
 ```mermaid
 flowchart TD

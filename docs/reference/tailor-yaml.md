@@ -1,6 +1,6 @@
 # `tailor.yaml` reference
 
-`tailor.yaml` is the workspace manifest: it configures toolchains, runtime defaults, and image discovery. tailor finds it by walking up from the current directory, like Cargo.
+`tailor.yaml` is the workspace manifest: it configures toolchains, runtime defaults, and image discovery. tailor finds it by walking up from the current directory.
 
 ```yaml
 schemaVersion: 1
