@@ -99,7 +99,12 @@ fn discover_members(root: &Path, tool: &ToolConfig) -> Result<Vec<DiscoveredImag
     };
 
     let mut images = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     for dir in member_dirs {
+        // The `*` glob and an explicit member entry can name the same directory; keep it once.
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
         let name = dir
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -201,6 +206,24 @@ mod tests {
         names.sort_unstable();
         assert_eq!(names, ["alpha", "beta"]);
         assert!(workspace.image("beta").is_some());
+    }
+
+    #[test]
+    fn glob_and_explicit_member_naming_the_same_dir_is_deduplicated() {
+        // `tailor add image` writes `members: ["*", <new>]`; the `*` already covers a depth-1 dir,
+        // so the explicit entry must not yield a duplicate image.
+        let tmp = TempDir::new().unwrap();
+        let manifest = format!("{TOOL}images:\n  members:\n    - \"*\"\n    - alpha\n");
+        write(tmp.path(), "tailor.yaml", &manifest);
+        write(tmp.path(), "alpha/image.yaml", &image("alpha"));
+
+        let workspace = discover(tmp.path()).unwrap();
+        let names: Vec<&str> = workspace
+            .images
+            .iter()
+            .map(|i| i.definition.name.as_str())
+            .collect();
+        assert_eq!(names, ["alpha"], "alpha must appear exactly once");
     }
 
     #[test]

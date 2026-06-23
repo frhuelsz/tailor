@@ -3,6 +3,7 @@
 mod cli;
 mod error;
 mod run;
+mod scaffold;
 
 use std::process::ExitCode;
 

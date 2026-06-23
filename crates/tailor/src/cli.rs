@@ -68,6 +68,55 @@ pub(crate) enum Command {
     Slugs(ImagesArgs),
     /// Print version information (identical to `--version`).
     Version,
+    /// Scaffold a new tailor project (manifest and/or image definition).
+    Init(InitArgs),
+    /// Add an image or axis to an existing tailor project.
+    Add {
+        #[command(subcommand)]
+        what: AddCommand,
+    },
+}
+
+/// Subcommands of `tailor add`.
+#[derive(Debug, Subcommand)]
+pub(crate) enum AddCommand {
+    /// Scaffold a new member image and register it in the workspace `tailor.yaml`.
+    Image {
+        /// The new image's name (also its directory, created in the current directory).
+        name: String,
+    },
+    /// Append a new axis to an image's matrix and create its `by-<axis>/` directory.
+    ///
+    /// Pass just `<axis>` when the workspace has one image, or `<image> <axis>` to choose one.
+    Axis {
+        /// The axis name, or the image name when a second argument is given.
+        first: String,
+        /// The axis name (when the first argument is the image name).
+        second: Option<String>,
+    },
+}
+
+/// Args for `tailor init`.
+#[derive(Debug, Args)]
+pub(crate) struct InitArgs {
+    /// The image name (also the member directory for the `base`/`advanced` templates).
+    pub(crate) name: String,
+
+    /// Which scaffold to generate (default: `base`).
+    #[arg(value_enum, default_value_t = InitTemplate::Base)]
+    pub(crate) template: InitTemplate,
+}
+
+/// Scaffold template for `tailor init`.
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub(crate) enum InitTemplate {
+    /// A workspace `tailor.yaml` plus a basic `<name>/image.yaml`.
+    #[default]
+    Base,
+    /// A single standalone `image.yaml` in the current directory (no `tailor.yaml`).
+    Simple,
+    /// Like `base`, but the image declares two example axes with `by-*` fragments.
+    Advanced,
 }
 
 /// Args for verbs that operate on a set of images and (optionally) a cell selection.
