@@ -1,0 +1,24 @@
+schemaVersion: 1
+
+toolchains:
+  default: ic
+  entries:
+    ic:
+      container: registry.example/imagecustomizer
+      tag: "1.0.0"
+
+# Signing profiles (meta/docs/signing.md §4). Purpose-built test fixtures, not real keys.
+signing:
+  default: test-ca
+  profiles:
+    test-ca:
+      backend: local-test-ca
+      publishCaCert: ./artifacts/ca_cert.pem
+    byo:
+      backend: keypair
+      key: ./keys/db.key
+      cert: ./keys/db.crt
+    broken:
+      backend: keypair
+      key: ./keys/absent.key
+      cert: ./keys/absent.crt

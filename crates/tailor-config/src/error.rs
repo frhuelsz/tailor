@@ -145,4 +145,15 @@ pub enum ConfigError {
          use `$set` to override on purpose"
     )]
     AmbiguousBase { slug: String, kinds: String },
+
+    #[error("signing profile `{profile}` is invalid: {detail}")]
+    InvalidSigningProfile { profile: String, detail: String },
+
+    #[error(
+        "unknown signing profile `{profile}`; define it under `signing.profiles` in tailor.yaml"
+    )]
+    UnknownSigningProfile { profile: String },
+
+    #[error("signing is requested but misconfigured: {detail}")]
+    SigningMisconfigured { detail: String },
 }

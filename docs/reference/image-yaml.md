@@ -15,7 +15,8 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `params` | scalar map | no | Values interpolated into `config:` strings with `${name}`. Params may reference other params. |
 | `rpmSources` | path list | no | Each path is a directory of RPMs or a `.repo` file; passed as IC `--rpm-source`. |
 | `operation` | `customize` or `convert` | no | Default: `customize`. |
-| `injectFiles` | boolean | no | Default: `false`; controls the signing/inject-files pipeline when IC config declares artifacts. |
+| `signing` | `true` or profile id | no | Opt in to the signed-image pipeline. `true` ⇒ the workspace `signing.default` profile; a string ⇒ that named profile; omitted ⇒ unsigned. See [Sign an image](../how-to/sign-an-image.md). |
+| `injectFiles` | boolean | no | Inert placeholder, superseded by `signing:`. Currently a no-op; do not rely on it. |
 | `extraDependencies` | path list | no | Extra files/directories to hash for incremental checks; use for IC-config-referenced assets. |
 | `config` | mapping or path string | conditional | Required for `customize`, forbidden for `convert`. Opaque IC config. |
 

@@ -211,3 +211,71 @@ fn verify_artifact(path: &PathBuf, format: OutputFormat) -> Result<(), ExecError
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+
+    use serde_yaml_ng::{Mapping, Value};
+    use tailor_config::{Arch, BaseSource, ImageDefinition, OutputSpec};
+    use tailor_core::{CellSlug, Target};
+
+    use crate::container::runtime::NoopRuntime;
+
+    fn dry_run_cell() -> Cell {
+        let definition: ImageDefinition =
+            serde_yaml_ng::from_str("name: sample\noperation: customize\ninjectFiles: false\n")
+                .unwrap();
+        Cell {
+            target: Arc::new(Target {
+                definition,
+                dir: PathBuf::from("/images"),
+                architectures: vec![Arch::Amd64],
+                default_outputs: Vec::new(),
+            }),
+            axes: BTreeMap::new(),
+            arch: Arch::Amd64,
+            output: OutputSpec {
+                format: OutputFormat::Cosi,
+                cosi_compression_level: None,
+                name: None,
+            },
+            slug: CellSlug("sample_cosi".to_owned()),
+            ic_config: Value::Mapping(Mapping::default()),
+            base: BaseSource::Path {
+                path: PathBuf::from("/images/base.img"),
+            },
+            rpm_sources: Vec::new(),
+        }
+    }
+
+    fn dry_run_context() -> ExecutionContext {
+        ExecutionContext {
+            output_dir: PathBuf::from("/out"),
+            ic_image_ref: "ic@sha256:abc".to_owned(),
+            platform: "linux/amd64".to_owned(),
+            clone_index: None,
+            dry_run: true,
+            runtime: RuntimeConfig::default(),
+        }
+    }
+
+    // A dry-run renders the invocation without ever calling the runtime; `NoopRuntime` (whose
+    // methods all error) proves no daemon is contacted — so `build --dry-run` is engine-free.
+    #[tokio::test]
+    async fn dry_run_executes_without_contacting_the_runtime() {
+        let executor = IcExecutor::new(NoopRuntime);
+        let result = executor
+            .execute(
+                &dry_run_cell(),
+                &dry_run_context(),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("dry-run must not require a container engine");
+        assert_eq!(result.exit_code, 0);
+        assert!(result.logs.contains("sample_cosi"));
+    }
+}

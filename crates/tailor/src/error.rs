@@ -16,6 +16,9 @@ pub(crate) enum AppError {
     Exec(#[from] tailor_core::ExecError),
 
     #[error(transparent)]
+    Sign(#[from] tailor_core::SignError),
+
+    #[error(transparent)]
     Json(#[from] serde_json::Error),
 
     #[error("{0}")]

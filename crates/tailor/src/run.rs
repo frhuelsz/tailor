@@ -14,9 +14,10 @@ use tailor_config::{
 };
 use tailor_core::{
     BaseResolver, BuildOptions, Executor, LockedBase, LockedContainer, Lockfile, Orchestrator,
-    ResolvedBase, Selector, Target, cells_selected, runtime_config,
+    ResolvedBase, Selector, SigningRequirement, Target, cells_selected, preflight_profile,
+    runtime_config,
 };
-use tailor_exec::{BollardRuntime, IcExecutor};
+use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, resolve};
 use tailor_resolve::OciResolver;
 use tokio_util::sync::CancellationToken;
 
@@ -28,6 +29,14 @@ use crate::{
 
 const LOCK_FILE: &str = "tailor.lock";
 const ARTIFACTS_DIR: &str = "artifacts";
+
+/// A per-invocation engine/endpoint override from the global `--engine` / `--host` flags
+/// (`meta/docs/container-runtimes.md` §3). Both sit above the manifest in the precedence ladder.
+#[derive(Clone, Default)]
+pub(crate) struct EngineOverride {
+    engine: Option<tailor_config::Engine>,
+    host: Option<String>,
+}
 
 /// Load the workspace, then dispatch the requested verb.
 pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
@@ -43,6 +52,10 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
         _ => {}
     }
     let workspace = load_workspace(&cli)?;
+    let engine = EngineOverride {
+        engine: cli.engine.map(Into::into),
+        host: cli.host.clone(),
+    };
     match cli.command {
         Command::Version | Command::Init(_) | Command::Add { .. } => {
             unreachable!("handled before workspace discovery")
@@ -69,11 +82,17 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             &selector(&args.select, &[])?,
             MatrixFormat::Slugs,
         ),
-        Command::Resolve(args) => resolve(&workspace, &args.images).await,
+        Command::Resolve(args) => resolve_verb(&workspace, &args.images).await,
         Command::Lock | Command::Update => lock(&workspace).await,
-        Command::Build(args) => build(&workspace, args).await,
+        Command::Build(args) => build(&workspace, args, &engine).await,
         Command::Clean(args) => {
-            clean(&workspace, &args.images, &selector(&args.select, &[])?).await
+            clean(
+                &workspace,
+                &args.images,
+                &selector(&args.select, &[])?,
+                &engine,
+            )
+            .await
         }
     }
 }
@@ -172,10 +191,18 @@ fn show(workspace: &Workspace, name: &str, field: Option<&str>) -> Result<(), Ap
 }
 
 fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Result<(), AppError> {
-    for target in build_targets(workspace, names)? {
-        let cells = cells_selected(&target, selector)?;
+    let tool = tool_config(workspace);
+    let targets = build_targets(workspace, names)?;
+    for target in &targets {
+        let cells = cells_selected(target, selector)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
+    // Surface signing prerequisites non-fatally (meta/docs/signing.md §5.1) so they are discoverable
+    // without starting a real build.
+    report_signing(
+        &signing_requirements(&targets, tool.signing.as_ref())?,
+        &workspace.root,
+    );
     Ok(())
 }
 
@@ -244,7 +271,7 @@ fn matrix(
 
 // ───────────────────────────── network verbs (registry resolution) ─────────────────────────────
 
-async fn resolve(workspace: &Workspace, names: &[String]) -> Result<(), AppError> {
+async fn resolve_verb(workspace: &Workspace, names: &[String]) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, names)?;
     let lock = build_lock(&tool, &targets, &OciResolver::new()).await?;
@@ -311,7 +338,11 @@ async fn build_lock(
 
 // ───────────────────────────── execution verbs (Docker) ─────────────────────────────
 
-async fn build(workspace: &Workspace, args: BuildArgs) -> Result<(), AppError> {
+async fn build(
+    workspace: &Workspace,
+    args: BuildArgs,
+    engine: &EngineOverride,
+) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, &args.images)?;
     let selection = selector(&args.select, &args.arch)?;
@@ -319,13 +350,12 @@ async fn build(workspace: &Workspace, args: BuildArgs) -> Result<(), AppError> {
         .output_dir
         .clone()
         .unwrap_or_else(|| workspace.root.join(ARTIFACTS_DIR));
-    let orchestrator = Orchestrator::new(
-        IcExecutor::new(BollardRuntime::connect()?),
-        OciResolver::new(),
-    );
+    let signing = signing_requirements(&targets, tool.signing.as_ref())?;
 
-    // Dry-run prints each selected cell's container invocation without resolving digests or running.
+    // Dry-run prints each selected cell's container invocation without resolving digests, running,
+    // or contacting any engine — so it stays daemon-free via a no-op runtime.
     if args.dry_run {
+        let orchestrator = Orchestrator::new(IcExecutor::new(NoopRuntime), OciResolver::new());
         let results = orchestrator
             .dry_run(&targets, &tool, &selection, &output_dir)
             .await?;
@@ -333,8 +363,29 @@ async fn build(workspace: &Workspace, args: BuildArgs) -> Result<(), AppError> {
         for result in results {
             println!("{}\n", result.logs);
         }
+        if !signing.is_empty() {
+            report_signing(&signing, &workspace.root);
+            println!(
+                "note: signing execution is not yet implemented; this dry-run shows the unsigned \
+                 customize invocation (meta/docs/signing.md §11)."
+            );
+        }
         return Ok(());
     }
+
+    // Fail fast on signing prerequisites *before* any IC run (meta/docs/signing.md §5.1); then, since
+    // signing execution is not yet wired, refuse rather than emit a silently-unsigned image.
+    if !signing.is_empty() {
+        tailor_core::preflight(&signing, &workspace.root)?;
+        return Err(signing_not_implemented(&signing));
+    }
+
+    // A real build contacts the engine: resolve it and fail fast now if it is missing or
+    // unreachable (`meta/docs/container-runtimes.md` §4-§5).
+    let orchestrator = Orchestrator::new(
+        IcExecutor::new(establish_runtime(engine, &tool).await?),
+        OciResolver::new(),
+    );
 
     let lock = Lockfile::read(&workspace.root.join(LOCK_FILE))?;
     let plan = orchestrator
@@ -375,6 +426,7 @@ async fn clean(
     workspace: &Workspace,
     names: &[String],
     selector: &Selector,
+    engine: &EngineOverride,
 ) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, names)?;
@@ -391,7 +443,7 @@ async fn clean(
         }
     }
 
-    let executor = IcExecutor::new(BollardRuntime::connect()?);
+    let executor = IcExecutor::new(establish_runtime(engine, &tool).await?);
     executor
         .clean(
             &paths,
@@ -401,6 +453,105 @@ async fn clean(
         .await?;
     println!("cleaned {} artifact path(s)", paths.len());
     Ok(())
+}
+
+/// Gather the connection-resolution inputs (`meta/docs/container-runtimes.md` §3): the per-invocation
+/// flags, the engine environment variables, and the manifest `runtime.engine` / `runtime.host`.
+fn resolve_inputs(engine: &EngineOverride, tool: &ToolConfig) -> ResolveInputs {
+    let runtime = tool.runtime.as_ref();
+    ResolveInputs {
+        flag_engine: engine.engine,
+        flag_host: engine.host.clone(),
+        env_docker_host: non_empty_env("DOCKER_HOST"),
+        env_container_host: non_empty_env("CONTAINER_HOST"),
+        manifest_engine: runtime.and_then(|runtime| runtime.engine),
+        manifest_host: runtime.and_then(|runtime| runtime.host.clone()),
+        xdg_runtime_dir: non_empty_env("XDG_RUNTIME_DIR"),
+    }
+}
+
+/// Resolve the engine/endpoint, connect, and run the fail-fast preflight (§4-§5).
+async fn establish_runtime(
+    engine: &EngineOverride,
+    tool: &ToolConfig,
+) -> Result<BollardRuntime, AppError> {
+    let plan = resolve(&resolve_inputs(engine, tool));
+    Ok(BollardRuntime::establish(&plan).await?)
+}
+
+/// A set, non-empty environment variable, else `None`.
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
+// ───────────────────────────── signing (meta/docs/signing.md) ─────────────────────────────
+
+/// Gather the distinct signing profiles the selected images require, tracking which images need
+/// each (`meta/docs/signing.md` §5.1). Resolution also validates each referenced profile.
+fn signing_requirements<'a>(
+    targets: &[Arc<Target>],
+    workspace_signing: Option<&'a tailor_config::SigningConfig>,
+) -> Result<Vec<SigningRequirement<'a>>, AppError> {
+    let mut requirements: Vec<SigningRequirement<'a>> = Vec::new();
+    for target in targets {
+        let resolved =
+            tailor_config::resolve_signing(target.definition.signing.as_ref(), workspace_signing)?;
+        if let Some((profile_id, profile)) = resolved {
+            let image = target.definition.name.clone();
+            if let Some(existing) = requirements
+                .iter_mut()
+                .find(|requirement| requirement.profile_id == profile_id)
+            {
+                existing.images.push(image);
+            } else {
+                requirements.push(SigningRequirement {
+                    profile_id,
+                    profile,
+                    images: vec![image],
+                });
+            }
+        }
+    }
+    Ok(requirements)
+}
+
+/// Report signing-preflight status **without failing** — for `validate` and `--dry-run`
+/// (`meta/docs/signing.md` §5.1). Relative key/cert paths resolve against `base_dir`.
+fn report_signing(requirements: &[SigningRequirement<'_>], base_dir: &Path) {
+    for requirement in requirements {
+        let unmet = preflight_profile(requirement.profile, base_dir);
+        if unmet.is_empty() {
+            println!(
+                "✓ signing profile `{}` ready (image(s): {})",
+                requirement.profile_id,
+                requirement.images.join(", ")
+            );
+        } else {
+            for detail in unmet {
+                println!(
+                    "⚠ signing profile `{}` not ready: {} (image(s): {})",
+                    requirement.profile_id,
+                    detail,
+                    requirement.images.join(", ")
+                );
+            }
+        }
+    }
+}
+
+/// The hard error returned for a signed build while signing **execution** is not yet implemented
+/// (`meta/docs/signing.md` §11). tailor refuses rather than emit a silently-unsigned image.
+fn signing_not_implemented(requirements: &[SigningRequirement<'_>]) -> AppError {
+    let profiles: Vec<&str> = requirements
+        .iter()
+        .map(|requirement| requirement.profile_id.as_str())
+        .collect();
+    AppError::Message(format!(
+        "signing is requested (profile(s): {}) and its prerequisites are satisfied, but the signing \
+         pipeline is not yet implemented (Milestone S1 in progress — see meta/docs/signing.md §11). \
+         Refusing to build a silently-unsigned image; remove `signing:` to build unsigned.",
+        profiles.join(", ")
+    ))
 }
 
 // ───────────────────────────── helpers ─────────────────────────────

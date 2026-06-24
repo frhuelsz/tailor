@@ -10,6 +10,7 @@ pub mod lockfile;
 pub mod orchestrator;
 pub mod ports;
 pub mod selector;
+pub mod signing;
 pub mod stamp;
 pub mod testing;
 
@@ -24,3 +25,6 @@ pub use ports::{
     ExecutionResult, Executor, FilesystemOps, ResolvedBase, RuntimeConfig,
 };
 pub use selector::Selector;
+pub use signing::{
+    MissingPrerequisite, SignError, SigningRequirement, preflight, preflight_profile,
+};

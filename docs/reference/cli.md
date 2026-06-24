@@ -5,6 +5,8 @@ Global options:
 | Option | Meaning |
 | --- | --- |
 | `--manifest <PATH>` | Path to `tailor.yaml`, or a directory to search from. Default: walk up from the current directory. |
+| `--engine <docker\|podman\|auto>` | Container engine for this invocation. Overrides `runtime.engine`. See [Select a container engine](../how-to/select-a-container-engine.md). |
+| `--host <ENDPOINT>` | Engine endpoint for this invocation (`unix://…` or `tcp://…`). Overrides `runtime.host` and `DOCKER_HOST` / `CONTAINER_HOST`. |
 | `--strict` | Promote authority/confinement warnings to errors. |
 | `-v`, `--verbose` | Increase verbosity; repeatable. |
 | `-q`, `--quiet` | Decrease verbosity; repeatable. |

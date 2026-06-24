@@ -9,5 +9,6 @@ pub mod rpm_farm;
 pub mod working_copy;
 
 pub use arg_builder::build_ic_args;
-pub use container::runtime::BollardRuntime;
+pub use container::connection::{ConnectionPlan, Endpoint, Resolution, ResolveInputs, resolve};
+pub use container::runtime::{BollardRuntime, NoopRuntime};
 pub use executor::IcExecutor;

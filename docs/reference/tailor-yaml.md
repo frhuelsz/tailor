@@ -24,6 +24,8 @@ defaults:
 | `schemaVersion` | integer | yes | Current value: `1`. |
 | `toolchains.default` | string | yes | Default toolchain id for images that omit `toolchain:`. |
 | `toolchains.entries` | map | yes | Toolchain definitions. `tag` defaults to `version`, else `latest`. |
+| `runtime.engine` | enum | no | Container engine: `docker` (default), `podman`, or `auto`. See [Select a container engine](../how-to/select-a-container-engine.md). |
+| `runtime.host` | string | no | Explicit engine endpoint (`unix://…`, a bare socket path, or `tcp://…`), overriding the engine default and `DOCKER_HOST` / `CONTAINER_HOST`. |
 | `runtime.privileged` | bool | no | Default `true`; IC requires privileged container execution. |
 | `runtime.mounts.hostRoot` | path | no | Default `/host`; host `/` bind target and path-translation prefix. |
 | `runtime.mounts.dev` | bool | no | Default `true`; bind `/dev:/dev`. |
@@ -31,6 +33,8 @@ defaults:
 | `runtime.logLevel` | enum | no | IC log level: `panic`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`. |
 | `runtime.imageCacheDir` | path | conditional | Required for `oci`/`azureLinux` bases. |
 | `runtime.janitorImage` | `{container, tag?}` | no | Minimal image used for sudo-free ownership cleanup. |
+| `signing.default` | string | no | Signing profile used when an image says `signing: true`. See [Sign an image](../how-to/sign-an-image.md). |
+| `signing.profiles` | map of `{backend, …}` | no | Named signing profiles. `backend` is `local-test-ca`, `keypair` (needs `key`+`cert`), or `azure-key-vault` (needs `vault`+`certificate`). |
 | `defaults.architectures` | arch list | no | Inherited by images without `architectures`. |
 | `defaults.outputs` | output list | no | Inherited by images without `outputs`. |
 | `images` | object | no | Omit to auto-discover every immediate `*/image.yaml`. |

@@ -28,8 +28,39 @@ pub(crate) struct Cli {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub(crate) quiet: u8,
 
+    /// Container engine for this invocation: `docker` (default), `podman`, or `auto`. Overrides
+    /// `runtime.engine` in `tailor.yaml` (`meta/docs/container-runtimes.md` §3).
+    #[arg(long, global = true, value_enum)]
+    pub(crate) engine: Option<EngineArg>,
+
+    /// Container engine endpoint for this invocation, e.g. `unix:///run/user/1000/podman/podman.sock`
+    /// or `tcp://host:2375`. Overrides `runtime.host` and `DOCKER_HOST` / `CONTAINER_HOST`.
+    #[arg(long, global = true, value_name = "ENDPOINT")]
+    pub(crate) host: Option<String>,
+
     #[command(subcommand)]
     pub(crate) command: Command,
+}
+
+/// The container engine selector for `--engine` (mirrors [`tailor_config::Engine`]).
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum EngineArg {
+    /// The Docker daemon (default).
+    Docker,
+    /// Podman via its Docker-compatible API.
+    Podman,
+    /// Probe known Docker/Podman sockets and use the first that answers.
+    Auto,
+}
+
+impl From<EngineArg> for tailor_config::Engine {
+    fn from(value: EngineArg) -> Self {
+        match value {
+            EngineArg::Docker => tailor_config::Engine::Docker,
+            EngineArg::Podman => tailor_config::Engine::Podman,
+            EngineArg::Auto => tailor_config::Engine::Auto,
+        }
+    }
 }
 
 /// The verb to run.

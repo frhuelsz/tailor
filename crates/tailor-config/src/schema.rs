@@ -5,6 +5,7 @@ use semver::Version;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
+use crate::error::ConfigError;
 use crate::types::{Arch, LogLevel, Operation, OutputFormat, ParamValue};
 
 // ===== tailor.yaml — workspace / tool config (reference/tailor-yaml.md) =====
@@ -19,6 +20,9 @@ pub struct ToolConfig {
     pub runtime: Option<Runtime>,
     #[serde(default)]
     pub defaults: Option<Defaults>,
+    /// Workspace-wide signing profiles (`meta/docs/signing.md` §4).
+    #[serde(default)]
+    pub signing: Option<SigningConfig>,
     #[serde(default)]
     pub images: Option<ImageCatalogue>,
 }
@@ -68,10 +72,52 @@ pub enum ToolchainRef {
     Inline(ToolchainEntry),
 }
 
+/// The container engine tailor talks to. Podman speaks the same Docker Engine API, so it needs no
+/// separate implementation — only a different socket (`meta/docs/container-runtimes.md` §2-§3).
+///
+/// This is a *selector*: it picks the default socket and the `auto` probe order. The engine that
+/// actually governs runtime behavior is whatever the endpoint reports on connect (§4-§5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    /// The Docker daemon (default; today's behavior, unchanged).
+    #[default]
+    Docker,
+    /// Podman via its Docker-compatible API (`podman system service`).
+    Podman,
+    /// Probe known Docker/Podman sockets and use the first that answers.
+    Auto,
+}
+
+impl Engine {
+    /// The lowercase token (`docker` | `podman` | `auto`), as written in `tailor.yaml` / `--engine`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Engine::Docker => "docker",
+            Engine::Podman => "podman",
+            Engine::Auto => "auto",
+        }
+    }
+}
+
+impl std::fmt::Display for Engine {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// Container-runtime (bollard) knobs.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Runtime {
+    /// Which container engine to use: `docker` (default), `podman`, or `auto`
+    /// (`meta/docs/container-runtimes.md` §3). A selector only — the live daemon governs behavior.
+    #[serde(default)]
+    pub engine: Option<Engine>,
+    /// An explicit engine endpoint (`unix://…`, `tcp://…`, or a bare socket path), overriding the
+    /// engine's default socket and the `DOCKER_HOST` / `CONTAINER_HOST` environment variables.
+    #[serde(default)]
+    pub host: Option<String>,
     #[serde(default)]
     pub privileged: Option<bool>,
     #[serde(default)]
@@ -101,6 +147,151 @@ pub struct JanitorImage {
     pub container: String,
     #[serde(default)]
     pub tag: Option<String>,
+}
+
+// ===== Signing (meta/docs/signing.md) =====
+
+/// Workspace-wide signing profiles (`tailor.yaml`). An image opts in with [`ImageDefinition::signing`]
+/// (`meta/docs/signing.md` §4).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SigningConfig {
+    /// Profile used when an image says `signing: true`.
+    #[serde(default)]
+    pub default: Option<String>,
+    /// Named signing profiles, keyed by id.
+    #[serde(default)]
+    pub profiles: BTreeMap<String, SigningProfile>,
+}
+
+/// One signing profile: a key-source `backend` plus its backend-specific settings. Private key
+/// material is always **referenced** (a path), never inlined (`meta/docs/signing.md` §4, §9).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SigningProfile {
+    /// The key-source backend.
+    pub backend: SigningBackend,
+    /// `keypair`: PEM private key file.
+    #[serde(default)]
+    pub key: Option<PathBuf>,
+    /// `keypair`: PEM signing certificate file.
+    #[serde(default)]
+    pub cert: Option<PathBuf>,
+    /// `local-test-ca`: where to write the enrollable CA certificate.
+    #[serde(default)]
+    pub publish_ca_cert: Option<PathBuf>,
+    /// `azure-key-vault`: vault URL.
+    #[serde(default)]
+    pub vault: Option<String>,
+    /// `azure-key-vault`: certificate name.
+    #[serde(default)]
+    pub certificate: Option<String>,
+}
+
+/// Where a signing key comes from (`meta/docs/signing.md` §6). The PE signer is orthogonal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SigningBackend {
+    /// Mint a self-signed CA + leaf per build with pure-Rust `rcgen` (MVP / CI; not a production root).
+    LocalTestCa,
+    /// Bring your own PEM key + certificate.
+    Keypair,
+    /// Remote signing via Azure Key Vault (future).
+    AzureKeyVault,
+}
+
+impl SigningBackend {
+    /// The lowercase token as written in `tailor.yaml`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SigningBackend::LocalTestCa => "local-test-ca",
+            SigningBackend::Keypair => "keypair",
+            SigningBackend::AzureKeyVault => "azure-key-vault",
+        }
+    }
+}
+
+impl SigningProfile {
+    /// Structural validation: every backend's required fields are present (`meta/docs/signing.md` §4).
+    /// This is *config* validation only; capability/filesystem probing is the build-time preflight
+    /// (`tailor-core` signing preflight, §5.1).
+    pub fn validate(&self, profile_id: &str) -> Result<(), ConfigError> {
+        let missing = |field: &str| ConfigError::InvalidSigningProfile {
+            profile: profile_id.to_owned(),
+            detail: format!("backend `{}` requires `{field}`", self.backend.as_str()),
+        };
+        match self.backend {
+            SigningBackend::Keypair => {
+                if self.key.is_none() {
+                    return Err(missing("key"));
+                }
+                if self.cert.is_none() {
+                    return Err(missing("cert"));
+                }
+            }
+            SigningBackend::AzureKeyVault => {
+                if self.vault.is_none() {
+                    return Err(missing("vault"));
+                }
+                if self.certificate.is_none() {
+                    return Err(missing("certificate"));
+                }
+            }
+            SigningBackend::LocalTestCa => {}
+        }
+        Ok(())
+    }
+}
+
+/// An image's `signing:` opt-in: `true` ⇒ the workspace default profile, a string ⇒ that named
+/// profile, `false`/omitted ⇒ unsigned (`meta/docs/signing.md` §4).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum SigningRef {
+    /// `signing: true` (default profile) or `signing: false` (unsigned).
+    Enabled(bool),
+    /// `signing: <profile-id>`.
+    Profile(String),
+}
+
+/// Resolve an image's `signing:` ref against the workspace profiles (`meta/docs/signing.md` §4).
+///
+/// Returns the resolved `(profile_id, profile)` for a signed image, or `None` when unsigned
+/// (`false` / omitted). Validates the resolved profile structurally.
+pub fn resolve_signing<'a>(
+    image: Option<&SigningRef>,
+    workspace: Option<&'a SigningConfig>,
+) -> Result<Option<(String, &'a SigningProfile)>, ConfigError> {
+    let reference = match image {
+        None | Some(SigningRef::Enabled(false)) => return Ok(None),
+        Some(reference) => reference,
+    };
+    let config = workspace.ok_or_else(|| ConfigError::SigningMisconfigured {
+        detail: "an image requests signing, but `tailor.yaml` defines no `signing:` profiles"
+            .to_owned(),
+    })?;
+    let profile_id = match reference {
+        SigningRef::Enabled(true) => {
+            config
+                .default
+                .clone()
+                .ok_or_else(|| ConfigError::SigningMisconfigured {
+                    detail: "an image says `signing: true`, but `signing.default` is not set"
+                        .to_owned(),
+                })?
+        }
+        SigningRef::Profile(name) => name.clone(),
+        SigningRef::Enabled(false) => unreachable!("handled above"),
+    };
+    let profile =
+        config
+            .profiles
+            .get(&profile_id)
+            .ok_or_else(|| ConfigError::UnknownSigningProfile {
+                profile: profile_id.clone(),
+            })?;
+    profile.validate(&profile_id)?;
+    Ok(Some((profile_id, profile)))
 }
 
 /// Defaults inherited by every image that does not set the field itself.
@@ -155,6 +346,10 @@ pub struct ImageDefinition {
     pub rpm_sources: Vec<PathBuf>,
     #[serde(default)]
     pub operation: Option<Operation>,
+    /// Signing opt-in: `true` ⇒ the workspace default profile, `<id>` ⇒ that profile, omitted ⇒
+    /// unsigned (`meta/docs/signing.md` §4).
+    #[serde(default)]
+    pub signing: Option<SigningRef>,
     #[serde(default)]
     pub inject_files: Option<bool>,
     #[serde(default)]
@@ -222,4 +417,159 @@ pub struct Matrix {
     pub exclude: Vec<CellSelector>,
     #[serde(flatten)]
     pub axes: IndexMap<String, Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Engine, Runtime};
+    use super::{SigningBackend, SigningConfig, SigningRef, resolve_signing};
+
+    #[test]
+    fn engine_deserializes_lowercase_tokens() {
+        assert_eq!(
+            serde_yaml_ng::from_str::<Engine>("docker").unwrap(),
+            Engine::Docker
+        );
+        assert_eq!(
+            serde_yaml_ng::from_str::<Engine>("podman").unwrap(),
+            Engine::Podman
+        );
+        assert_eq!(
+            serde_yaml_ng::from_str::<Engine>("auto").unwrap(),
+            Engine::Auto
+        );
+        assert!(serde_yaml_ng::from_str::<Engine>("rkt").is_err());
+    }
+
+    #[test]
+    fn engine_default_is_docker() {
+        assert_eq!(Engine::default(), Engine::Docker);
+        assert_eq!(Engine::Podman.as_str(), "podman");
+        assert_eq!(Engine::Auto.to_string(), "auto");
+    }
+
+    #[test]
+    fn runtime_parses_engine_and_host() {
+        let runtime: Runtime = serde_yaml_ng::from_str(
+            "engine: podman\nhost: unix:///run/user/1000/podman/podman.sock\n",
+        )
+        .unwrap();
+        assert_eq!(runtime.engine, Some(Engine::Podman));
+        assert_eq!(
+            runtime.host.as_deref(),
+            Some("unix:///run/user/1000/podman/podman.sock")
+        );
+    }
+
+    #[test]
+    fn runtime_engine_host_default_to_none() {
+        let runtime: Runtime = serde_yaml_ng::from_str("privileged: true\n").unwrap();
+        assert_eq!(runtime.engine, None);
+        assert_eq!(runtime.host, None);
+    }
+
+    // ----- signing -----
+
+    fn signing_config() -> SigningConfig {
+        serde_yaml_ng::from_str(
+            "default: test-ca\n\
+             profiles:\n\
+            \x20 test-ca:\n\
+            \x20   backend: local-test-ca\n\
+            \x20   publishCaCert: ./artifacts/ca_cert.pem\n\
+            \x20 byo:\n\
+            \x20   backend: keypair\n\
+            \x20   key: ./secrets/db.key\n\
+            \x20   cert: ./secrets/db.crt\n",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn signing_ref_parses_bool_and_string() {
+        assert_eq!(
+            serde_yaml_ng::from_str::<SigningRef>("true").unwrap(),
+            SigningRef::Enabled(true)
+        );
+        assert_eq!(
+            serde_yaml_ng::from_str::<SigningRef>("test-ca").unwrap(),
+            SigningRef::Profile("test-ca".to_owned())
+        );
+    }
+
+    #[test]
+    fn resolve_signing_none_when_unsigned() {
+        let config = signing_config();
+        assert!(resolve_signing(None, Some(&config)).unwrap().is_none());
+        assert!(
+            resolve_signing(Some(&SigningRef::Enabled(false)), Some(&config))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn resolve_signing_true_uses_default_profile() {
+        let config = signing_config();
+        let (id, profile) = resolve_signing(Some(&SigningRef::Enabled(true)), Some(&config))
+            .unwrap()
+            .unwrap();
+        assert_eq!(id, "test-ca");
+        assert_eq!(profile.backend, SigningBackend::LocalTestCa);
+    }
+
+    #[test]
+    fn resolve_signing_named_profile() {
+        let config = signing_config();
+        let (id, profile) =
+            resolve_signing(Some(&SigningRef::Profile("byo".to_owned())), Some(&config))
+                .unwrap()
+                .unwrap();
+        assert_eq!(id, "byo");
+        assert_eq!(profile.backend, SigningBackend::Keypair);
+    }
+
+    #[test]
+    fn resolve_signing_unknown_profile_errors() {
+        let config = signing_config();
+        let err = resolve_signing(Some(&SigningRef::Profile("nope".to_owned())), Some(&config))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::ConfigError::UnknownSigningProfile { .. }
+        ));
+    }
+
+    #[test]
+    fn resolve_signing_without_workspace_block_errors() {
+        let err = resolve_signing(Some(&SigningRef::Enabled(true)), None).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::ConfigError::SigningMisconfigured { .. }
+        ));
+    }
+
+    #[test]
+    fn resolve_signing_true_without_default_errors() {
+        let config: SigningConfig =
+            serde_yaml_ng::from_str("profiles:\n  test-ca:\n    backend: local-test-ca\n").unwrap();
+        let err = resolve_signing(Some(&SigningRef::Enabled(true)), Some(&config)).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::ConfigError::SigningMisconfigured { .. }
+        ));
+    }
+
+    #[test]
+    fn keypair_profile_missing_cert_is_invalid() {
+        let config: SigningConfig =
+            serde_yaml_ng::from_str("profiles:\n  byo:\n    backend: keypair\n    key: ./db.key\n")
+                .unwrap();
+        let err = resolve_signing(Some(&SigningRef::Profile("byo".to_owned())), Some(&config))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::ConfigError::InvalidSigningProfile { .. }
+        ));
+    }
 }

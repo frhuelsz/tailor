@@ -114,6 +114,7 @@ mod tests {
             params: IndexMap::new(),
             rpm_sources: vec![],
             operation: None,
+            signing: None,
             inject_files: None,
             extra_dependencies: vec![],
             config: None,

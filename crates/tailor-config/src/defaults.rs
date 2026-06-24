@@ -42,6 +42,7 @@ pub fn default_tool_config() -> ToolConfig {
         },
         runtime: None,
         defaults: None,
+        signing: None,
         images: None,
     }
 }
