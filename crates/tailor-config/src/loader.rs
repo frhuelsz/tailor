@@ -90,7 +90,7 @@ mod tests {
         let img = load_image(&path).unwrap();
         assert_eq!(img.name, "gizmo");
         let m = img.matrix.expect("declares a matrix");
-        assert_eq!(matrix::expand(&m).unwrap().len(), 4); // edition[2] × arch[2]
+        assert_eq!(matrix::expand(&m, img.selectors.as_ref()).unwrap().len(), 4); // edition[2] × arch[2]
     }
 
     #[test]

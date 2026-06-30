@@ -25,7 +25,8 @@
         "toolchains": { "$ref": "#/$defs/Toolchains" },
         "runtime": { "$ref": "#/$defs/Runtime" },
         "defaults": { "$ref": "#/$defs/Defaults" },
-        "images": { "$ref": "#/$defs/ImageCatalogue" }
+        "images": { "$ref": "#/$defs/ImageCatalogue" },
+        "baseImages": { "$ref": "#/$defs/BaseImageCatalogue" }
       }
     },
 
@@ -35,7 +36,6 @@
       "description": "One buildable image (the base document). May declare a `matrix:` that expands into many cells; per-axis deltas live in sibling by-*/ fragment files. Top-level keys are tailor fields ONLY; all Image Customizer config lives under `config:`.",
       "additionalProperties": false,
       "required": ["name"],
-      "not": { "required": ["base", "baseByArch"] },
       "properties": {
         "name": {
           "type": "string",
@@ -47,7 +47,6 @@
         "matrix": { "$ref": "#/$defs/Matrix" },
         "outputs": { "$ref": "#/$defs/OutputsField" },
         "base": { "$ref": "#/$defs/BaseField" },
-        "baseByArch": { "$ref": "#/$defs/BaseByArch" },
         "features": { "$ref": "#/$defs/FeatureFlags" },
         "params": { "$ref": "#/$defs/Params" },
         "rpmSources": { "$ref": "#/$defs/RpmSourcesField" },
@@ -75,7 +74,6 @@
         "architectures": { "$ref": "#/$defs/Architectures" },
         "outputs": { "$ref": "#/$defs/OutputsField" },
         "base": { "$ref": "#/$defs/BaseField" },
-        "baseByArch": { "$ref": "#/$defs/BaseByArch" },
         "features": { "$ref": "#/$defs/FeatureFlags" },
         "params": { "$ref": "#/$defs/Params" },
         "rpmSources": { "$ref": "#/$defs/RpmSourcesField" },
@@ -217,6 +215,63 @@
       }
     },
 
+    "BaseImageCatalogue": {
+      "type": "object",
+      "description": "Named base image catalogue for image.yaml `base: { ref: <name> }` references. Use one entry per architecture for per-arch local files, selected from by-arch/<arch>.yaml fragments.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/BaseImageEntry" }
+    },
+
+    "BaseImageEntry": {
+      "type": "object",
+      "description": "A named base image file, optionally scoped to one architecture and annotated with its original upstream source.",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "description": "Local image file path resolved relative to tailor.yaml." },
+        "arch": { "$ref": "#/$defs/Arch" },
+        "source": { "$ref": "#/$defs/BaseImageSource" }
+      }
+    },
+
+    "BaseImageSource": {
+      "type": "object",
+      "description": "Optional provenance for a catalogue base image. Exactly one source kind.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["oci"],
+          "properties": {
+            "oci": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["uri"],
+              "properties": {
+                "uri": { "type": "string", "description": "OCI reference the local file was derived from." },
+                "platform": { "type": "string", "description": "e.g. linux/amd64." }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["azureLinux"],
+          "properties": {
+            "azureLinux": {
+              "type": "object",
+              "description": "MCR Azure Linux source the local file was derived from.",
+              "additionalProperties": false,
+              "required": ["version", "variant"],
+              "properties": {
+                "version": { "type": "string", "description": "Azure Linux release, e.g. \"3.0\"." },
+                "variant": { "type": "string", "description": "Image variant, e.g. minimal-os." }
+              }
+            }
+          }
+        }
+      ]
+    },
+
     "Architectures": {
       "type": "array",
       "description": "Target architectures (the arch matrix axis). Each is one IC invocation per output.",
@@ -302,7 +357,7 @@
     },
 
     "BaseField": {
-      "description": "The base image source for the image. A BaseSource, or a directive ($set/$select/$include) when used in a fragment to override an inherited base. Mutually exclusive with `baseByArch`.",
+      "description": "The base image source for the image. A BaseSource, or a directive ($set/$select/$include) when used in a fragment to override an inherited base.",
       "oneOf": [
         { "$ref": "#/$defs/BaseSource" },
         { "$ref": "#/$defs/SetDirective" },
@@ -319,7 +374,14 @@
           "additionalProperties": false,
           "required": ["path"],
           "properties": {
-            "path": { "type": "string", "description": "Local image file (e.g. a .vhdx). Single-arch; for per-arch local files use baseByArch." }
+            "path": { "type": "string", "description": "Local image file (e.g. a .vhdx). Single-arch; for per-arch local files use the baseImages catalogue with one slot per arch." }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {
+            "ref": { "type": "string", "description": "Name of an entry in tailor.yaml `baseImages` (a reference to a catalogue slot)." }
           }
         },
         {
@@ -354,14 +416,6 @@
           }
         }
       ]
-    },
-
-    "BaseByArch": {
-      "type": "object",
-      "description": "Per-architecture base sources (mutually exclusive with `base`). Required when local-file bases differ per arch; every selected architecture MUST have an entry.",
-      "minProperties": 1,
-      "propertyNames": { "$ref": "#/$defs/Arch" },
-      "additionalProperties": { "$ref": "#/$defs/BaseSource" }
     },
 
     "FeatureFlags": {

@@ -2,7 +2,7 @@
 //! §8.3). The orchestrator and downstream crates use these to exercise the build pipeline.
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -22,10 +22,17 @@ use crate::{
 pub struct FakeResolver;
 
 impl BaseResolver for FakeResolver {
-    async fn resolve(&self, source: &BaseSource, arch: Arch) -> Result<ResolvedBase, ResolveError> {
+    async fn resolve(
+        &self,
+        source: &BaseSource,
+        arch: Arch,
+        _image_dir: &Path,
+    ) -> Result<ResolvedBase, ResolveError> {
         let platform = format!("linux/{arch}");
         Ok(match source {
-            BaseSource::Path { .. } => ResolvedBase::LocalFile {
+            // Catalogue references collapse to a `path` base before resolution; treat any leftover as
+            // a local file so test doubles stay deterministic.
+            BaseSource::Path { .. } | BaseSource::Ref { .. } => ResolvedBase::LocalFile {
                 sha256: [0; 32],
                 size: 0,
             },

@@ -1,0 +1,73 @@
+name: E2E
+
+# End-to-end smoke test: build the real `tailor` binary and use it to build sample images with
+# Image Customizer (a real, privileged container run), to catch breakage the unit/integration tests
+# can't (they use synthetic fixtures and never invoke IC). Images are built but not booted.
+#
+# Real builds pull the IC image and an Azure Linux base from MCR and run a privileged customize, so
+# this is heavier than the unit CI — it lives in its own workflow. Trigger it on main, on PRs, and
+# manually; switch to a nightly `schedule:` if the per-PR cost is too high.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-images:
+    name: build sample images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4.2.0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Confirm Docker is available
+        run: docker version
+
+      - name: Build the tailor binary
+        run: cargo build --release --locked -p tailor
+
+      - name: Pure verbs (no engine needed)
+        working-directory: e2e
+        run: |
+          set -euxo pipefail
+          BIN="$GITHUB_WORKSPACE/target/release/tailor"
+          "$BIN" list
+          "$BIN" matrix --format slugs
+          "$BIN" validate
+          "$BIN" explain appliance -s flavor=net
+          "$BIN" render
+
+      - name: Resolve the lockfile (pin base + toolchain digests)
+        working-directory: e2e
+        run: |
+          "$GITHUB_WORKSPACE/target/release/tailor" lock
+
+      - name: Build the images (real Image Customizer run)
+        working-directory: e2e
+        run: |
+          "$GITHUB_WORKSPACE/target/release/tailor" build
+
+      - name: Assert the artifacts were produced and owned by the runner (janitor worked)
+        working-directory: e2e
+        run: |
+          set -euxo pipefail
+          for slug in appliance_min_amd64_cosi appliance_net_amd64_cosi; do
+            artifact="artifacts/${slug}.cosi"
+            test -s "$artifact" || { echo "missing or empty artifact: $artifact" >&2; exit 1; }
+            owner=$(stat -c '%U' "$artifact")
+            if [ "$owner" = "root" ]; then
+              echo "artifact $artifact is still root-owned (janitor did not run)" >&2
+              exit 1
+            fi
+            echo "ok: $artifact ($(stat -c '%s' "$artifact") bytes, owner $owner)"
+          done

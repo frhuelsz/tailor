@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, slice};
 
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -9,7 +9,9 @@ use tailor_core::{
     Executor, RuntimeConfig, artifact_name,
 };
 
-use crate::{arg_builder, arg_builder::DEV_BIND, janitor, rpm_farm, working_copy};
+use crate::{
+    arg_builder, arg_builder::DEV_BIND, janitor, output_artifacts, rpm_farm, working_copy,
+};
 
 const CONTAINER_NAME_PREFIX: &str = "tailor-ic";
 const RPM_FARM_PREFIX: &str = ".tailor-farm";
@@ -67,6 +69,15 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                 source,
             })?;
         }
+        // When on-disk persistence is opted in (§5.5), ensure the log directory exists so IC's
+        // `--log-file` lands; IC writes the file itself, tailor just chowns and points at it.
+        let log_file = arg_builder::log_file_path(cell, context);
+        if let Some(log_dir) = &context.runtime.log_dir {
+            fs::create_dir_all(log_dir).map_err(|source| ExecError::Io {
+                context: format!("failed to create log directory `{}`", log_dir.display()),
+                source,
+            })?;
+        }
 
         let farms = prepare_rpm_farms(cell, context)?;
         let mut run_cell = cell.clone();
@@ -74,6 +85,30 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             .iter()
             .map(|farm| farm.arg_path.clone())
             .collect::<Vec<_>>();
+
+        // Relocate IC's `output.artifacts` scratch to a tailor-owned path so it does not land
+        // root-owned in the source tree (`meta/docs/output-artifacts-staging.md`).
+        let run_id = output_artifacts::run_id();
+        let staging = output_artifacts::apply(
+            &mut run_cell.ic_config,
+            cell.target.output_artifacts,
+            cell.slug.as_ref(),
+            &run_id,
+            &cell.target.dir,
+            &context.output_dir,
+            &context.runtime.host_root,
+        );
+        // Reclaim any staging dir an earlier crashed run of this cell left behind (§3.5). Safe: only
+        // matches tailor's own `.tailor-stage.<slug>.*`, and same-cell concurrency in one worktree is
+        // already unsupported (the working copy collides).
+        if staging.is_some() {
+            let stale = output_artifacts::stale_staging_dirs(&cell.target.dir, cell.slug.as_ref());
+            if !stale.is_empty() {
+                janitor::remove_paths(&self.runtime, &stale, &context.runtime, cancel.clone())
+                    .await?;
+            }
+        }
+
         let rendered_config = working_copy::render_working_copy(&run_cell.ic_config)
             .map_err(|err| ExecError::Other(err.to_string()))?;
         let working_copy_path =
@@ -98,21 +133,56 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                         DEV_BIND.to_owned(),
                     ],
                     privileged: context.runtime.privileged,
+                    cell_slug: cell.slug.as_ref().to_owned(),
+                    log_file: log_file.clone(),
                 },
                 cancel.clone(),
             )
             .await?;
 
         let _ = fs::remove_file(&working_copy_path);
+
+        // Reclaim IC's root-owned staging tree before propagating any IC failure, so a failed build
+        // never strands root-owned scratch (§3.4): chown to the caller always; scratch also removes.
+        if let Some(plan) = &staging {
+            janitor::chown_paths(
+                &self.runtime,
+                slice::from_ref(&plan.dir),
+                &context.runtime,
+                cancel.clone(),
+            )
+            .await?;
+            if plan.reclaim {
+                janitor::remove_paths(
+                    &self.runtime,
+                    slice::from_ref(&plan.dir),
+                    &context.runtime,
+                    cancel.clone(),
+                )
+                .await?;
+            }
+        }
+
         if result.exit_code != 0 {
             return Err(ExecError::IcFailed {
+                cell: cell.slug.as_ref().to_owned(),
                 code: result.exit_code,
-                logs: result.logs,
+                dump: result.failure_dump.unwrap_or_default(),
             });
         }
         verify_artifact(&artifact_path, cell.output.format)?;
         let mut managed_paths = vec![artifact_path.clone()];
         managed_paths.extend(farms.iter().map(RpmFarm::repodata_path));
+        // The image cache dir is written by IC inside the privileged container (root-owned); fold it
+        // into the janitor sweep so the caller can read/clean it sudo-free.
+        if let Some(cache_dir) = &context.runtime.image_cache_dir {
+            managed_paths.push(cache_dir.clone());
+        }
+        // The per-cell IC log is written root-owned inside the container too; chown it so a runner can
+        // read/upload it (`meta/docs/logging.md` §5.5).
+        if let Some(log_file) = &log_file {
+            managed_paths.push(log_file.clone());
+        }
         janitor::chown_paths(&self.runtime, &managed_paths, &context.runtime, cancel).await?;
         Ok(ExecutionResult {
             artifact_path,
@@ -219,7 +289,9 @@ mod tests {
     use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
     use serde_yaml_ng::{Mapping, Value};
-    use tailor_config::{Arch, BaseSource, ImageDefinition, OutputSpec};
+    use tailor_config::{
+        Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputSpec,
+    };
     use tailor_core::{CellSlug, Target};
 
     use crate::container::runtime::NoopRuntime;
@@ -234,6 +306,9 @@ mod tests {
                 dir: PathBuf::from("/images"),
                 architectures: vec![Arch::Amd64],
                 default_outputs: Vec::new(),
+                output_artifacts: OutputArtifactsPolicy::default(),
+                root: PathBuf::from("/images"),
+                base_images: BaseImageCatalogue::default(),
             }),
             axes: BTreeMap::new(),
             arch: Arch::Amd64,
@@ -247,6 +322,7 @@ mod tests {
             base: BaseSource::Path {
                 path: PathBuf::from("/images/base.img"),
             },
+            base_image: None,
             rpm_sources: Vec::new(),
         }
     }
@@ -255,6 +331,7 @@ mod tests {
         ExecutionContext {
             output_dir: PathBuf::from("/out"),
             ic_image_ref: "ic@sha256:abc".to_owned(),
+            base_ref: None,
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: true,

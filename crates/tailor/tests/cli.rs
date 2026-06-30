@@ -56,7 +56,7 @@ fn list_via_manifest_flag_from_any_directory() {
 
 #[test]
 fn defaults_inheritance_and_architecture_override_change_cell_counts() {
-    // `app` inherits the amd64-only default → 1 cell; `db` widens architectures → amd64 + arm64.
+    // `app` inherits the amd64-only default → 1 cell; `db` declares an arch axis → amd64 + arm64.
     in_dir("workspace")
         .args(["validate", "app"])
         .assert()
@@ -94,6 +94,34 @@ fn standalone_image_builds_without_a_manifest() {
         .assert()
         .success()
         .stdout(predicate::str::contains("1 cell(s) valid"));
+}
+
+#[test]
+fn no_arch_axis_defaults_to_a_single_amd64_cell() {
+    // No `arch` axis and no workspace default ⇒ exactly one amd64 cell.
+    in_dir("standalone")
+        .args(["matrix", "--format", "slugs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("solo_amd64_cosi"));
+}
+
+#[test]
+fn removed_per_image_architectures_field_is_rejected() {
+    in_dir("legacy-architectures")
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("architectures"));
+}
+
+#[test]
+fn oci_platform_mismatch_fails_validate() {
+    in_dir("oci-platform-mismatch")
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("arm64").and(predicate::str::contains("amd64")));
 }
 
 #[test]
@@ -153,6 +181,114 @@ fn slugs_subcommand_matches_matrix_format_slugs() {
         from_matrix.get_output().stdout,
         "`slugs` must match `matrix --format slugs`"
     );
+}
+
+#[test]
+fn matrix_ado_emits_one_setvariable_line_with_flat_scalar_legs() {
+    let assert = in_dir("matrix")
+        .args([
+            "matrix",
+            "--ado",
+            "BUILD_MATRIX",
+            "-s",
+            "edition=lite,arch=amd64,channel=stable",
+        ])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 1, "exactly one stdout line for the agent");
+    // Wrapper, leg key (sanitised slug), reserved fields, axes as `axis_*`, raw slug verbatim.
+    assert!(out.starts_with("##vso[task.setvariable variable=BUILD_MATRIX;isOutput=true]{"));
+    assert!(out.contains("\"gizmo_lite_amd64_stable_cosi\":{"));
+    assert!(out.contains("\"slug\":\"gizmo_lite_amd64_stable_cosi\""));
+    assert!(out.contains("\"axis_edition\":\"lite\""));
+    assert!(
+        !out.contains("\"axes\""),
+        "values are flat — no nested axes object"
+    );
+}
+
+#[test]
+fn matrix_format_ado_prints_the_bare_object_without_wrapper() {
+    in_dir("matrix")
+        .args([
+            "matrix",
+            "--format",
+            "ado",
+            "-s",
+            "edition=lite,arch=amd64,channel=stable",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("{\"gizmo_lite_amd64_stable_cosi\"")
+                .and(predicate::str::contains("##vso").not()),
+        );
+}
+
+#[test]
+fn matrix_format_ado_of_empty_selection_prints_empty_object() {
+    in_dir("matrix")
+        .args(["matrix", "--format", "ado", "-s", "edition=enterprise"])
+        .assert()
+        .success()
+        .stdout(predicate::str::diff("{}\n"));
+}
+
+#[test]
+fn matrix_ado_of_empty_selection_fails() {
+    in_dir("matrix")
+        .args([
+            "matrix",
+            "--ado",
+            "BUILD_MATRIX",
+            "-s",
+            "edition=enterprise",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no cells"));
+}
+
+#[test]
+fn matrix_ado_rejects_invalid_variable_name() {
+    in_dir("matrix")
+        .args(["matrix", "--ado", "1bad", "-s", "edition=lite"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid --ado variable name"));
+}
+
+// ───────────────────────────── base-image catalogue (baseImages) ───────────────────────────────
+
+#[test]
+fn matrix_json_exposes_base_image_for_a_catalogue_slot() {
+    in_dir("catalogue")
+        .arg("matrix")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"baseImage\": \"baremetal\""));
+}
+
+#[test]
+fn matrix_ado_carries_base_image_as_a_reserved_scalar() {
+    in_dir("catalogue")
+        .args(["matrix", "--format", "ado"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"baseImage\":\"baremetal\""));
+}
+
+#[test]
+fn bases_verify_fails_when_a_referenced_slot_file_is_missing() {
+    // The `host` image references `baremetal`, whose file is absent in the fixture → verify fails
+    // with a hint to download.
+    in_dir("catalogue")
+        .args(["bases", "verify"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("baremetal").and(predicate::str::contains("download")));
 }
 
 #[test]
@@ -230,13 +366,14 @@ fn dry_run_set_directive_overrides_the_base_with_an_oci_reference() {
 // ───────────────────────────── matrix: rendered config (merge + interpolation) ────────────────────
 
 #[test]
-fn explain_renders_nested_interpolation_and_removed_packages() {
+fn explain_with_config_renders_nested_interpolation_and_removed_packages() {
     // `edge` derives bootPkg = "boot-edge-${efiArch}"; on amd64 ${efiArch}=x64 → boot-edge-x64
     // (nested interpolation). `pro` $removes the `base-extra` baseline package.
     in_dir("matrix")
         .args([
             "explain",
             "gizmo",
+            "--with-config",
             "-s",
             "edition=pro,arch=amd64,channel=edge",
         ])
@@ -251,13 +388,14 @@ fn explain_renders_nested_interpolation_and_removed_packages() {
 }
 
 #[test]
-fn explain_resolves_includes_and_appends_lists() {
+fn explain_with_config_resolves_includes_and_appends_lists() {
     // `pro` splices layouts/storage/pro.yaml via $include (adds a `data` partition) and appends
     // `audit=1` to the shared kernel command line; the `stable` channel pins boot-stable.
     in_dir("matrix")
         .args([
             "explain",
             "gizmo",
+            "--with-config",
             "-s",
             "edition=pro,arch=amd64,channel=stable",
         ])
@@ -268,6 +406,59 @@ fn explain_resolves_includes_and_appends_lists() {
                 .and(predicate::str::contains("audit=1")) // appended kernel arg
                 .and(predicate::str::contains("boot-stable")), // stable channel param
         );
+}
+
+#[test]
+fn explain_prints_the_merge_order_with_reasons() {
+    // The default `explain` (no --with-config) lists the ordered fragment files and why each applies.
+    in_dir("matrix")
+        .args([
+            "explain",
+            "gizmo",
+            "-s",
+            "edition=pro,arch=amd64,channel=stable",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("merge order")
+                .and(predicate::str::contains("image.yaml"))
+                .and(predicate::str::contains("by-edition/pro.yaml"))
+                .and(predicate::str::contains("edition=pro"))
+                .and(predicate::str::contains("$include")), // pro splices a storage layout
+        );
+}
+
+#[test]
+fn composite_fragment_applies_only_to_its_axis_pair() {
+    // by-edition+arch/pro+arm64.yaml adds `composite-only-pkg` to the (pro, arm64) cells only.
+    in_dir("matrix")
+        .args([
+            "explain",
+            "gizmo",
+            "--with-config",
+            "-s",
+            "edition=pro,arch=arm64,channel=stable",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("by-edition+arch/pro+arm64.yaml")
+                .and(predicate::str::contains("edition=pro ∧ arch=arm64"))
+                .and(predicate::str::contains("composite-only-pkg")),
+        );
+    // The sibling amd64 cell does not get the composite delta.
+    in_dir("matrix")
+        .args([
+            "explain",
+            "gizmo",
+            "--with-config",
+            "-s",
+            "edition=pro,arch=amd64,channel=stable",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("composite-only-pkg").not());
 }
 
 // ───────────────────────────── selection: slices, single cells, validation ───────────────────────

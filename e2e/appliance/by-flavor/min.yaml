@@ -1,0 +1,3 @@
+# The `min` flavor: a plain hostname.
+params:
+  hostname: appliance-min

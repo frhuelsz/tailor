@@ -118,7 +118,13 @@ fn init_advanced_scaffolds_a_rendering_matrix() {
         .success()
         .stdout(predicate::str::contains("4 cell(s) valid"));
     tailor_in(tmp.path())
-        .args(["explain", "gadget", "-s", "variant=full,arch=amd64"])
+        .args([
+            "explain",
+            "gadget",
+            "--with-config",
+            "-s",
+            "variant=full,arch=amd64",
+        ])
         .assert()
         .success()
         .stdout(

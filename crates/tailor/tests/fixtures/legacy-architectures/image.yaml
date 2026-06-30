@@ -1,0 +1,11 @@
+# Synthetic standalone image (NOT a real config) — uses the removed per-image `architectures:` field,
+# which `deny_unknown_fields` now rejects (use a `matrix.arch` axis or `defaults.architectures`).
+name: solo
+architectures: [arm64]
+
+base:
+  path: ./b.img
+
+config:
+  os:
+    hostname: solo

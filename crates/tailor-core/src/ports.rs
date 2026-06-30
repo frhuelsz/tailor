@@ -2,9 +2,12 @@
 //! (`meta/docs/architecture.md` §4.2). Traits use return-position `impl Future` (no `async-trait`); the
 //! composition root wires concrete adapters as generics, so the traits need not be dyn-compatible.
 
-use std::{future::Future, path::PathBuf};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+};
 
-use tailor_config::{Arch, BaseSource, ToolchainEntry};
+use tailor_config::{Arch, BaseImageSource, BaseSource, ToolchainEntry};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -38,6 +41,11 @@ pub struct ExecutionContext {
     pub output_dir: PathBuf,
     /// The pinned toolchain image, as `container@sha256:…`.
     pub ic_image_ref: String,
+    /// The digest-pinned IC `--image` reference for a registry base (`oci:<repo>@sha256:…`), or
+    /// `None` for a local-file base (which uses `--image-file`) and for `--dry-run` (no digest
+    /// resolved). Threaded from the resolved base so registry builds are reproducible
+    /// (`meta/docs/design.md` §5.2/§6).
+    pub base_ref: Option<String>,
     /// The container platform, `linux/<arch>`.
     pub platform: String,
     /// `Some(i)` under `build --clones N`; suffixes all per-clone paths so clones never race.
@@ -68,10 +76,13 @@ pub struct RuntimeConfig {
     pub privileged: bool,
     /// Scratch directory for working copies and RPM farms.
     pub build_dir: Option<PathBuf>,
-    /// IC `--log-level`.
+    /// IC `--log-level` (when unset, the executor defaults IC to `debug` — `meta/docs/logging.md` §5.1).
     pub log_level: Option<String>,
     /// Host directory forwarded as IC `--image-cache-dir`.
     pub image_cache_dir: Option<PathBuf>,
+    /// Opt-in host directory for per-cell IC debug logs (`--log-dir`/`TAILOR_LOG_DIR`/`runtime.logDir`).
+    /// `None` (the default) means nothing is written to disk (`meta/docs/logging.md` §5.5).
+    pub log_dir: Option<PathBuf>,
     /// The sudo-free janitor image, `container@sha256:…`.
     pub janitor_image: String,
 }
@@ -84,6 +95,7 @@ impl Default for RuntimeConfig {
             build_dir: None,
             log_level: None,
             image_cache_dir: None,
+            log_dir: None,
             janitor_image: String::new(),
         }
     }
@@ -111,13 +123,23 @@ pub struct ContainerConfig {
     pub args: Vec<String>,
     pub binds: Vec<String>,
     pub privileged: bool,
+    /// The cell slug, tagged onto every re-emitted IC log event (`cell = <slug>`); empty for
+    /// non-cell containers such as the ownership janitor (`meta/docs/logging.md` §5.3).
+    pub cell_slug: String,
+    /// Host path of the per-cell on-disk IC log, when persistence is enabled — used only to point at
+    /// it in the failure dump (IC itself writes the file via `--log-file`; `meta/docs/logging.md` §5.4-§5.5).
+    pub log_file: Option<PathBuf>,
 }
 
 /// The outcome of a container run.
 #[derive(Debug, Clone)]
 pub struct ContainerResult {
     pub exit_code: i64,
+    /// The captured container output, joined verbatim (used for non-IC error reporting).
     pub logs: String,
+    /// On a non-zero exit, the categorized failure dump (cause + bounded context tail + optional
+    /// on-disk pointer) built from the in-memory capture (`meta/docs/logging.md` §5.4). `None` on success.
+    pub failure_dump: Option<String>,
 }
 
 /// Daemon configuration relevant to ownership translation (userns-remap, rootless).
@@ -129,10 +151,14 @@ pub struct DaemonInfo {
 
 /// Resolve base images and toolchain containers to digest-pinned references plus content hashes.
 pub trait BaseResolver: Send + Sync {
+    /// Resolve a base source. A relative [`BaseSource::Path`] is authored relative to `image_dir`
+    /// (the folder holding `image.yaml`), so it is resolved against it — never the process CWD —
+    /// matching how the Image Customizer `--image-file` argument is built.
     fn resolve(
         &self,
         source: &BaseSource,
         arch: Arch,
+        image_dir: &Path,
     ) -> impl Future<Output = Result<ResolvedBase, ResolveError>> + Send;
 
     fn resolve_toolchain(
@@ -152,6 +178,27 @@ pub enum ResolvedBase {
         platform: String,
         digest: String,
     },
+}
+
+/// Acquire a base-image catalogue slot's file from its remote source (`meta/docs/base-image-catalogue.md`
+/// §5.2/§8). `tailor bases download` drives this; the build itself never pulls — it consumes the slot
+/// file like any `path` base. The fetcher streams the artifact for `linux/<arch>` to `dest`.
+pub trait BaseImageFetcher: Send + Sync {
+    fn fetch(
+        &self,
+        source: &BaseImageSource,
+        arch: Arch,
+        dest: &Path,
+    ) -> impl Future<Output = Result<FetchedBase, ResolveError>> + Send;
+}
+
+/// Provenance recorded after a successful slot pull: the source manifest digest, plus the written
+/// file's content hash and size — the lock pins the file; the digest makes the pull auditable (§5.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedBase {
+    pub source_digest: String,
+    pub sha256: [u8; 32],
+    pub size: u64,
 }
 
 /// Filesystem operations that need special handling (RPM farm, working copy).

@@ -18,6 +18,18 @@ pub const DEFAULT_IC_CONTAINER: &str = "mcr.microsoft.com/azurelinux/imagecustom
 /// MCR publishes unprefixed tags (e.g. `1.3.0`, `latest`).
 pub const DEFAULT_IC_TAG: &str = "latest";
 
+/// The default ownership-janitor image (`meta/docs/design.md` §7.7) — a minimal OS image with
+/// `/bin/chown` and `/bin/rm`, used to normalize IC's root-owned outputs sudo-free when the manifest
+/// sets no `runtime.janitorImage`.
+pub const DEFAULT_JANITOR_CONTAINER: &str = "mcr.microsoft.com/azurelinux/base/core";
+
+/// The tag pulled for [`DEFAULT_JANITOR_CONTAINER`].
+pub const DEFAULT_JANITOR_TAG: &str = "3.0";
+
+/// The directory (relative to the workspace root) where registry base images are cached when the
+/// manifest sets no `runtime.imageCacheDir`. IC requires a cache dir for `oci`/`azureLinux` bases.
+pub const DEFAULT_IMAGE_CACHE_DIR: &str = ".tailor/cache";
+
 /// The id of the built-in toolchain entry created in standalone mode.
 const DEFAULT_TOOLCHAIN_ID: &str = "ic";
 
@@ -44,6 +56,7 @@ pub fn default_tool_config() -> ToolConfig {
         defaults: None,
         signing: None,
         images: None,
+        base_images: None,
     }
 }
 

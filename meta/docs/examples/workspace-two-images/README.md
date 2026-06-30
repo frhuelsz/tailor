@@ -49,7 +49,7 @@ database   ic-1.1      1.1.0    amd64, arm64  azureLinux 3.0/minimal-os  cosi
 Both images inherit `outputs: [cosi]` from `tailor.yaml` `defaults:`. `webserver` also inherits the
 default `architectures: [amd64]`; `database` **overrides** it to build **both `amd64` and `arm64`**.
 Because its base is the multi-arch `azureLinux` (MCR) image, that single line is all it takes — tailor
-resolves the per-arch digest at pull time, with no `baseByArch` wiring. An image overrides a default
+resolves the per-arch digest at pull time, with no per-arch slot wiring. An image overrides a default
 only when it needs to (a wider arch set here, or a different output format like the
 [`vm-img` variant](../trident-vm-testimage)).
 

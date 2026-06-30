@@ -92,7 +92,10 @@ mod tests {
 
     use indexmap::IndexMap;
     use serde_yaml_ng::Value;
-    use tailor_config::{Arch, BaseSource, ImageDefinition, Matrix, OutputFormat, OutputSpec};
+    use tailor_config::{
+        Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputFormat,
+        OutputSpec,
+    };
 
     use super::*;
     use crate::domain::{CellSlug, Target};
@@ -101,19 +104,15 @@ mod tests {
         let definition = ImageDefinition {
             name: "img".to_owned(),
             toolchain: None,
-            architectures: None,
-            matrix: Some(Matrix {
-                include: vec![],
-                exclude: vec![],
-                axes: IndexMap::new(),
-            }),
+            matrix: Some(IndexMap::new()),
+            selectors: None,
             outputs: None,
             base: None,
-            base_by_arch: None,
             features: vec![],
             params: IndexMap::new(),
             rpm_sources: vec![],
             operation: None,
+            output_artifacts: None,
             signing: None,
             inject_files: None,
             extra_dependencies: vec![],
@@ -124,6 +123,9 @@ mod tests {
             dir: ".".into(),
             architectures: vec![Arch::Amd64],
             default_outputs: vec![],
+            output_artifacts: OutputArtifactsPolicy::default(),
+            root: ".".into(),
+            base_images: BaseImageCatalogue::default(),
         });
         Cell {
             target,
@@ -140,6 +142,7 @@ mod tests {
             slug: CellSlug(slug.to_owned()),
             ic_config: Value::Null,
             base: BaseSource::Path { path: "b".into() },
+            base_image: None,
             rpm_sources: vec![],
         }
     }

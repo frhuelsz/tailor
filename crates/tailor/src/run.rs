@@ -2,7 +2,7 @@
 //! and implements each CLI verb (`meta/docs/design.md` §11).
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -10,19 +10,22 @@ use std::{
 use serde::Serialize;
 use tailor_config::{
     Arch, BaseSource, OutputFormat, OutputSpec, RenderedCell, ToolConfig, Workspace, discover,
-    expand, find_manifest, render_image, write_golden,
+    expand, find_manifest, merge_plan, render_image, write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, Executor, LockedBase, LockedContainer, Lockfile, Orchestrator,
-    ResolvedBase, Selector, SigningRequirement, Target, cells_selected, preflight_profile,
-    runtime_config,
+    BaseResolver, BuildOptions, CoreError, Executor, LockedBase, LockedContainer, Lockfile,
+    Orchestrator, ResolvedBase, Selector, SigningRequirement, SlotSource, SlotSummary, Target,
+    ado_matrix, cells_selected, download, is_valid_var_name, preflight_profile, runtime_config,
+    summarize, verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, resolve};
-use tailor_resolve::OciResolver;
+use tailor_resolve::{OciFetcher, OciResolver};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    cli::{AddCommand, BuildArgs, Cli, Command, InitArgs, InitTemplate, MatrixFormat},
+    cli::{
+        AddCommand, BasesCommand, BuildArgs, Cli, Command, InitArgs, InitTemplate, MatrixFormat,
+    },
     error::AppError,
     scaffold,
 };
@@ -36,6 +39,35 @@ const ARTIFACTS_DIR: &str = "artifacts";
 pub(crate) struct EngineOverride {
     engine: Option<tailor_config::Engine>,
     host: Option<String>,
+}
+
+/// Per-invocation logging overrides from the global `--log-dir` / `--ic-log-level` flags
+/// (`meta/docs/logging.md` §5.1, §5.5).
+#[derive(Clone, Default)]
+pub(crate) struct LogOverrides {
+    log_dir: Option<PathBuf>,
+    ic_log_level: Option<tailor_config::LogLevel>,
+}
+
+/// The `TAILOR_LOG_DIR` environment variable: the CI/pipeline path to opt into on-disk IC logs.
+const LOG_DIR_ENV: &str = "TAILOR_LOG_DIR";
+
+/// Resolve the opt-in log directory by precedence (highest first): `--log-dir` flag, `TAILOR_LOG_DIR`
+/// env, then `runtime.logDir` from the manifest (`meta/docs/logging.md` §5.5). `None` keeps persistence
+/// off (the default), so nothing is written to disk.
+fn resolve_log_dir(
+    flag: Option<PathBuf>,
+    env: Option<PathBuf>,
+    manifest: Option<PathBuf>,
+) -> Option<PathBuf> {
+    flag.or(env).or(manifest)
+}
+
+/// Read `TAILOR_LOG_DIR`, treating an empty value as unset.
+fn log_dir_from_env() -> Option<PathBuf> {
+    std::env::var_os(LOG_DIR_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Load the workspace, then dispatch the requested verb.
@@ -56,6 +88,10 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
         engine: cli.engine.map(Into::into),
         host: cli.host.clone(),
     };
+    let logging = LogOverrides {
+        log_dir: cli.log_dir.clone(),
+        ic_log_level: cli.ic_log_level.map(Into::into),
+    };
     match cli.command {
         Command::Version | Command::Init(_) | Command::Add { .. } => {
             unreachable!("handled before workspace discovery")
@@ -69,22 +105,28 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             validate(&workspace, &args.images, &selector(&args.select, &[])?)
         }
         Command::Render(args) => render(&workspace, &args.images, &selector(&args.select, &[])?),
-        Command::Explain { image, select } => explain(&workspace, &image, &selector(&select, &[])?),
+        Command::Explain {
+            image,
+            select,
+            with_config,
+        } => explain(&workspace, &image, &selector(&select, &[])?, with_config),
         Command::Matrix(args) => matrix(
             &workspace,
             &args.images,
             &selector(&args.select, &[])?,
             args.format,
+            args.ado.as_deref(),
         ),
         Command::Slugs(args) => matrix(
             &workspace,
             &args.images,
             &selector(&args.select, &[])?,
             MatrixFormat::Slugs,
+            None,
         ),
         Command::Resolve(args) => resolve_verb(&workspace, &args.images).await,
         Command::Lock | Command::Update => lock(&workspace).await,
-        Command::Build(args) => build(&workspace, args, &engine).await,
+        Command::Build(args) => build(&workspace, args, &engine, &logging).await,
         Command::Clean(args) => {
             clean(
                 &workspace,
@@ -94,6 +136,7 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             )
             .await
         }
+        Command::Bases { what } => bases(&workspace, &what).await,
     }
 }
 
@@ -109,16 +152,18 @@ fn print_version() {
 }
 
 fn load_workspace(cli: &Cli) -> Result<Workspace, AppError> {
+    let cwd =
+        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     let start = match &cli.manifest {
         Some(path) if path.is_file() => path
             .parent()
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
         Some(path) => path.clone(),
-        None => {
-            std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?
-        }
+        None => cwd.clone(),
     };
-    Ok(discover(start)?)
+    // Resolve to an absolute root so every derived path (image dirs, base, cache, outputs) is absolute
+    // — relative paths break Docker bind mounts and the `/host` translation.
+    Ok(discover(tailor_config::absolutize(start, &cwd))?)
 }
 
 // ───────────────────────────── pure verbs (no Docker / network) ─────────────────────────────
@@ -126,11 +171,9 @@ fn load_workspace(cli: &Cli) -> Result<Workspace, AppError> {
 fn list(workspace: &Workspace) {
     println!("Images:");
     for image in &workspace.images {
-        let cells = image
-            .definition
-            .matrix
-            .as_ref()
-            .map_or(1, |m| expand(m).map_or(0, |c| c.len()));
+        let cells = image.definition.matrix.as_ref().map_or(1, |m| {
+            expand(m, image.definition.selectors.as_ref()).map_or(0, |c| c.len())
+        });
         println!("  {:<28} {cells} cell(s)", image.definition.name);
     }
     if let Some(tool) = &workspace.tool {
@@ -159,18 +202,20 @@ fn show(workspace: &Workspace, name: &str, field: Option<&str>) -> Result<(), Ap
     }
     println!("name:    {}", definition.name);
     println!("dir:     {}", image.dir.display());
-    if let Some(matrix) = &definition.matrix {
-        let cells = expand(matrix).map_or(0, |c| c.len());
-        println!(
-            "matrix:  {cells} cell(s) across {} axis(es)",
-            matrix.axes.len()
-        );
-        let width = matrix.axes.keys().map(String::len).max().unwrap_or(0);
-        for (axis, values) in &matrix.axes {
+    if let Some(axes) = &definition.matrix {
+        let cells = expand(axes, definition.selectors.as_ref()).map_or(0, |c| c.len());
+        println!("matrix:  {cells} cell(s) across {} axis(es)", axes.len());
+        let width = axes.keys().map(String::len).max().unwrap_or(0);
+        for (axis, values) in axes {
             println!("  {axis:<width$} : {}", values.join(", "));
         }
-        if !matrix.exclude.is_empty() {
-            println!("  ({} exclude rule(s))", matrix.exclude.len());
+        if let Some(selectors) = &definition.selectors {
+            if !selectors.include.is_empty() {
+                println!("  ({} include selector(s))", selectors.include.len());
+            }
+            if !selectors.exclude.is_empty() {
+                println!("  ({} exclude selector(s))", selectors.exclude.len());
+            }
         }
     } else {
         println!("matrix:  none (single cell)");
@@ -216,20 +261,54 @@ fn render(workspace: &Workspace, names: &[String], selector: &Selector) -> Resul
     Ok(())
 }
 
-fn explain(workspace: &Workspace, name: &str, selector: &Selector) -> Result<(), AppError> {
+/// Print the merge order (the ordered fragment files) for each selected cell, so the precedence model
+/// is legible. With `with_config`, also print the merged IC config. Read-only and offline.
+fn explain(
+    workspace: &Workspace,
+    name: &str,
+    selector: &Selector,
+    with_config: bool,
+) -> Result<(), AppError> {
     let targets = build_targets(workspace, std::slice::from_ref(&name.to_owned()))?;
     let target = targets
         .first()
         .ok_or_else(|| AppError::Message(format!("unknown image `{name}`")))?;
     let cells = cells_selected(target, selector)?;
-    println!("{name}: {} cell(s)\n", cells.len());
+
+    // One merge plan per axis-cell (outputs don't change fragment selection), in first-seen order.
+    let mut seen: BTreeSet<BTreeMap<String, String>> = BTreeSet::new();
     for cell in &cells {
-        println!("── {} ──", cell.slug.as_ref());
-        let yaml = serde_yaml_ng::to_string(&cell.ic_config)
-            .map_err(|e| AppError::Message(format!("serialize: {e}")))?;
-        println!("{yaml}");
+        if !seen.insert(cell.axes.clone()) {
+            continue;
+        }
+        let coordinate: Vec<String> = cell
+            .axes
+            .iter()
+            .map(|(axis, value)| format!("{axis}={value}"))
+            .collect();
+        println!("cell  {}   ({})", cell.slug.as_ref(), coordinate.join(", "));
+        println!("\nmerge order (top = base, bottom wins):");
+        let plan = merge_plan(&cell.target.definition, &cell.target.dir, &cell.axes)?;
+        let width = plan.iter().map(|s| s.label.len()).max().unwrap_or(0);
+        for (i, step) in plan.iter().enumerate() {
+            println!(
+                "  {:>2}  {:<width$}  {}",
+                i + 1,
+                step.label,
+                step.reason,
+                width = width
+            );
+            for include in &step.includes {
+                println!("        └─ $include {include}");
+            }
+        }
+        if with_config {
+            let yaml = serde_yaml_ng::to_string(&cell.ic_config)
+                .map_err(|e| AppError::Message(format!("serialize: {e}")))?;
+            println!("\nmerged config:\n{yaml}");
+        }
+        println!();
     }
-    // NOTE: per-fragment provenance (the source map for "which fragment set this value") is future work.
     Ok(())
 }
 
@@ -239,34 +318,180 @@ struct MatrixEntry {
     slug: String,
     axes: BTreeMap<String, String>,
     format: String,
+    #[serde(rename = "baseImage", skip_serializing_if = "Option::is_none")]
+    base_image: Option<String>,
 }
+
+/// The ADO logging command that publishes a cross-stage output variable (`meta/docs/ado-matrix.md` §3):
+/// `##vso[task.setvariable variable=<NAME>;isOutput=true]<compact-json>`.
+const ADO_SETVAR_PREFIX: &str = "##vso[task.setvariable variable=";
+const ADO_SETVAR_SUFFIX: &str = ";isOutput=true]";
 
 fn matrix(
     workspace: &Workspace,
     names: &[String],
     selector: &Selector,
     format: MatrixFormat,
+    ado_var: Option<&str>,
 ) -> Result<(), AppError> {
-    let mut entries = Vec::new();
+    // `--ado <VAR>` is `--format ado` plus the setvariable wrapper.
+    let format = if ado_var.is_some() {
+        MatrixFormat::Ado
+    } else {
+        format
+    };
+    let mut cells = Vec::new();
     for target in build_targets(workspace, names)? {
-        for cell in cells_selected(&target, selector)? {
-            entries.push(MatrixEntry {
-                image: target.name().to_owned(),
-                slug: cell.slug.to_string(),
-                axes: cell.axes.clone(),
-                format: cell.output.format.as_str().to_owned(),
-            });
+        match cells_selected(&target, selector) {
+            Ok(mut selected) => cells.append(&mut selected),
+            // ADO tolerates an empty slice: `--format ado` prints `{}`, `--ado` fails clearly below.
+            Err(CoreError::NoCellsSelected { .. }) if matches!(format, MatrixFormat::Ado) => {}
+            Err(e) => return Err(e.into()),
         }
     }
     match format {
-        MatrixFormat::Json => println!("{}", serde_json::to_string_pretty(&entries)?),
+        MatrixFormat::Json => {
+            let entries: Vec<MatrixEntry> = cells
+                .iter()
+                .map(|cell| MatrixEntry {
+                    image: cell.target.name().to_owned(),
+                    slug: cell.slug.to_string(),
+                    axes: cell.axes.clone(),
+                    format: cell.output.format.as_str().to_owned(),
+                    base_image: cell.base_image.clone(),
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&entries)?);
+        }
         MatrixFormat::Slugs => {
-            for entry in &entries {
-                println!("{}", entry.slug);
+            for cell in &cells {
+                println!("{}", cell.slug);
+            }
+        }
+        MatrixFormat::Ado => {
+            let matrix = ado_matrix(&cells);
+            let json = serde_json::to_string(&matrix)?;
+            match ado_var {
+                Some(var) => {
+                    if !is_valid_var_name(var) {
+                        return Err(AppError::Message(format!(
+                            "invalid --ado variable name `{var}` (expected [A-Za-z_][A-Za-z0-9_]*)"
+                        )));
+                    }
+                    if cells.is_empty() {
+                        return Err(AppError::Message(
+                            "--ado selection matched no cells; ADO cannot expand an empty matrix"
+                                .to_owned(),
+                        ));
+                    }
+                    println!("{ADO_SETVAR_PREFIX}{var}{ADO_SETVAR_SUFFIX}{json}");
+                    eprint_ado_legs(var, &matrix);
+                }
+                None => println!("{json}"),
             }
         }
     }
     Ok(())
+}
+
+/// `--ado <VAR>` emits only the `##vso[task.setvariable …]` line, which the ADO agent consumes and
+/// hides from the build log. Echo a human-readable leg roster to stderr (which the log *does* show)
+/// so an operator can see which legs were published and map each ADO leg key back to its cell slug.
+fn eprint_ado_legs(var: &str, matrix: &BTreeMap<String, BTreeMap<String, String>>) {
+    eprintln!(
+        "Published {} matrix leg(s) to ADO variable {var}:",
+        matrix.len()
+    );
+    let width = matrix.keys().map(String::len).max().unwrap_or(0);
+    for (key, vars) in matrix {
+        let slug = vars.get("slug").map_or("", String::as_str);
+        eprintln!("  {key:<width$}  {slug}");
+    }
+}
+
+// ───────────────────────────── base-image catalogue verbs ─────────────────────────────
+
+/// `tailor bases download|verify`: manage the `baseImages:` catalogue (`meta/docs/base-image-catalogue.md`
+/// §5). Download pulls slots from their `source`; verify asserts referenced slot files are present.
+async fn bases(workspace: &Workspace, what: &BasesCommand) -> Result<(), AppError> {
+    let catalogue = workspace
+        .tool
+        .as_ref()
+        .and_then(|t| t.base_images.clone())
+        .ok_or_else(|| {
+            AppError::Message("no `baseImages:` catalogue defined in tailor.yaml".to_owned())
+        })?;
+    match what {
+        BasesCommand::List => {
+            print_bases(&summarize(&catalogue, &workspace.root));
+            Ok(())
+        }
+        BasesCommand::Download { names, force } => {
+            let reports = download(
+                &catalogue,
+                &workspace.root,
+                &OciFetcher::new(),
+                names,
+                *force,
+            )
+            .await?;
+            for report in &reports {
+                status(report.outcome.verb(), &describe_artifact(&report.path));
+            }
+            println!("processed {} slot(s)", reports.len());
+            Ok(())
+        }
+        BasesCommand::Verify { names } => {
+            let referenced = if names.is_empty() {
+                referenced_slots(workspace)?
+            } else {
+                names.iter().cloned().collect()
+            };
+            verify(&catalogue, &workspace.root, &referenced)?;
+            println!("verified {} slot(s) present", referenced.len());
+            Ok(())
+        }
+    }
+}
+
+/// Render `tailor bases list`: one aligned line per slot with its arch, source, presence, and path.
+fn print_bases(slots: &[SlotSummary]) {
+    if slots.is_empty() {
+        println!("No base-image slots defined.");
+        return;
+    }
+    let width = slots.iter().map(|slot| slot.name.len()).max().unwrap_or(0);
+    println!("Base images:");
+    for slot in slots {
+        let presence = if slot.present { "present" } else { "missing" };
+        let source = match &slot.source {
+            SlotSource::Oci(uri) => format!("oci:{uri}"),
+            SlotSource::AzureLinux { version, variant } => {
+                format!("azureLinux:{version}/{variant}")
+            }
+            SlotSource::OutOfBand => "out-of-band".to_owned(),
+        };
+        println!(
+            "  {name:<width$}  {arch:<5}  {presence:<7}  {source:<28}  {path}",
+            name = slot.name,
+            arch = slot.arch,
+            path = slot.path.display(),
+        );
+    }
+}
+
+/// The catalogue slot names every workspace cell binds to via `base: { ref: <name> }` — verify's
+/// default scope, so an empty `tailor bases verify` checks exactly what builds will consume.
+fn referenced_slots(workspace: &Workspace) -> Result<BTreeSet<String>, AppError> {
+    let mut names = BTreeSet::new();
+    for target in build_targets(workspace, &[])? {
+        for cell in cells_selected(&target, &Selector::default())? {
+            if let Some(name) = cell.base_image {
+                names.insert(name);
+            }
+        }
+    }
+    Ok(names)
 }
 
 // ───────────────────────────── network verbs (registry resolution) ─────────────────────────────
@@ -322,7 +547,7 @@ async fn build_lock(
                     reference,
                     platform,
                     digest,
-                } = resolver.resolve(&cell.base, arch).await?
+                } = resolver.resolve(&cell.base, arch, &target.dir).await?
                 {
                     lock.upsert_base(LockedBase {
                         reference,
@@ -342,14 +567,19 @@ async fn build(
     workspace: &Workspace,
     args: BuildArgs,
     engine: &EngineOverride,
+    logging: &LogOverrides,
 ) -> Result<(), AppError> {
-    let tool = tool_config(workspace);
+    let mut tool = tool_config(workspace);
+    resolve_image_cache_dir(&mut tool, &workspace.root);
+    apply_log_overrides(&mut tool, logging);
     let targets = build_targets(workspace, &args.images)?;
     let selection = selector(&args.select, &args.arch)?;
-    let output_dir = args
-        .output_dir
-        .clone()
-        .unwrap_or_else(|| workspace.root.join(ARTIFACTS_DIR));
+    let output_dir = tailor_config::absolutize(
+        args.output_dir
+            .clone()
+            .unwrap_or_else(|| workspace.root.join(ARTIFACTS_DIR)),
+        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?,
+    );
     let signing = signing_requirements(&targets, tool.signing.as_ref())?;
 
     // Dry-run prints each selected cell's container invocation without resolving digests, running,
@@ -392,16 +622,45 @@ async fn build(
         .plan(&targets, &tool, &lock, &selection, &output_dir)
         .await?;
     let stale = plan.stale().count();
-    println!("{} cell(s) planned, {stale} to build", plan.cells.len());
 
+    // Cargo-style build report (`meta/docs/design.md` §11): toolchain in use, per-cell progress,
+    // and a Finished summary. Base descriptions are looked up per slug from the plan.
+    let bases: BTreeMap<&str, String> = plan
+        .cells
+        .iter()
+        .map(|planned| {
+            (
+                planned.cell.slug.as_ref(),
+                describe_base(&planned.cell.base),
+            )
+        })
+        .collect();
+    status("Toolchain", &describe_toolchains(&tool));
+    status(
+        "Building",
+        &format!("{} cell(s) selected, {stale} to build", plan.cells.len()),
+    );
+
+    let started = std::time::Instant::now();
     let clones = args.clones.max(1);
+    let mut built = 0usize;
     for clone in 0..clones {
         let options = BuildOptions {
             force: args.force,
             dry_run: false,
             clone_index: (clones > 1).then_some(clone),
         };
-        let results = orchestrator
+        let mut on_progress = |event: tailor_core::BuildProgress<'_>| match event {
+            tailor_core::BuildProgress::Building { slug } => {
+                let base = bases.get(slug).map_or("", String::as_str);
+                status("Customizing", &format!("{slug}  ({base})"));
+            }
+            tailor_core::BuildProgress::Built { artifact, .. } => {
+                built += 1;
+                status("Built", &describe_artifact(artifact));
+            }
+        };
+        orchestrator
             .build(
                 &plan,
                 &tool,
@@ -409,16 +668,17 @@ async fn build(
                 &output_dir,
                 &options,
                 CancellationToken::new(),
+                &mut on_progress,
             )
             .await?;
-        for result in results {
-            println!(
-                "  built {} (exit {})",
-                result.artifact_path.display(),
-                result.exit_code
-            );
-        }
     }
+    status(
+        "Finished",
+        &format!(
+            "{built} artifact(s) in {}",
+            format_duration(started.elapsed())
+        ),
+    );
     Ok(())
 }
 
@@ -482,6 +742,128 @@ async fn establish_runtime(
 /// A set, non-empty environment variable, else `None`.
 fn non_empty_env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
+// ───────────────────────────── build reporting (cargo-style) ─────────────────────────────
+
+/// Whether to emit ANSI color — the shared, process-global decision (`NO_COLOR` off, `CLICOLOR_FORCE`
+/// on, else stderr is a terminal). Re-exported so tailor's status output, error prefix, and the
+/// pass-through of Image Customizer's colored logs all agree.
+pub(crate) use tailor_exec::color_enabled as use_color;
+
+/// Print a cargo-style status line to stderr: a right-aligned (bold green) verb plus a message.
+fn status(verb: &str, message: &str) {
+    eprintln!("{}", status_line(verb, message, use_color()));
+}
+
+/// Render a status line (factored out of [`status`] so the formatting is testable).
+fn status_line(verb: &str, message: &str, color: bool) -> String {
+    let padding = " ".repeat(12usize.saturating_sub(verb.chars().count()));
+    if color {
+        format!("{padding}\u{1b}[1;32m{verb}\u{1b}[0m {message}")
+    } else {
+        format!("{padding}{verb} {message}")
+    }
+}
+
+/// The IC container in use (the workspace default toolchain; per-image overrides show in `list`).
+fn describe_toolchains(tool: &ToolConfig) -> String {
+    let id = &tool.toolchains.default;
+    tool.toolchains.entries.get(id).map_or_else(
+        || id.clone(),
+        |entry| format!("{}:{}", entry.container, entry.effective_tag()),
+    )
+}
+
+/// A short, human description of a base source.
+fn describe_base(base: &BaseSource) -> String {
+    match base {
+        BaseSource::Path { path } => format!("path: {}", path.display()),
+        BaseSource::Oci { oci } => format!("oci: {}", oci.uri),
+        BaseSource::AzureLinux { azure_linux } => {
+            format!("azureLinux {}/{}", azure_linux.version, azure_linux.variant)
+        }
+        BaseSource::Ref { reference } => format!("ref: {reference}"),
+    }
+}
+
+/// `<artifact> (<size>)`, with the artifact shown relative to the current directory when possible.
+fn describe_artifact(artifact: &Path) -> String {
+    let shown = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| artifact.strip_prefix(&cwd).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| artifact.to_path_buf());
+    match std::fs::metadata(artifact) {
+        Ok(meta) => format!("{} ({})", shown.display(), format_bytes(meta.len())),
+        Err(_) => shown.display().to_string(),
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "human-readable size, precision irrelevant"
+    )]
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{size:.1} {}", UNITS[unit])
+    }
+}
+
+fn format_duration(elapsed: std::time::Duration) -> String {
+    let secs = elapsed.as_secs();
+    if secs >= 60 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{:.1}s", elapsed.as_secs_f64())
+    }
+}
+
+/// Resolve `runtime.imageCacheDir` to an **absolute** path: a manifest-relative value is taken
+/// relative to the workspace root, and an absent value defaults to `<workspace>/.tailor/cache` (IC
+/// refuses to download `oci`/`azureLinux` bases without a cache dir). Absolutizing here is required:
+/// the path is both translated into the `/host` mount for IC and used as a verbatim container bind by
+/// the janitor sweep, and Docker rejects a relative bind source (e.g. `./.tailor/cache`).
+fn resolve_image_cache_dir(tool: &mut ToolConfig, workspace_root: &Path) {
+    let runtime = tool
+        .runtime
+        .get_or_insert_with(tailor_config::Runtime::default);
+    let dir = runtime
+        .image_cache_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(tailor_config::defaults::DEFAULT_IMAGE_CACHE_DIR));
+    runtime.image_cache_dir = Some(tailor_config::absolutize(dir, workspace_root));
+}
+
+/// Apply the global `--log-dir` / `--ic-log-level` overrides onto the manifest's `runtime` settings,
+/// resolving the log directory by precedence (flag > `TAILOR_LOG_DIR` > manifest;
+/// `meta/docs/logging.md` §5.5). Only mutates `runtime` when there is an override to apply, so a plain
+/// `tailor build` keeps persistence off.
+fn apply_log_overrides(tool: &mut ToolConfig, logging: &LogOverrides) {
+    let manifest_log_dir = tool.runtime.as_ref().and_then(|r| r.log_dir.clone());
+    let log_dir = resolve_log_dir(
+        logging.log_dir.clone(),
+        log_dir_from_env(),
+        manifest_log_dir,
+    );
+    if log_dir.is_none() && logging.ic_log_level.is_none() {
+        return;
+    }
+    let runtime = tool
+        .runtime
+        .get_or_insert_with(tailor_config::Runtime::default);
+    runtime.log_dir = log_dir;
+    if let Some(level) = logging.ic_log_level {
+        runtime.log_level = Some(level);
+    }
 }
 
 // ───────────────────────────── signing (meta/docs/signing.md) ─────────────────────────────
@@ -571,22 +953,31 @@ fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Targ
     let default_outputs = defaults
         .and_then(|d| d.outputs.clone())
         .unwrap_or_else(default_cosi);
+    let default_output_artifacts = defaults
+        .and_then(|d| d.output_artifacts)
+        .unwrap_or_default();
+    let base_images = workspace
+        .tool
+        .as_ref()
+        .and_then(|t| t.base_images.clone())
+        .unwrap_or_default();
 
     let mut targets = Vec::new();
     for image in &workspace.images {
         if !names.is_empty() && !names.iter().any(|n| n == &image.definition.name) {
             continue;
         }
-        let architectures = image
-            .definition
-            .architectures
-            .clone()
-            .unwrap_or_else(|| default_arches.clone());
         targets.push(Arc::new(Target {
             definition: image.definition.clone(),
             dir: image.dir.clone(),
-            architectures,
+            architectures: default_arches.clone(),
             default_outputs: default_outputs.clone(),
+            output_artifacts: image
+                .definition
+                .output_artifacts
+                .unwrap_or(default_output_artifacts),
+            root: workspace.root.clone(),
+            base_images: base_images.clone(),
         }));
     }
     if !names.is_empty() && targets.is_empty() {
@@ -610,6 +1001,7 @@ fn default_cosi() -> Vec<OutputSpec> {
 fn cell_arches(cell: &RenderedCell, target: &Target) -> Vec<Arch> {
     match cell.tuple.get("arch").and_then(parse_arch) {
         Some(arch) => vec![arch],
+        None if target.architectures.is_empty() => vec![Arch::Amd64],
         None => target.architectures.clone(),
     }
 }
@@ -841,14 +1233,41 @@ base:
     variant: minimal-os
 
 config:
+  previewFeatures:
+    - input-image-oci   # lets IC download the azureLinux/oci base
   os:
     hostname: __IMAGE_NAME__
+    bootloader:
+      resetType: hard-reset
     packages:
       install:
         - openssh-server
     services:
       enable:
         - sshd
+  # minimal-os ships tight on free space, so grow the rootfs for the package install above.
+  # (Repartitioning here is why os.bootloader.resetType: hard-reset is required.)
+  storage:
+    bootType: efi
+    disks:
+      - partitionTableType: gpt
+        maxSize: 4G
+        partitions:
+          - id: esp
+            type: esp
+            size: 8M
+          - id: rootfs
+            size: grow
+    filesystems:
+      - deviceId: esp
+        type: fat32
+        mountPoint:
+          path: /boot/efi
+          options: \"umask=0077\"
+      - deviceId: rootfs
+        type: ext4
+        mountPoint:
+          path: /
 ";
 
 const SIMPLE_IMAGE: &str = "\
@@ -867,14 +1286,41 @@ base:
     variant: minimal-os
 
 config:
+  previewFeatures:
+    - input-image-oci   # lets IC download the azureLinux/oci base
   os:
     hostname: __IMAGE_NAME__
+    bootloader:
+      resetType: hard-reset
     packages:
       install:
         - openssh-server
     services:
       enable:
         - sshd
+  # minimal-os ships tight on free space, so grow the rootfs for the package install above.
+  # (Repartitioning here is why os.bootloader.resetType: hard-reset is required.)
+  storage:
+    bootType: efi
+    disks:
+      - partitionTableType: gpt
+        maxSize: 4G
+        partitions:
+          - id: esp
+            type: esp
+            size: 8M
+          - id: rootfs
+            size: grow
+    filesystems:
+      - deviceId: esp
+        type: fat32
+        mountPoint:
+          path: /boot/efi
+          options: \"umask=0077\"
+      - deviceId: rootfs
+        type: ext4
+        mountPoint:
+          path: /
 ";
 
 const ADVANCED_IMAGE: &str = "\
@@ -901,13 +1347,40 @@ base:
     variant: minimal-os
 
 config:
+  previewFeatures:
+    - input-image-oci   # lets IC download the azureLinux/oci base
   os:
     hostname: __IMAGE_NAME__
+    bootloader:
+      resetType: hard-reset
     packages:
       install:
         - openssh-server
         # ${efiArch} is a parameter set per-arch in by-arch/<arch>.yaml (x64 / aa64).
         - \"grub2-efi-${efiArch}\"
+  # minimal-os ships tight on free space, so grow the rootfs for the package install above.
+  # (Repartitioning here is why os.bootloader.resetType: hard-reset is required.)
+  storage:
+    bootType: efi
+    disks:
+      - partitionTableType: gpt
+        maxSize: 4G
+        partitions:
+          - id: esp
+            type: esp
+            size: 8M
+          - id: rootfs
+            size: grow
+    filesystems:
+      - deviceId: esp
+        type: fat32
+        mountPoint:
+          path: /boot/efi
+          options: \"umask=0077\"
+      - deviceId: rootfs
+        type: ext4
+        mountPoint:
+          path: /
 ";
 
 const BY_VARIANT_MINIMAL: &str = "\
@@ -941,3 +1414,206 @@ const BY_ARCH_ARM64: &str = "\
 params:
   efiArch: aa64
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LogOverrides, MatrixEntry, apply_log_overrides, describe_base, describe_toolchains,
+        format_bytes, format_duration, resolve_image_cache_dir, resolve_log_dir, status_line,
+    };
+
+    use std::{
+        collections::BTreeMap,
+        path::{Path, PathBuf},
+        time::Duration,
+    };
+
+    use tailor_config::{AzureLinuxBase, BaseSource, OciBase, defaults::default_tool_config};
+
+    #[test]
+    fn status_line_right_aligns_and_colors_the_verb() {
+        // Plain: 12-wide right-aligned verb, then the message.
+        assert_eq!(
+            status_line("Built", "img.cosi (1.0 MiB)", false),
+            "       Built img.cosi (1.0 MiB)"
+        );
+        assert_eq!(status_line("Customizing", "x", false), " Customizing x");
+        // Colored: a bold-green verb wrapped in ANSI, padding still outside the codes.
+        assert_eq!(
+            status_line("Built", "x", true),
+            "       \u{1b}[1;32mBuilt\u{1b}[0m x"
+        );
+    }
+
+    #[test]
+    fn format_bytes_scales_units() {
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(2048), "2.0 KiB");
+        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MiB");
+        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
+    }
+
+    #[test]
+    fn format_duration_switches_to_minutes() {
+        assert_eq!(format_duration(Duration::from_secs_f64(34.0)), "34.0s");
+        assert_eq!(format_duration(Duration::from_secs(72)), "1m12s");
+        assert_eq!(format_duration(Duration::from_secs(605)), "10m05s");
+    }
+
+    #[test]
+    fn resolve_log_dir_honors_precedence_flag_then_env_then_manifest() {
+        let flag = || Some(PathBuf::from("/flag"));
+        let env = || Some(PathBuf::from("/env"));
+        let manifest = || Some(PathBuf::from("/manifest"));
+
+        // Flag wins over everything.
+        assert_eq!(
+            resolve_log_dir(flag(), env(), manifest()),
+            Some(PathBuf::from("/flag"))
+        );
+        // Env wins when there is no flag.
+        assert_eq!(
+            resolve_log_dir(None, env(), manifest()),
+            Some(PathBuf::from("/env"))
+        );
+        // Manifest is the lowest-precedence opt-in.
+        assert_eq!(
+            resolve_log_dir(None, None, manifest()),
+            Some(PathBuf::from("/manifest"))
+        );
+    }
+
+    #[test]
+    fn resolve_log_dir_off_by_default_when_nothing_is_set() {
+        assert_eq!(resolve_log_dir(None, None, None), None);
+    }
+
+    #[test]
+    fn apply_log_overrides_leaves_persistence_off_without_opt_in() {
+        let mut tool = default_tool_config();
+        apply_log_overrides(&mut tool, &LogOverrides::default());
+        // No flag/env/manifest log dir → persistence stays off (no runtime.log_dir).
+        assert!(
+            tool.runtime
+                .as_ref()
+                .and_then(|r| r.log_dir.clone())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn apply_log_overrides_threads_the_flag_log_dir_and_ic_level() {
+        let mut tool = default_tool_config();
+        let logging = LogOverrides {
+            log_dir: Some(PathBuf::from("/flag/logs")),
+            ic_log_level: Some(tailor_config::LogLevel::Trace),
+        };
+        apply_log_overrides(&mut tool, &logging);
+        let runtime = tool.runtime.as_ref().expect("runtime created");
+        assert_eq!(runtime.log_dir.as_deref(), Some(Path::new("/flag/logs")));
+        assert_eq!(runtime.log_level, Some(tailor_config::LogLevel::Trace));
+    }
+
+    #[test]
+    fn describe_base_covers_every_source() {
+        assert_eq!(
+            describe_base(&BaseSource::Path {
+                path: PathBuf::from("./base.img")
+            }),
+            "path: ./base.img"
+        );
+        assert_eq!(
+            describe_base(&BaseSource::Oci {
+                oci: OciBase {
+                    uri: "registry.example/base:edge".to_owned(),
+                    platform: None,
+                }
+            }),
+            "oci: registry.example/base:edge"
+        );
+        assert_eq!(
+            describe_base(&BaseSource::AzureLinux {
+                azure_linux: AzureLinuxBase {
+                    version: "3.0".to_owned(),
+                    variant: "minimal-os".to_owned(),
+                }
+            }),
+            "azureLinux 3.0/minimal-os"
+        );
+        assert_eq!(
+            describe_base(&BaseSource::Ref {
+                reference: "baremetal".to_owned()
+            }),
+            "ref: baremetal"
+        );
+    }
+
+    #[test]
+    fn matrix_entry_emits_base_image_only_when_bound() {
+        let bound = MatrixEntry {
+            image: "mini".to_owned(),
+            slug: "mini_amd64_cosi".to_owned(),
+            axes: BTreeMap::new(),
+            format: "cosi".to_owned(),
+            base_image: Some("baremetal".to_owned()),
+        };
+        assert!(
+            serde_json::to_string(&bound)
+                .unwrap()
+                .contains("\"baseImage\":\"baremetal\"")
+        );
+        let unbound = MatrixEntry {
+            base_image: None,
+            ..bound
+        };
+        assert!(
+            !serde_json::to_string(&unbound)
+                .unwrap()
+                .contains("baseImage")
+        );
+    }
+
+    #[test]
+    fn describe_toolchains_uses_the_default_entry() {
+        let tool = default_tool_config();
+        assert_eq!(
+            describe_toolchains(&tool),
+            "mcr.microsoft.com/azurelinux/imagecustomizer:latest"
+        );
+    }
+
+    #[test]
+    fn resolve_image_cache_dir_defaults_absent_and_absolutizes_relative_against_workspace() {
+        let mut tool = default_tool_config();
+        resolve_image_cache_dir(&mut tool, std::path::Path::new("/ws"));
+        assert_eq!(
+            tool.runtime.as_ref().unwrap().image_cache_dir.as_deref(),
+            Some(std::path::Path::new("/ws/.tailor/cache"))
+        );
+
+        // A manifest-relative value is absolutized against the workspace root (so it never reaches
+        // Docker as a relative bind source like `./.tailor/cache`).
+        let mut relative = default_tool_config();
+        relative.runtime = Some(tailor_config::Runtime {
+            image_cache_dir: Some(PathBuf::from("./.tailor/cache")),
+            ..Default::default()
+        });
+        resolve_image_cache_dir(&mut relative, std::path::Path::new("/ws"));
+        assert_eq!(
+            relative.runtime.unwrap().image_cache_dir.as_deref(),
+            Some(std::path::Path::new("/ws/.tailor/cache"))
+        );
+
+        // An absolute value is left untouched.
+        let mut configured = default_tool_config();
+        configured.runtime = Some(tailor_config::Runtime {
+            image_cache_dir: Some(PathBuf::from("/custom/cache")),
+            ..Default::default()
+        });
+        resolve_image_cache_dir(&mut configured, std::path::Path::new("/ws"));
+        assert_eq!(
+            configured.runtime.unwrap().image_cache_dir.as_deref(),
+            Some(std::path::Path::new("/custom/cache"))
+        );
+    }
+}

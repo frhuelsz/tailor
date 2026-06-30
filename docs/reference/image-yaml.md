@@ -6,11 +6,10 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | --- | --- | --- | --- |
 | `name` | string | yes | Image id used by CLI and slugs. Use `[A-Za-z0-9.-]+`; `_` is reserved as the slug separator. |
 | `toolchain` | string or `{container, version?, tag?}` | no | Workspace toolchain id or inline standalone toolchain. Defaults to workspace default or built-in `latest`. |
-| `architectures` | `amd64`/`arm64` list | no | Defaults from `tailor.yaml`; equivalent to an `arch` axis when no matrix `arch` is declared. |
-| `matrix` | ordered map of axes plus `include`/`exclude` | no | User-defined axes. Omit for one cell. Axis declaration order controls slug order and fragment precedence. |
+| `matrix` | ordered map `axis: [values]` | no | User-defined axes; their cartesian product is the candidate cells. Omit for one cell. Declaration order controls slug order and fragment precedence — order axes widest → most-specific (so `arch` is first). |
+| `selectors` | `{ include?, exclude? }` | no | Which cells of the `matrix:` product to build. Lists of **selectors** (sub-cubes); `include` is an allowlist, `exclude` a denylist. Requires `matrix:`; omitted ⇒ the full product. |
 | `outputs` | list of output specs | no | Defaults from workspace or built-in `cosi`. One artifact per cell × output. |
-| `base` | one of `path`, `oci`, `azureLinux` | conditional | Exactly one of `base` or `baseByArch` must resolve per cell. |
-| `baseByArch` | map from arch to base | conditional | Per-arch base sources, usually for local files. |
+| `base` | one of `path`, `oci`, `azureLinux`, `image` | conditional | Exactly one base resolves per cell. `image: <name>` references a `baseImages:` slot. |
 | `features` | string list | no | Enables matching `by-feature/<name>.yaml` fragments. Does not multiply cells. |
 | `params` | scalar map | no | Values interpolated into `config:` strings with `${name}`. Params may reference other params. |
 | `rpmSources` | path list | no | Each path is a directory of RPMs or a `.repo` file; passed as IC `--rpm-source`. |
@@ -22,21 +21,68 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 
 ## Matrix
 
+`matrix:` declares the axes; their cartesian product (in declaration order) is the candidate cells.
+The optional `selectors:` block chooses which of those cells to actually build.
+
 ```yaml
-matrix:
-  edition: [lite, pro]
+matrix:                   # axes only — order widest → most-specific (arch first)
   arch: [amd64, arm64]
+  edition: [lite, pro]
   channel: [stable, edge]
-  exclude:
-    - edition: pro
-      channel: stable
-  include:
-    - edition: lite
-      arch: arm64
-      channel: edge
+
+selectors:                # omit entirely ⇒ build the full product
+  include:                # allowlist: keep cells matched by any selector (full product if absent)
+    - { arch: amd64 }                        # every amd64 cell
+    - { arch: arm64, edition: lite }         # plus the lite arm64 cells (channel expands)
+  exclude:                # denylist: then drop cells matched by any selector (exclude wins)
+    - { edition: pro, channel: [stable, edge] }   # a value may be a list
 ```
 
-Axes are closed: selectors and fragment paths must use declared axis names and values. `include` entries must pin every axis.
+A **selector** is a partial assignment over the axes: each axis is pinned to a value or a **list** of
+values, and **omitted axes match every value**. The final cell set is the union of the `include`
+selectors (or the full product when `include` is empty), minus the union of the `exclude` selectors.
+
+Axes are closed: every selector and `by-<axis>/<value>.yaml` fragment path must use declared axis
+names and values. Selecting zero cells from a non-empty matrix is an error.
+
+## Architectures
+
+`arch` is the one **reserved** axis. Its values are closed to `amd64` and `arm64`, and the cell's
+arch drives `--platform linux/<arch>`, per-arch base selection, the slug, and `${arch}`. Each cell
+has exactly one arch, resolved in this order:
+
+1. the `arch` matrix axis, one cell per value (`matrix.arch: [amd64, arm64]`);
+2. else the workspace `defaults.architectures` in [`tailor.yaml`](tailor-yaml.md);
+3. else **`amd64`**.
+
+There is no per-image `architectures:` field — declare a non-default arch with the axis (or override
+the whole workspace via `defaults.architectures`). The default is fixed at `amd64` and never the host
+arch, so a workspace builds the same set everywhere. See [Architectures](../explanation/architectures.md)
+and [Cross-arch building](../how-to/cross-arch-building.md).
+
+## Fragments
+
+Per-cell deltas live in `by-*/` files whose **path** is the condition — no inline `match:` needed. A
+fragment applies to a cell when its path predicate holds:
+
+| Path | Applies when | Kind |
+| --- | --- | --- |
+| `by-arch/amd64.yaml` | `arch == amd64` | single axis, single value |
+| `by-mode/dev+test.yaml` | `mode ∈ {dev, test}` | single axis, **disjunction** |
+| `by-boot+verity/uki+root.yaml` | `boot == uki` **and** `verity == root` | multi-axis **conjunction** |
+| `by-feature/<name>.yaml` | the feature is enabled | feature flag |
+
+`+` joins axes in the directory and values in the file. A directory naming **one** axis lets the file list
+several values (a disjunction, in the axis's declared value order); a directory naming **several** axes
+takes exactly one value per axis, positionally, with the axes in matrix-declared order. `image.yaml` is the
+base (applies to every cell).
+
+Apply order is merge precedence (later wins for scalars, extends lists). Fragments are sorted by: **arity**
+(more axes apply later — a composite refines the singles it builds on), then **axis-declaration order**
+(cross-axis precedence follows the matrix), then **breadth** (a broader disjunction applies before a
+narrower single value on the same axis, so the more specific one wins). Run `tailor explain <image> --cell
+<slug>` to print the exact merge order for a cell. See `meta/docs/directive-design.md` §2 for the full
+model.
 
 ## Base sources
 
@@ -58,6 +104,33 @@ base:
     version: "3.0"
     variant: minimal-os
 ```
+
+```yaml
+base:
+  ref: baremetal          # a named slot in tailor.yaml `baseImages:`
+```
+
+For an `oci` or `azureLinux` base, tailor resolves the registry digest and passes IC a digest-pinned
+`--image oci:<repo>@sha256:…` (so the build is reproducible). Image Customizer downloads OCI input
+images behind a **preview feature**, and tailor never edits your IC `config:`, so you must enable it
+yourself in the image's `config:`:
+
+```yaml
+config:
+  previewFeatures:
+    - input-image-oci
+```
+
+Registry bases also need an image cache directory; tailor defaults `runtime.imageCacheDir` to
+`<workspace>/.tailor/cache` when you set none (see [tailor.yaml](tailor-yaml.md)).
+
+The `arch` component of an `oci.platform` must match the cell's arch, so `linux/${arch}` is the safe
+spelling. Pinning a fixed `platform: linux/arm64` on an amd64 cell is a validate-time error.
+
+An `image:` base references a named slot from the workspace `baseImages:` catalogue and resolves to
+that slot's local file (the path lives once, in `tailor.yaml`). Use it for the file-based, registry-pull-free
+flow Trident needs — see [`baseImages` in tailor.yaml](tailor-yaml.md), [Use a base-image catalogue](../how-to/use-a-base-image-catalogue.md),
+and [Base images](../explanation/base-images.md).
 
 ## Output spec
 

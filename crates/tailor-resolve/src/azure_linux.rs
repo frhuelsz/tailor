@@ -21,7 +21,7 @@ pub(crate) async fn resolve(
     oci::resolve(&oci_base, arch).await
 }
 
-fn reference(azure_linux: &AzureLinuxBase) -> String {
+pub(crate) fn reference(azure_linux: &AzureLinuxBase) -> String {
     let version = &azure_linux.version;
     let variant = &azure_linux.variant;
     format!(

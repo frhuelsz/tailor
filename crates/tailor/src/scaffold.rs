@@ -49,11 +49,7 @@ pub(crate) fn register_member(manifest: &str, member_rel: &str) -> Result<String
 pub(crate) fn add_axis(image: &str, axis: &str, placeholder: &str) -> Result<String, String> {
     let def: ImageDefinition =
         serde_yaml_ng::from_str(image).map_err(|e| format!("parse image.yaml: {e}"))?;
-    if def
-        .matrix
-        .as_ref()
-        .is_some_and(|m| m.axes.contains_key(axis))
-    {
+    if def.matrix.as_ref().is_some_and(|m| m.contains_key(axis)) {
         return Err(format!("axis `{axis}` already exists"));
     }
 
@@ -245,7 +241,7 @@ base:
         let out = add_axis(image, "release", "TODO").unwrap();
         let def: ImageDefinition = serde_yaml_ng::from_str(&out).unwrap();
         let matrix = def.matrix.unwrap();
-        let axes: Vec<&str> = matrix.axes.keys().map(String::as_str).collect();
+        let axes: Vec<&str> = matrix.keys().map(String::as_str).collect();
         assert_eq!(
             axes,
             ["variant", "arch", "release"],
@@ -260,7 +256,7 @@ base:
         let out = add_axis(image, "variant", "TODO").unwrap();
         let def: ImageDefinition = serde_yaml_ng::from_str(&out).unwrap();
         let matrix = def.matrix.unwrap();
-        let axes: Vec<&str> = matrix.axes.keys().map(String::as_str).collect();
+        let axes: Vec<&str> = matrix.keys().map(String::as_str).collect();
         assert_eq!(axes, ["variant"]);
     }
 

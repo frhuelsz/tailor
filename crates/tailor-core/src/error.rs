@@ -6,14 +6,20 @@
 
 use std::path::PathBuf;
 
+use tailor_config::Arch;
+
 /// Errors from container execution adapters (the `Executor` / `ContainerRuntime` ports).
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
     #[error("container runtime error: {0}")]
     Runtime(String),
 
-    #[error("Image Customizer exited with code {code}")]
-    IcFailed { code: i64, logs: String },
+    #[error("Image Customizer failed for {cell} (exit {code})\n\n{dump}")]
+    IcFailed {
+        cell: String,
+        code: i64,
+        dump: String,
+    },
 
     #[error("execution cancelled")]
     Cancelled,
@@ -67,6 +73,40 @@ pub enum CoreError {
     #[error("image `{image}` declares no base for architecture `{arch}`")]
     MissingArchBase { image: String, arch: String },
 
+    #[error(
+        "image `{image}` references base image `{name}`, undefined in tailor.yaml `baseImages` (known: {known})"
+    )]
+    UnknownBaseImage {
+        image: String,
+        name: String,
+        known: String,
+    },
+
+    #[error(
+        "image `{image}` cell `{slug}` references base image `{name}` (arch `{slot_arch}`) but the cell arch is `{cell_arch}`; pick a matching slot or fix the `arch`"
+    )]
+    BaseImageArchMismatch {
+        image: String,
+        slug: String,
+        name: String,
+        slot_arch: Arch,
+        cell_arch: Arch,
+    },
+
+    #[error("base image `{name}` is missing its file `{}`; run `tailor bases download {name}` or place it", .path.display())]
+    BaseImageMissing { name: String, path: PathBuf },
+
+    #[error(
+        "image `{image}` cell `{slug}` sets base `oci.platform: {platform}` (arch `{platform_arch}`) but the cell arch is `{cell_arch}`; declare a matching `arch` or fix the platform"
+    )]
+    PlatformArchMismatch {
+        image: String,
+        slug: String,
+        platform: String,
+        platform_arch: String,
+        cell_arch: Arch,
+    },
+
     #[error("unknown toolchain id `{id}` (image `{image}`)")]
     UnknownToolchain { id: String, image: String },
 
@@ -98,4 +138,26 @@ pub enum CoreError {
         #[source]
         source: serde_yaml_ng::Error,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExecError;
+
+    #[test]
+    fn ic_failure_surfaces_the_categorized_dump() {
+        let err = ExecError::IcFailed {
+            cell: "appliance_amd64_cosi".to_owned(),
+            code: 1,
+            dump: "  image customization failed:\n  out of disk space\n\n  last IC context:\n    \
+                   INFO  Installing packages"
+                .to_owned(),
+        };
+        let rendered = err.to_string();
+        // The header names the cell and the exit code.
+        assert!(rendered.contains("Image Customizer failed for appliance_amd64_cosi (exit 1)"));
+        // The categorized cause (not just the exit code) is visible.
+        assert!(rendered.contains("out of disk space"));
+        assert!(rendered.contains("last IC context"));
+    }
 }

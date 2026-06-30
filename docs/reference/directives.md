@@ -17,9 +17,16 @@ A later `$set` wins over an earlier `$set`. A plain reassignment after a `$set` 
 | Directive | Valid position | Value | Purpose |
 | --- | --- | --- | --- |
 | `$set` | Any field value, commonly scalars or whole tailor values | any YAML value | Explicitly override an earlier value. |
-| `$replace` | List field value | list | Replace the inherited list wholesale. |
+| `$replace` | List field value (exclusive) | list | Replace the inherited list wholesale. |
 | `$remove` | List field value | list | Remove matching items from the inherited list. |
+| `$prepend` | List field value | list | Insert items **before** the inherited list. |
+| `$append` | List field value | list | Insert items **after** the inherited list. |
+| `$unset` | Mapping value | the bare token `$unset` | Remove the inherited key entirely. |
 | `$include` | Mapping value or list item | path string | Splice a shared YAML file at that position. |
+| `$select` | — | — | **Reserved, not implemented** — use `by-<axis>/<value>.yaml` fragments. |
+
+`$prepend`, `$append`, and `$remove` may share one mapping (e.g. trim the inherited list and add to both
+ends at once); `$set` and `$replace` are exclusive and cannot be combined with the others.
 
 ## `$set`
 
@@ -58,6 +65,41 @@ config:
         $remove:
           - base-extra
 ```
+
+## `$prepend` / `$append`
+
+Lists append by default. `$prepend` puts items at the front; `$append` is the explicit, combinable form of
+the default. Use both to wrap an inherited list in one fragment (a plain `$prepend` mapping would otherwise
+leave no room for an inline append):
+
+```yaml
+config:
+  scripts:
+    postCustomization:
+      $prepend:
+        - path: scripts/setup.sh
+      $append:
+        - path: scripts/teardown.sh
+```
+
+For a fragment that prepends to an inherited list `[a, b]`, the result is `[setup.sh, a, b, teardown.sh]`.
+Across fragments, a later fragment's `$prepend` lands further toward the front. `$remove` may be combined
+too: it drops matching inherited items before the ends are added.
+
+## `$unset`
+
+Set a key's value to the bare token `$unset` to remove that key, so the rendered config omits it:
+
+```yaml
+config:
+  os:
+    selinux: $unset      # drop the inherited selinux block entirely
+```
+
+Remove several keys by annotating each; remove a whole subtree by unsetting it at its own level
+(`scripts: $unset`). `$unset` is resolved at merge time before interpolation, so a field can never hold the
+literal string `$unset` (as with YAML's reserved `null`/`~`). A later fragment may set a removed key again.
+The mapping synonym `key: { $unset: true }` is tolerated; `{ $unset: false }` is an error.
 
 ## `$include`
 

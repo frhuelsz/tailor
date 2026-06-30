@@ -4,7 +4,9 @@
 use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 
 use serde_yaml_ng::Value;
-use tailor_config::{Arch, BaseSource, ImageDefinition, OutputSpec};
+use tailor_config::{
+    Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputSpec,
+};
 
 /// A resolved image — the catalogue/authoring unit, after config load and defaults are applied.
 #[derive(Debug, Clone)]
@@ -17,6 +19,14 @@ pub struct Target {
     pub architectures: Vec<Arch>,
     /// Output formats to build when a cell declares none (workspace `defaults.outputs`).
     pub default_outputs: Vec<OutputSpec>,
+    /// Resolved `output.artifacts` staging policy (per-image override, else workspace default, else
+    /// `managed`) — consulted only for cells that opt into the `output-artifacts` preview feature
+    /// (`meta/docs/output-artifacts-staging.md` §3).
+    pub output_artifacts: OutputArtifactsPolicy,
+    /// The workspace root, the base-dir for catalogue slot paths (`meta/docs/base-image-catalogue.md` §3).
+    pub root: PathBuf,
+    /// The `tailor.yaml` base-image catalogue, against which `base: { ref: … }` is resolved.
+    pub base_images: BaseImageCatalogue,
 }
 
 impl Target {
@@ -41,8 +51,12 @@ pub struct Cell {
     pub slug: CellSlug,
     /// The merged, interpolated Image Customizer config for this cell.
     pub ic_config: Value,
-    /// The resolved base image source.
+    /// The resolved base image source. A catalogue reference is resolved to its slot's local file, so
+    /// downstream sees a `path` base; [`Cell::base_image`] keeps the slot name for the matrix output.
     pub base: BaseSource,
+    /// The `baseImages` slot name this cell resolved from, when its base is a catalogue reference
+    /// (`meta/docs/base-image-catalogue.md` §6.2); `None` for `path`/`oci`/`azureLinux` bases.
+    pub base_image: Option<String>,
     /// Local RPM sources passed to IC as `--rpm-source`.
     pub rpm_sources: Vec<PathBuf>,
 }
@@ -88,6 +102,9 @@ pub struct PlannedCell {
     pub fingerprint: Fingerprint,
     /// `true` if a build stamp records the same fingerprint and the artifact exists.
     pub up_to_date: bool,
+    /// The digest-pinned IC `--image` reference for a registry base (`oci:<repo>@sha256:…`), or
+    /// `None` for a local-file base. Resolved during planning so the build stays reproducible.
+    pub base_ref: Option<String>,
 }
 
 /// An ordered list of cells to (re)build.

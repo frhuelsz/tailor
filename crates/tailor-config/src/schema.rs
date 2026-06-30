@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_yaml_ng::Value;
 
 use crate::error::ConfigError;
-use crate::types::{Arch, LogLevel, Operation, OutputFormat, ParamValue};
+use crate::types::{Arch, LogLevel, Operation, OutputArtifactsPolicy, OutputFormat, ParamValue};
 
 // ===== tailor.yaml — workspace / tool config (reference/tailor-yaml.md) =====
 
@@ -25,6 +25,9 @@ pub struct ToolConfig {
     pub signing: Option<SigningConfig>,
     #[serde(default)]
     pub images: Option<ImageCatalogue>,
+    /// Named base-image slots referenced by `base: { ref: <name> }` (`meta/docs/base-image-catalogue.md` §3).
+    #[serde(default)]
+    pub base_images: Option<BaseImageCatalogue>,
 }
 
 /// Repo-wide Image Customizer toolchain(s). This is where the IC version lives.
@@ -107,7 +110,7 @@ impl std::fmt::Display for Engine {
 }
 
 /// Container-runtime (bollard) knobs.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Runtime {
     /// Which container engine to use: `docker` (default), `podman`, or `auto`
@@ -128,6 +131,10 @@ pub struct Runtime {
     pub log_level: Option<LogLevel>,
     #[serde(default)]
     pub image_cache_dir: Option<PathBuf>,
+    /// Opt-in directory for per-cell IC debug logs; persistence is off unless set
+    /// (`meta/docs/logging.md` §5.5). Overridden by `--log-dir` and `TAILOR_LOG_DIR`.
+    #[serde(default)]
+    pub log_dir: Option<PathBuf>,
     #[serde(default)]
     pub janitor_image: Option<JanitorImage>,
 }
@@ -302,6 +309,10 @@ pub struct Defaults {
     pub architectures: Option<Vec<Arch>>,
     #[serde(default)]
     pub outputs: Option<Vec<OutputSpec>>,
+    /// Default `output.artifacts` staging policy for images that opt into the `output-artifacts`
+    /// preview feature (`meta/docs/output-artifacts-staging.md` §3.3); omitted ⇒ `managed`.
+    #[serde(default, rename = "outputArtifacts")]
+    pub output_artifacts: Option<OutputArtifactsPolicy>,
 }
 
 /// Which images belong to the workspace. Omitted ⇒ auto-discover `*/image.yaml` at depth 1.
@@ -329,15 +340,15 @@ pub struct ImageDefinition {
     #[serde(default)]
     pub toolchain: Option<ToolchainRef>,
     #[serde(default)]
-    pub architectures: Option<Vec<Arch>>,
+    pub matrix: Option<AxisValues>,
+    /// Which cells of the `matrix:` product to build (`include`/`exclude` sub-cubes). Requires
+    /// `matrix:`; omitted ⇒ the full product.
     #[serde(default)]
-    pub matrix: Option<Matrix>,
+    pub selectors: Option<Selectors>,
     #[serde(default)]
     pub outputs: Option<Vec<OutputSpec>>,
     #[serde(default)]
     pub base: Option<BaseSource>,
-    #[serde(default)]
-    pub base_by_arch: Option<BTreeMap<Arch, BaseSource>>,
     #[serde(default)]
     pub features: Vec<String>,
     #[serde(default)]
@@ -346,6 +357,10 @@ pub struct ImageDefinition {
     pub rpm_sources: Vec<PathBuf>,
     #[serde(default)]
     pub operation: Option<Operation>,
+    /// Per-image override of the `output.artifacts` staging policy
+    /// (`meta/docs/output-artifacts-staging.md` §3.3); omitted ⇒ the workspace default, else `managed`.
+    #[serde(default)]
+    pub output_artifacts: Option<OutputArtifactsPolicy>,
     /// Signing opt-in: `true` ⇒ the workspace default profile, `<id>` ⇒ that profile, omitted ⇒
     /// unsigned (`meta/docs/signing.md` §4).
     #[serde(default)]
@@ -360,10 +375,43 @@ pub struct ImageDefinition {
 
 // ===== shared types (reference/types.md) =====
 
-/// A base OS image source. Exactly one of three kinds, keyed by property name (a schema `oneOf`).
+/// The base-image catalogue: named slots in `tailor.yaml`, each a local file plus an optional remote
+/// source `tailor bases download` fills it from (`meta/docs/base-image-catalogue.md` §3). Images
+/// reference a slot by name with `base: { ref: <name> }`; the path lives once, here.
+pub type BaseImageCatalogue = BTreeMap<String, BaseImageSlot>;
+
+/// One catalogue slot: the local `path` (build input **and** `download` output, workspace-root-relative),
+/// an optional `arch` that reconciles with the referencing cell (`meta/docs/arch-and-platform.md` §3),
+/// and an optional remote `source` (`oci`/`azureLinux`); a sourceless slot is filled out-of-band (CI feed).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BaseImageSlot {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub arch: Option<Arch>,
+    #[serde(default)]
+    pub source: Option<BaseImageSource>,
+}
+
+/// A slot's remote source — `oci: { uri }` or `azureLinux: { version, variant }`, pulled for
+/// `linux/<arch>`. Untagged so the YAML reads `{ oci: … }` / `{ azureLinux: … }`, reusing the base
+/// source structs.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum BaseImageSource {
+    Oci {
+        oci: OciBase,
+    },
+    #[serde(rename_all = "camelCase")]
+    AzureLinux {
+        azure_linux: AzureLinuxBase,
+    },
+}
+
+/// A base OS image source. Exactly one of four kinds, keyed by property name (a schema `oneOf`).
 ///
 /// Modeled as an untagged enum so the YAML surface is `{ path: … }` / `{ oci: … }` /
-/// `{ azureLinux: … }` (serde's externally-tagged form would instead require YAML `!tags`).
+/// `{ azureLinux: … }` / `{ ref: … }` (serde's externally-tagged form would instead require YAML `!tags`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum BaseSource {
@@ -374,6 +422,13 @@ pub enum BaseSource {
     /// Microsoft Container Registry sugar for an Azure Linux base.
     #[serde(rename_all = "camelCase")]
     AzureLinux { azure_linux: AzureLinuxBase },
+    /// A reference (`ref`) to a named `baseImages` catalogue slot
+    /// (`meta/docs/base-image-catalogue.md` §4) — resolves to the slot's local file, like a `path`
+    /// base, but the path lives once in `tailor.yaml`.
+    Ref {
+        #[serde(rename = "ref")]
+        reference: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -402,22 +457,61 @@ pub struct OutputSpec {
     pub name: Option<String>,
 }
 
-/// A partial cell: a map of axis name to a single pinned value.
-pub type CellSelector = IndexMap<String, String>;
-
-/// An image's matrix: user-defined axes (order-preserving) plus reserved `include`/`exclude`.
+/// A selector value: an axis pinned to a single value or to a list of values.
 ///
-/// `include`/`exclude` are named fields; every other key flattens into `axes` (the product),
-/// preserving the declaration order that the cell slug depends on (`meta/docs/design.md` §10).
+/// Deserializes from either a YAML scalar (`arch: amd64`) or a sequence (`arch: [amd64, arm64]`).
 #[derive(Debug, Clone, Deserialize)]
-pub struct Matrix {
-    #[serde(default)]
-    pub include: Vec<CellSelector>,
-    #[serde(default)]
-    pub exclude: Vec<CellSelector>,
-    #[serde(flatten)]
-    pub axes: IndexMap<String, Vec<String>>,
+#[serde(untagged)]
+pub enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
 }
+
+impl OneOrMany {
+    /// Does this value-set contain `value`?
+    pub fn contains(&self, value: &str) -> bool {
+        self.iter().any(|v| v == value)
+    }
+
+    /// Iterate the pinned value(s).
+    pub fn iter(&self) -> std::slice::Iter<'_, String> {
+        match self {
+            OneOrMany::One(v) => std::slice::from_ref(v).iter(),
+            OneOrMany::Many(vs) => vs.iter(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a OneOrMany {
+    type Item = &'a String;
+    type IntoIter = std::slice::Iter<'a, String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// A **selector** (a section / sub-cube of the matrix): a partial assignment over the axes. Each
+/// listed axis is pinned to a value or a list of values; **omitted axes match all** their values.
+pub type Selector = IndexMap<String, OneOrMany>;
+
+/// The `selectors:` block — which cells of the `matrix:` product to actually build.
+///
+/// `include` (allowlist) unions its sub-cubes into the build set (or the full product when empty);
+/// `exclude` (denylist) then removes its sub-cubes. Both lists are order-independent; `exclude`
+/// always wins over `include` (`meta/docs/matrix-constraints.md`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Selectors {
+    #[serde(default)]
+    pub include: Vec<Selector>,
+    #[serde(default)]
+    pub exclude: Vec<Selector>,
+}
+
+/// An image's matrix axes: user-defined, order-preserving `name -> [values]`. The cartesian product
+/// (in declaration order, which the cell slug depends on — `meta/docs/design.md` §10) is the set of
+/// candidate cells; selection logic lives separately in `selectors:`.
+pub type AxisValues = IndexMap<String, Vec<String>>;
 
 #[cfg(test)]
 mod tests {
@@ -571,5 +665,55 @@ mod tests {
             err,
             crate::ConfigError::InvalidSigningProfile { .. }
         ));
+    }
+
+    // ----- base-image catalogue -----
+
+    #[test]
+    fn parses_base_image_catalogue_with_both_source_kinds() {
+        let tool: super::ToolConfig = serde_yaml_ng::from_str(indoc::indoc! {"
+            schemaVersion: 1
+            toolchains:
+              default: ic
+              entries:
+                ic:
+                  container: registry.example/ic
+                  version: 1.0.0
+            baseImages:
+              baremetal:
+                path: bases/baremetal.vhdx
+                arch: amd64
+                source:
+                  azureLinux:
+                    version: '3.0'
+                    variant: baremetal
+              edge:
+                path: bases/edge.vhdx
+                arch: arm64
+                source:
+                  oci:
+                    uri: mcr.example/base:edge
+              feed:
+                path: bases/feed.vhdx
+        "})
+        .unwrap();
+        let cat = tool.base_images.unwrap();
+        assert_eq!(cat.len(), 3);
+        assert_eq!(cat["baremetal"].arch, Some(super::Arch::Amd64));
+        assert!(matches!(
+            cat["baremetal"].source,
+            Some(super::BaseImageSource::AzureLinux { .. })
+        ));
+        assert!(matches!(
+            cat["edge"].source,
+            Some(super::BaseImageSource::Oci { .. })
+        ));
+        assert!(cat["feed"].source.is_none(), "sourceless feed slot");
+    }
+
+    #[test]
+    fn base_image_reference_parses_as_ref_source() {
+        let base: super::BaseSource = serde_yaml_ng::from_str("ref: baremetal\n").unwrap();
+        assert!(matches!(base, super::BaseSource::Ref { reference } if reference == "baremetal"));
     }
 }

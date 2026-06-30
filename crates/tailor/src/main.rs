@@ -6,9 +6,13 @@ mod run;
 mod scaffold;
 
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{
+    EnvFilter, fmt,
+    fmt::{format::Writer, time::FormatTime},
+};
 
 use crate::cli::Cli;
 
@@ -20,9 +24,36 @@ async fn main() -> ExitCode {
     match run::dispatch(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
+            if run::use_color() {
+                eprintln!("\u{1b}[1;31merror:\u{1b}[0m {error}");
+            } else {
+                eprintln!("error: {error}");
+            }
             ExitCode::FAILURE
         }
+    }
+}
+
+/// A compact wall-clock `HH:MM:SS` timer for the live `tracing` view (`meta/docs/logging.md` §5.6).
+/// A full RFC3339 stamp dominates a scrolling build and the precise instant only matters post-hoc, so
+/// the live formatter shows just the time-of-day (UTC, dependency-free); preserved on-disk IC logs keep
+/// IC's own full-precision `time` field.
+struct CompactTime;
+
+impl FormatTime for CompactTime {
+    fn format_time(&self, writer: &mut Writer<'_>) -> std::fmt::Result {
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default()
+            % 86_400;
+        write!(
+            writer,
+            "{:02}:{:02}:{:02}",
+            secs / 3600,
+            (secs % 3600) / 60,
+            secs % 60
+        )
     }
 }
 
@@ -39,5 +70,7 @@ fn init_tracing(verbose: u8, quiet: u8) {
     fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
+        .with_ansi(run::use_color())
+        .with_timer(CompactTime)
         .init();
 }

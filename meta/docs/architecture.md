@@ -1,9 +1,8 @@
 # tailor — Software Architecture
 
-> Status: **Draft for review.** Authored 2026-06-18.
-> Scope: crate-level architecture for `tailor`, realizing the behavior specified in
-> [design.md](./design.md) and [image-definitions.md](./image-definitions.md).
-> This document precedes implementation; no buildable code is produced until sign-off.
+> **Status:** Stale · _last reviewed 2026-06-29_
+>
+> The five-crate graph matches `Cargo.toml`, and the main layers exist, but the detailed module maps and feature table point at speculative paths such as `schema/tool_config.rs`, `merge/directives.rs`, `lockfile/`, and source-map/test fakes that do not match the current `crates/*/src` layout. Use the live crate tree as source of truth until this doc is reconciled.
 
 ---
 

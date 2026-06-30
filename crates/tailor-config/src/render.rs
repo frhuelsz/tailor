@@ -72,13 +72,76 @@ pub fn render_image(
     let image_dir = image_dir.as_ref();
     let fragments = fragment::discover(image_dir, image.matrix.as_ref(), &image.features)?;
     let cells = match &image.matrix {
-        Some(matrix) => matrix::expand(matrix)?,
+        Some(axes) => matrix::expand(axes, image.selectors.as_ref())?,
+        None if image.selectors.is_some() => {
+            return Err(ConfigError::SelectorsWithoutMatrix {
+                slug: image.name.clone(),
+            });
+        }
         None => vec![AxisTuple { values: Vec::new() }],
     };
     cells
         .into_iter()
         .map(|tuple| render_cell(image, image_dir, &fragments, tuple))
         .collect()
+}
+
+/// One step of a cell's merge plan: the fragment file, why it applies, and any `$include`d libraries.
+#[derive(Debug, Clone)]
+pub struct MergeStep {
+    /// The fragment's source label, e.g. `by-boot+verity/uki+root.yaml` (or `image.yaml` for the base).
+    pub label: String,
+    /// Why it applies: `base`, `boot=uki ∧ verity=root`, `mode ∈ {dev,test}`, or `feature <name>`.
+    pub reason: String,
+    /// Repo-relative `$include` targets this fragment splices in (in document order).
+    pub includes: Vec<String>,
+}
+
+/// The ordered list of fragment files that merge into one cell — the literal `merge_into` sequence
+/// (base first, later steps win), for `tailor explain`. Reuses the same discovery and precedence sort
+/// as [`render_image`], so the order cannot drift from a real render.
+pub fn merge_plan(
+    image: &ImageDefinition,
+    image_dir: impl AsRef<Path>,
+    axes: &BTreeMap<String, String>,
+) -> Result<Vec<MergeStep>, ConfigError> {
+    let fragments = fragment::discover(image_dir.as_ref(), image.matrix.as_ref(), &image.features)?;
+    Ok(fragments
+        .iter()
+        .filter(|f| f.applies(axes, &image.features))
+        .map(|f| MergeStep {
+            label: f.label.clone(),
+            reason: f.reason(),
+            includes: collect_includes(f.doc.config.as_ref()),
+        })
+        .collect())
+}
+
+/// Collect the `$include` targets referenced anywhere in a fragment's `config:` tree, in order.
+fn collect_includes(config: Option<&Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(value) = config {
+        walk_includes(value, &mut out);
+    }
+    out
+}
+
+fn walk_includes(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Mapping(map) => {
+            for (key, child) in map {
+                if key.as_str() == Some("$include") {
+                    if let Some(target) = child.as_str() {
+                        out.push(target.to_owned());
+                    }
+                } else {
+                    walk_includes(child, out);
+                }
+            }
+        }
+        Value::Sequence(items) => items.iter().for_each(|item| walk_includes(item, out)),
+        _ => {}
+    }
 }
 
 fn render_cell(
@@ -182,14 +245,14 @@ fn resolve_base(
     deserialize_field(base, image, tuple, BASE_FIELD)
 }
 
-/// A base is a `oneOf` (`path` | `oci` | `azureLinux`). Two fragments merging incompatible base
-/// *kinds* without `$set` would otherwise silently keep the first; reject the ambiguity loudly.
+/// A base is a `oneOf` (`path` | `oci` | `azureLinux` | `image`). Two fragments merging incompatible
+/// base *kinds* without `$set` would otherwise silently keep the first; reject the ambiguity loudly.
 fn ensure_single_base_kind(
     base: &Value,
     image: &ImageDefinition,
     tuple: &AxisTuple,
 ) -> Result<(), ConfigError> {
-    const KINDS: [&str; 3] = ["path", "oci", "azureLinux"];
+    const KINDS: [&str; 4] = ["path", "oci", "azureLinux", "ref"];
     let present: Vec<&str> = KINDS
         .into_iter()
         .filter(|kind| base.get(kind).is_some())
@@ -368,6 +431,61 @@ mod tests {
     }
 
     #[test]
+    fn selectors_filter_the_matrix_through_render() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: sel
+                matrix:
+                  arch: [amd64, arm64]
+                  edition: [lite, pro]
+                selectors:
+                  include:
+                    - { arch: amd64 }                  # both editions on amd64
+                    - { arch: arm64, edition: [lite] }  # only lite on arm64 (list value)
+                outputs:
+                  - format: cosi
+                base:
+                  path: ./b.img
+                config:
+                  os: { hostname: sel }
+            "},
+        );
+        let image = load_image(tmp.path().join("image.yaml")).unwrap();
+        let cells = render_image(&image, tmp.path()).unwrap();
+        let coords: Vec<String> = cells.iter().map(|c| c.tuple.coordinate()).collect();
+        // amd64_lite, amd64_pro, arm64_lite — the arm64_pro cell is filtered out.
+        assert_eq!(coords, ["amd64_lite", "amd64_pro", "arm64_lite"]);
+    }
+
+    #[test]
+    fn selectors_without_a_matrix_is_an_error() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: bad
+                selectors:
+                  include:
+                    - { arch: amd64 }
+                base:
+                  path: ./b.img
+                config:
+                  os: { hostname: bad }
+            "},
+        );
+        let image = load_image(tmp.path().join("image.yaml")).unwrap();
+        let err = render_image(&image, tmp.path()).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::SelectorsWithoutMatrix { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
     fn lite_cell_keeps_path_base_appends_packages_and_resolves_include_and_nested_params() {
         let tmp = TempDir::new().unwrap();
         let image = mini_image(tmp.path());
@@ -455,5 +573,136 @@ mod tests {
         // even though the on-disk directory names (by-aa, by-zz) are identical in both cases.
         assert_eq!(rendered_hostname("aa", "zz"), "from-zz");
         assert_eq!(rendered_hostname("zz", "aa"), "from-aa");
+    }
+
+    /// Image exercising composite paths, single-axis disjunction, `$unset`, and `$prepend` together
+    /// through the full render+merge pipeline.
+    fn combo_image(root: &Path) -> ImageDefinition {
+        write(
+            root,
+            "image.yaml",
+            indoc! {"
+                name: combo
+                matrix:
+                  boot: [grub, uki]
+                  verity: [none, root, usr]
+                  mode: [dev, test, prod]
+                outputs:
+                  - format: cosi
+                base:
+                  path: ./b.img
+                config:
+                  os:
+                    hostname: base-host
+                    selinux:
+                      mode: disabled
+                  scripts:
+                    post:
+                      - path: mid.sh
+            "},
+        );
+        // single-axis disjunction (broader) then the singular override (narrower → wins for `dev`).
+        write(
+            root,
+            "by-mode/dev+test.yaml",
+            "config:\n  os:\n    hostname:\n      $set: shared\n",
+        );
+        write(
+            root,
+            "by-mode/dev.yaml",
+            "config:\n  os:\n    hostname:\n      $set: dev\n",
+        );
+        // $unset removes an inherited key for one axis value.
+        write(
+            root,
+            "by-verity/none.yaml",
+            "config:\n  os:\n    selinux: $unset\n",
+        );
+        // multi-axis composite applies only to the (uki, root) pair.
+        write(
+            root,
+            "by-boot+verity/uki+root.yaml",
+            "config:\n  os:\n    label: uki-root\n",
+        );
+        // $prepend puts a script before the inherited one for uki boots.
+        write(
+            root,
+            "by-boot/uki.yaml",
+            "config:\n  scripts:\n    post:\n      $prepend:\n        - path: first.sh\n",
+        );
+        load_image(root.join("image.yaml")).unwrap()
+    }
+
+    fn combo_cell<'a>(
+        cells: &'a [RenderedCell],
+        boot: &str,
+        verity: &str,
+        mode: &str,
+    ) -> &'a RenderedCell {
+        cells
+            .iter()
+            .find(|c| {
+                c.tuple.get("boot") == Some(boot)
+                    && c.tuple.get("verity") == Some(verity)
+                    && c.tuple.get("mode") == Some(mode)
+            })
+            .unwrap_or_else(|| panic!("no {boot}/{verity}/{mode} cell"))
+    }
+
+    fn scripts(cell: &RenderedCell) -> Vec<&str> {
+        cell.ic_config["scripts"]["post"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|s| s["path"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn composite_disjunction_unset_and_prepend_render_together() {
+        let tmp = TempDir::new().unwrap();
+        let image = combo_image(tmp.path());
+        let cells = render_image(&image, tmp.path()).unwrap();
+        assert_eq!(cells.len(), 2 * 3 * 3); // boot × verity × mode
+
+        // (uki, root, dev): singular `dev` beats the `dev+test` disjunction; composite label applies;
+        // selinux survives (verity != none); $prepend puts first.sh ahead of the inherited mid.sh.
+        let a = combo_cell(&cells, "uki", "root", "dev");
+        assert_eq!(a.ic_config["os"]["hostname"].as_str(), Some("dev"));
+        assert_eq!(a.ic_config["os"]["label"].as_str(), Some("uki-root"));
+        assert_eq!(
+            a.ic_config["os"]["selinux"]["mode"].as_str(),
+            Some("disabled")
+        );
+        assert_eq!(scripts(a), ["first.sh", "mid.sh"]);
+
+        // (uki, none, test): disjunction wins (no singular for `test`); selinux key removed by $unset;
+        // composite does NOT apply (verity != root); $prepend still applies (boot == uki).
+        let b = combo_cell(&cells, "uki", "none", "test");
+        assert_eq!(b.ic_config["os"]["hostname"].as_str(), Some("shared"));
+        assert!(
+            !b.ic_config["os"]
+                .as_mapping()
+                .unwrap()
+                .contains_key("selinux")
+        );
+        assert!(
+            !b.ic_config["os"]
+                .as_mapping()
+                .unwrap()
+                .contains_key("label")
+        );
+        assert_eq!(scripts(b), ["first.sh", "mid.sh"]);
+
+        // (grub, root, prod): no axis override → base hostname; selinux kept; no composite; no prepend.
+        let c = combo_cell(&cells, "grub", "root", "prod");
+        assert_eq!(c.ic_config["os"]["hostname"].as_str(), Some("base-host"));
+        assert!(
+            !c.ic_config["os"]
+                .as_mapping()
+                .unwrap()
+                .contains_key("label")
+        );
+        assert_eq!(scripts(c), ["mid.sh"]);
     }
 }
