@@ -11,7 +11,7 @@ architectures: [amd64, arm64]        # ← widen the amd64-only default → buil
 
 base:
   # `azureLinux` (MCR) images are multi-arch manifests, so ONE base covers both arches: tailor
-  # resolves the per-arch digest at pull time (platform linux/<arch>). No `baseByArch` needed.
+  # resolves the per-arch digest at pull time (platform linux/<arch>). No per-arch slots needed.
   azureLinux:
     version: "3.0"
     variant: minimal-os

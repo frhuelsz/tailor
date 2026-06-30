@@ -1,9 +1,8 @@
 # tailor — Design
 
-> Status: **Draft for review.** Authored 2026-06-17.
-> Scope: full design for `tailor`, a Cargo-style, manifest-driven front-end for the Azure Linux
-> Image Customizer (IC). This document precedes implementation; the MVP is built from it after
-> sign-off.
+> **Status:** Partially implemented (foundational/living) · _last reviewed 2026-06-29_
+>
+> Milestones M1–M3 are built across `crates/tailor-config`, `crates/tailor-core/src/orchestrator.rs`, `crates/tailor-exec/src/arg_builder.rs`, and `crates/tailor-core/src/stamp.rs`. M4 signing execution is not built, and the later caching/RPM tiers remain partial; see §17 for the milestone framing.
 
 ---
 
@@ -319,19 +318,11 @@ matrix:
 outputs:
   - format: cosi
 
-# Base image source (ONE for all archs when registry/multi-arch; use baseByArch for local files).
+# Base image source (registry bases are multi-arch; per-arch local files use `baseImages:` catalogue slots).
 base:
   azureLinux:
     version: "3.0"
     variant: core
-
-# Per-architecture base sources (mutually exclusive with `base`). Every architecture MUST
-# have an entry.
-# baseByArch:
-#   amd64:
-#     path: ./bases/amd64.vhdx
-#   arm64:
-#     path: ./bases/arm64.vhdx
 
 # Image-level feature flags (gates by-feature/<name>.yaml fragments).
 features: [pcrlock-static-files]
@@ -381,8 +372,7 @@ config:
 | `matrix`               | map<axisName, [values]> + include/exclude | no | User-defined axes. Omit for a single-cell image. `arch` may appear as an axis or via `architectures`. |
 | `architectures`        | string[] (`amd64`\|`arm64`)            | no  | Defaults from `defaults.architectures`. Equivalent to a `matrix.arch` axis. |
 | `outputs`              | [{format, cosiCompressionLevel?, name?}] | no | Defaults from `defaults.outputs`. `name` is a `${...}` template override for the output basename (§10). |
-| `base`                 | oneOf {path \| oci{uri,platform?} \| azureLinux{version,variant}} | cond | One base for all archs. A registry base (oci/azureLinux) is multi-arch ⇒ one `base` covers all arches. Exactly one of `base`/`baseByArch`. |
-| `baseByArch`           | map<arch, base>                        | cond | Per-arch base sources (only for per-arch **local files**); one entry per architecture. Exactly one of `base`/`baseByArch`. |
+| `base`                 | oneOf {image \| path \| oci{uri,platform?} \| azureLinux{version,variant}} | yes | Exactly one base source. A registry base (oci/azureLinux) is multi-arch ⇒ one `base` covers all arches. Per-arch local files use `baseImages:` catalogue slots and `base: { ref: <name> }` per cell. |
 | `features`             | string[]                               | no  | Image-level feature flag list. Gates `by-feature/<name>.yaml` fragment inclusion. |
 | `params`               | map<string, scalar>                    | no  | Named constants for `${...}` interpolation into `config:` string values. |
 | `rpmSources`           | path[]                                 | no  | Each entry is a directory of RPMs OR a `.repo` file → IC `--rpm-source` (customize only). |
@@ -393,7 +383,7 @@ config:
 
 Operation-specific validation (enforced at load time):
 
-- **`customize`**: `config` required; `base`/`baseByArch` required; `rpmSources` allowed; full
+- **`customize`**: `config` required; `base` required; `rpmSources` allowed; full
   output-format set allowed (`cosi, vhd, vhd-fixed, vhdx, qcow2, raw, iso, pxe-dir, pxe-tar,
   baremetal-image`).
 - **`convert`**: `config` **forbidden**; `injectFiles` **must be false/absent**; base must be a
@@ -405,13 +395,13 @@ Matrix/base validation (after defaults + `--arch` are applied, enforced before r
 
 - `architectures` and `outputs` must each be **non-empty**; otherwise the image produces no cells
   (error).
-- Exactly one of `base`/`baseByArch`. When `baseByArch` is used, it must have an entry for **every**
-  selected architecture (no cell may end up without a base).
+- Each rendered cell must resolve exactly one `base`; no cell may end up without a base.
 - A single `base.oci.platform`/`base.path` shared across multiple architectures is **warned** (a
   local file is single-arch; an explicit `oci.platform` that does not match the cell's architecture
   is an **error**). When `oci.platform` is omitted it defaults to `linux/<arch>` per cell.
 - A registry base (`oci`/`azureLinux`) is **multi-arch** — one `base` covers all architectures via
-  the platform manifest. `baseByArch` is only needed for per-arch **local files**.
+  the platform manifest. For per-arch **local files**, define one `baseImages:` catalogue slot per
+  arch (each with its own `path` + `arch`) and select it with `base: { ref: <name> }`.
 
 ### 5.3 Workspace topology & discovery (Cargo model)
 
@@ -496,7 +486,7 @@ Consequences:
 
 ## 6. Base-image resolution
 
-An image's `base` (or `baseByArch[arch]`) is resolved **per matrix cell** to (a) a concrete,
+An image's `base` is resolved **per matrix cell** to (a) a concrete,
 digest/hash-pinned input for that cell's container run and (b) a lock entry keyed by
 `(kind, architecture)`. tailor drives the base through the IC **command line** (authoritative over
 `input.image`, per §5.4) and never writes `input.image` into the IC config.
@@ -524,9 +514,11 @@ flowchart TD
 ```
 
 - **`path`** — the common MVP case. The base is a single-architecture local file, so for a
-  multi-arch image use `baseByArch` (a shared `base.path` across architectures is allowed but
-  warned, since one file cannot be correct for two arches). tailor streams a **SHA-256** (+ size)
-  for the lock; the path is host-translated and passed as `--image-file <hostRoot>/<abs>`.
+  multi-arch image define one `baseImages:` catalogue slot per arch (each with its own `path` +
+  `arch`) and select the right slot per cell with `base: { ref: <name> }`. A shared `base.path`
+  across architectures is allowed but warned, since one file cannot be correct for two arches.
+  tailor streams a **SHA-256** (+ size) for the lock; the path is host-translated and passed as
+  `--image-file <hostRoot>/<abs>`.
 - **`oci`** — requires the pinned IC to support `input-image-oci` (≥ v1.1) and a configured
   `runtime.imageCacheDir`. The cell's **platform defaults to `linux/<arch>`** unless `oci.platform`
   is set explicitly. tailor resolves the registry **digest** for that platform and runs IC with a
@@ -555,7 +547,8 @@ flowchart TD
 
 > **Multi-arch note:** A registry base (`oci` or `azureLinux`) references a **multi-arch manifest**
 > — one `base` source covers all architectures (tailor selects the platform per cell via
-> `linux/<arch>`). `baseByArch` is only needed for per-arch **local files**.
+> `linux/<arch>`). Per-arch **local files** use `baseImages:` catalogue slots selected per cell with
+> `base: { ref: <name> }`.
 
 Digest resolution uses a registry client (`oci-client`, already a Trident dependency) or bollard's
 image inspect; local hashing uses streamed `sha2`. Because every kind is reduced to a digest-pinned

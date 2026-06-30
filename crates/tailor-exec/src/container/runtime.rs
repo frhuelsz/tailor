@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use bollard::{
     API_DEFAULT_VERSION, Docker,
     container::{
@@ -13,10 +11,12 @@ use bollard::{
 use futures_util::{StreamExt, TryStreamExt};
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use tailor_config::Engine;
 use tailor_core::{ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo, ExecError};
+
+use crate::ic_log::{self, IcCapture};
 
 use super::connection::{
     ConnectionPlan, Endpoint, EngineMatch, PreflightError, Resolution, detect_engine,
@@ -150,6 +150,8 @@ impl ContainerRuntime for BollardRuntime {
         cancel: CancellationToken,
     ) -> Result<ContainerResult, ExecError> {
         let name = config.name.clone();
+        let cell_slug = config.cell_slug.clone();
+        let log_file = config.log_file.clone();
         let docker_config = DockerConfig {
             image: Some(config.image_ref),
             cmd: Some(config.args),
@@ -187,7 +189,7 @@ impl ContainerRuntime for BollardRuntime {
             )
             .await
             .map_err(|err| map_runtime_error(&err))?;
-        let log_task = stream_logs(attach.output);
+        let log_task = stream_logs(attach.output, cell_slug);
 
         self.docker
             .start_container::<String>(&name, None)
@@ -203,10 +205,16 @@ impl ContainerRuntime for BollardRuntime {
             }
         };
         remove_container(&self.docker, &name).await?;
-        let logs = log_task
+        let capture = log_task
             .await
             .map_err(|err| ExecError::Runtime(err.to_string()))?;
-        Ok(ContainerResult { exit_code, logs })
+        let failure_dump =
+            (exit_code != 0).then(|| capture.failure_dump(exit_code, log_file.as_deref()));
+        Ok(ContainerResult {
+            exit_code,
+            logs: capture.joined(),
+            failure_dump,
+        })
     }
 
     async fn daemon_info(&self) -> Result<DaemonInfo, ExecError> {
@@ -307,23 +315,47 @@ fn stream_logs(
                 + Send,
         >,
     >,
-) -> JoinHandle<String> {
+    cell_slug: String,
+) -> JoinHandle<IcCapture> {
     tokio::spawn(async move {
-        let mut logs = String::new();
+        let mut capture = IcCapture::default();
+        // IC (logrus) emits one JSON object per newline-terminated line, but bollard hands back
+        // arbitrary chunks: buffer bytes and split on '\n' so a parse always sees a whole line and a
+        // line split across chunks is reassembled (`meta/docs/logging.md` §5.3).
+        let mut pending = String::new();
         while let Some(item) = output.next().await {
             match item {
-                Ok(line) => {
-                    let line = line.to_string();
-                    info!(message = %line, "container log");
-                    logs.push_str(&line);
+                Ok(chunk) => {
+                    pending.push_str(&chunk.to_string());
+                    while let Some(newline) = pending.find('\n') {
+                        let line: String = pending.drain(..=newline).collect();
+                        ingest(&line, &cell_slug, &mut capture);
+                    }
                 }
                 Err(err) => {
-                    let _ = writeln!(logs, "container log stream error: {err}");
+                    let line = format!("container log stream error: {err}");
+                    ingest(&line, &cell_slug, &mut capture);
                 }
             }
         }
-        logs
+        // Flush any trailing line without a final newline.
+        if !pending.is_empty() {
+            ingest(&pending, &cell_slug, &mut capture);
+        }
+        capture
     })
+}
+
+/// Parse one IC output line, re-emit it live as a `tracing` event, and keep it in the capture. Blank
+/// lines are skipped so they neither clutter the live view nor pad the capture.
+fn ingest(line: &str, cell_slug: &str, capture: &mut IcCapture) {
+    let trimmed = line.trim_end_matches(['\n', '\r']);
+    if trimmed.is_empty() {
+        return;
+    }
+    let parsed = ic_log::parse_ic_line(trimmed);
+    ic_log::emit(&parsed, cell_slug);
+    capture.push(parsed);
 }
 
 async fn remove_container(docker: &Docker, name: &str) -> Result<(), ExecError> {

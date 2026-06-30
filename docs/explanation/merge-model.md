@@ -22,13 +22,21 @@ matrix:
 
 Here `by-edition/...` applies before `by-channel/...`. This is intentional: adding a directory or changing alphabetical order cannot silently change precedence. Authors control precedence where they declare the axes.
 
+A fragment can target a **combination** of axes (`by-edition+arch/pro+arm64.yaml`, a conjunction) or
+**several values of one axis** (`by-channel/stable+edge.yaml`, a disjunction). Such fragments sort after the
+single-axis ones they refine (more axes = more specific = later), and a narrower single-value fragment wins
+over a broader disjunction on the same axis. `tailor explain <image> --cell <slug>` prints the exact order;
+see `docs/reference/image-yaml.md` and `meta/docs/directive-design.md` §2.
+
 ## Maps, lists, and scalars
 
 - Maps deep-merge.
-- Lists append by default.
+- Lists append by default; `$prepend`/`$append` add to either end and `$replace`/`$remove` rewrite or trim.
 - Differing scalar assignments conflict unless the later assignment uses `$set`.
+- Set a key's value to the bare token `$unset` to remove the inherited key entirely.
 
-This makes accidental double ownership loud while keeping additive IC lists easy.
+This makes accidental double ownership loud while keeping additive IC lists easy. See
+`docs/reference/directives.md` for every directive.
 
 ## Why no IC-aware merge?
 

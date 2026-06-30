@@ -15,7 +15,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
-use crate::{error::ConfigError, schema::Matrix, types::ParamValue};
+use crate::{error::ConfigError, schema::AxisValues, types::ParamValue};
 
 const FRAGMENT_DIR_PREFIX: &str = "by-";
 const FEATURE_AXIS: &str = "feature";
@@ -93,15 +93,48 @@ fn leaf_matches(
     }
 }
 
-/// The path-derived predicate of a fragment file.
+/// The path-derived predicate of a fragment file: a conjunction of per-axis value-sets (the cell's
+/// value on each named axis must be in that axis's set), a feature flag, or the always-true base.
+/// A single-axis disjunction (`by-mode/dev+test.yaml`) is one clause with several values; a multi-axis
+/// composite (`by-boot+verity/uki+root.yaml`) is several clauses with one value each.
 #[derive(Debug, Clone)]
 enum Predicate {
     Always,
-    Axis { axis: String, value: String },
+    Conjunction(Vec<AxisClause>),
     Feature { name: String },
 }
 
+/// One clause of a path predicate: the cell's value for `axis` must be one of `values`.
+#[derive(Debug, Clone)]
+struct AxisClause {
+    axis: String,
+    values: Vec<String>,
+}
+
+/// Merge-precedence key (ascending = applied earlier = lower precedence), per
+/// `meta/docs/directive-design.md` §2: more axes (`arity`) apply later; among the same axes, broader
+/// value-sets apply earlier so a narrower fragment wins; `axes`/`values` give a deterministic order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Order {
+    arity: usize,
+    axes: Vec<usize>,
+    breadth: usize,
+    values: Vec<String>,
+}
+
+impl Order {
+    /// Apply order: arity asc, axis indices asc, **breadth desc**, values asc.
+    fn cmp_key(&self, other: &Self) -> std::cmp::Ordering {
+        self.arity
+            .cmp(&other.arity)
+            .then_with(|| self.axes.cmp(&other.axes))
+            .then_with(|| other.breadth.cmp(&self.breadth))
+            .then_with(|| self.values.cmp(&other.values))
+    }
+}
+
 /// A fragment with its source label and resolved predicate, ready to test against each cell.
+#[derive(Debug)]
 pub(crate) struct LoadedFragment {
     pub(crate) label: String,
     predicate: Predicate,
@@ -113,7 +146,10 @@ impl LoadedFragment {
     pub(crate) fn applies(&self, axes: &BTreeMap<String, String>, features: &[String]) -> bool {
         let path_ok = match &self.predicate {
             Predicate::Always => true,
-            Predicate::Axis { axis, value } => axes.get(axis).is_some_and(|actual| actual == value),
+            Predicate::Conjunction(clauses) => clauses.iter().all(|clause| {
+                axes.get(&clause.axis)
+                    .is_some_and(|actual| clause.values.iter().any(|v| v == actual))
+            }),
             Predicate::Feature { name } => features.iter().any(|f| f == name),
         };
         path_ok
@@ -123,17 +159,36 @@ impl LoadedFragment {
                 .as_ref()
                 .is_none_or(|m| m.evaluate(axes, features))
     }
+
+    /// A human-readable description of why this fragment applies (for `tailor explain`).
+    pub(crate) fn reason(&self) -> String {
+        match &self.predicate {
+            Predicate::Always => "base".to_owned(),
+            Predicate::Feature { name } => format!("feature {name}"),
+            Predicate::Conjunction(clauses) => clauses
+                .iter()
+                .map(|c| {
+                    if c.values.len() == 1 {
+                        format!("{}={}", c.axis, c.values[0])
+                    } else {
+                        format!("{} ∈ {{{}}}", c.axis, c.values.join(","))
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ∧ "),
+        }
+    }
 }
 
 /// Discover the base document and every `by-*/<value>.yaml` fragment for an image, in apply order:
-/// the base document first, then axis fragments in **matrix axis-declaration order**, then feature
-/// fragments in `features`-declaration order (`meta/docs/image-definitions.md` §7). Apply order is
-/// merge precedence (later fragments win `$set`/scalar overrides and append last), so the user
-/// controls it by ordering axes in the matrix — never by how the `by-*` directories happen to sort.
-/// Validates that every fragment axis/value is declared (closed-axis check, §9.4).
+/// the base document first, then fragments sorted by [`Order`] — single-axis fragments in
+/// matrix axis-declaration order (broader disjunctions before narrower ones), then multi-axis
+/// composites, then feature fragments. Apply order is merge precedence, so authors control it by
+/// ordering axes in the matrix. Validates that every fragment axis/value is declared (closed-axis
+/// check) and that composite/disjunction paths are well-formed (`meta/docs/directive-design.md` §2).
 pub(crate) fn discover(
     image_dir: &Path,
-    matrix: Option<&Matrix>,
+    matrix: Option<&AxisValues>,
     features: &[String],
 ) -> Result<Vec<LoadedFragment>, ConfigError> {
     let mut fragments = vec![LoadedFragment {
@@ -149,7 +204,7 @@ pub(crate) fn discover(
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        let Some(axis) = dir_name.strip_prefix(FRAGMENT_DIR_PREFIX) else {
+        let Some(dir_token) = dir_name.strip_prefix(FRAGMENT_DIR_PREFIX) else {
             continue;
         };
         if !axis_dir.is_dir() {
@@ -159,7 +214,7 @@ pub(crate) fn discover(
             if file.extension().and_then(|e| e.to_str()) != Some(YAML_EXT) {
                 continue;
             }
-            let value = file
+            let stem = file
                 .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -168,14 +223,11 @@ pub(crate) fn discover(
                 "{dir_name}/{}",
                 file.file_name().unwrap_or_default().to_string_lossy()
             );
-            let (predicate, order) = predicate_for(axis, &value, &label, matrix, features)?;
+            let (predicate, order) = build_predicate(dir_token, &stem, &label, matrix, features)?;
             local.push((order, label, predicate, parse_fragment(&file)?));
         }
     }
-    // Order by the axis's matrix position (features after all axes), so merge precedence follows the
-    // declared axis order. A given cell matches exactly one value per axis, so the label tiebreak
-    // only fixes a stable order among the (non-co-applying) values of one axis.
-    local.sort_by(|(oa, la, _, _), (ob, lb, _, _)| oa.cmp(ob).then_with(|| la.cmp(lb)));
+    local.sort_by(|a, b| a.0.cmp_key(&b.0).then_with(|| a.1.cmp(&b.1)));
     fragments.extend(
         local
             .into_iter()
@@ -188,52 +240,154 @@ pub(crate) fn discover(
     Ok(fragments)
 }
 
-/// Validate a fragment's axis/value and return its path predicate plus its **apply ordinal**: the
-/// axis's index in the matrix-declaration order, or `axes.len() + feature_index` for a feature
-/// fragment (so features apply after every axis, in `features`-declaration order).
-fn predicate_for(
-    axis: &str,
-    value: &str,
+/// Parse and validate one `by-<dir_token>/<stem>.yaml` fragment path into its predicate and [`Order`].
+/// `dir_token` is the part after `by-` (one axis, several `+`-joined axes, or `feature`); `stem` is the
+/// file name without extension (the axis value(s), `+`-joined).
+fn build_predicate(
+    dir_token: &str,
+    stem: &str,
     label: &str,
-    matrix: Option<&Matrix>,
+    matrix: Option<&AxisValues>,
     features: &[String],
-) -> Result<(Predicate, usize), ConfigError> {
-    if axis == FEATURE_AXIS {
-        let Some(feature_index) = features.iter().position(|f| f == value) else {
+) -> Result<(Predicate, Order), ConfigError> {
+    let axis_tokens: Vec<&str> = dir_token.split('+').collect();
+
+    if axis_tokens.as_slice() == [FEATURE_AXIS] {
+        let Some(feature_index) = features.iter().position(|f| f == stem) else {
             return Err(ConfigError::UnknownFragmentValue {
                 axis: FEATURE_AXIS.to_owned(),
-                value: value.to_owned(),
+                value: stem.to_owned(),
                 file: label.to_owned(),
             });
         };
-        let axis_count = matrix.map_or(0, |m| m.axes.len());
+        let axis_count = matrix.map_or(0, IndexMap::len);
         return Ok((
             Predicate::Feature {
-                name: value.to_owned(),
+                name: stem.to_owned(),
             },
-            axis_count + feature_index,
+            Order {
+                arity: 1,
+                axes: vec![axis_count + feature_index],
+                breadth: 1,
+                values: vec![stem.to_owned()],
+            },
         ));
     }
-    let (axis_index, _, declared) =
-        matrix.and_then(|m| m.axes.get_full(axis)).ok_or_else(|| {
+    if axis_tokens.contains(&FEATURE_AXIS) {
+        return Err(ConfigError::InvalidFragmentPath {
+            file: label.to_owned(),
+            reason: "the `feature` axis cannot be combined with other axes".to_owned(),
+        });
+    }
+
+    let value_tokens: Vec<&str> = stem.split('+').collect();
+
+    if axis_tokens.len() == 1 {
+        // Single axis, one or more values (a disjunction when several).
+        let axis = axis_tokens[0];
+        let (axis_index, _, declared) = matrix.and_then(|m| m.get_full(axis)).ok_or_else(|| {
             ConfigError::UnknownFragmentAxis {
                 axis: axis.to_owned(),
             }
         })?;
-    if !declared.iter().any(|v| v == value) {
-        return Err(ConfigError::UnknownFragmentValue {
-            axis: axis.to_owned(),
-            value: value.to_owned(),
-            file: label.to_owned(),
-        });
+        let mut last = None;
+        for value in &value_tokens {
+            let Some(decl_index) = declared.iter().position(|d| d == value) else {
+                return Err(ConfigError::UnknownFragmentValue {
+                    axis: axis.to_owned(),
+                    value: (*value).to_owned(),
+                    file: label.to_owned(),
+                });
+            };
+            if last.is_some_and(|prev| decl_index <= prev) {
+                return Err(ConfigError::InvalidFragmentPath {
+                    file: label.to_owned(),
+                    reason: format!(
+                        "values must be distinct and in `{axis}`'s declared order (e.g. `{}`)",
+                        canonical_values(&value_tokens, declared)
+                    ),
+                });
+            }
+            last = Some(decl_index);
+        }
+        let values: Vec<String> = value_tokens.iter().map(|s| (*s).to_owned()).collect();
+        Ok((
+            Predicate::Conjunction(vec![AxisClause {
+                axis: axis.to_owned(),
+                values: values.clone(),
+            }]),
+            Order {
+                arity: 1,
+                axes: vec![axis_index],
+                breadth: values.len(),
+                values,
+            },
+        ))
+    } else {
+        // Multi-axis conjunction: exactly one value per axis, positionally.
+        if axis_tokens.len() != value_tokens.len() {
+            return Err(ConfigError::InvalidFragmentPath {
+                file: label.to_owned(),
+                reason: format!(
+                    "{} axes (`{dir_token}`) but {} values (`{stem}`); a composite path names exactly one value per axis",
+                    axis_tokens.len(),
+                    value_tokens.len()
+                ),
+            });
+        }
+        let mut clauses = Vec::with_capacity(axis_tokens.len());
+        let mut axes = Vec::with_capacity(axis_tokens.len());
+        let mut last = None;
+        for (axis, value) in axis_tokens.iter().zip(&value_tokens) {
+            let (axis_index, _, declared) =
+                matrix.and_then(|m| m.get_full(*axis)).ok_or_else(|| {
+                    ConfigError::UnknownFragmentAxis {
+                        axis: (*axis).to_owned(),
+                    }
+                })?;
+            if last.is_some_and(|prev| axis_index <= prev) {
+                return Err(ConfigError::InvalidFragmentPath {
+                    file: label.to_owned(),
+                    reason: "axes must be distinct and in the matrix's declared order".to_owned(),
+                });
+            }
+            last = Some(axis_index);
+            if !declared.iter().any(|d| d == value) {
+                return Err(ConfigError::UnknownFragmentValue {
+                    axis: (*axis).to_owned(),
+                    value: (*value).to_owned(),
+                    file: label.to_owned(),
+                });
+            }
+            clauses.push(AxisClause {
+                axis: (*axis).to_owned(),
+                values: vec![(*value).to_owned()],
+            });
+            axes.push(axis_index);
+        }
+        let arity = axis_tokens.len();
+        Ok((
+            Predicate::Conjunction(clauses),
+            Order {
+                arity,
+                axes,
+                breadth: arity,
+                values: value_tokens.iter().map(|s| (*s).to_owned()).collect(),
+            },
+        ))
     }
-    Ok((
-        Predicate::Axis {
-            axis: axis.to_owned(),
-            value: value.to_owned(),
-        },
-        axis_index,
-    ))
+}
+
+/// The canonical `+`-joined spelling of `values` (the axis's declared order), for error suggestions.
+fn canonical_values(values: &[&str], declared: &[String]) -> String {
+    let mut sorted: Vec<&str> = values
+        .iter()
+        .copied()
+        .filter(|v| declared.iter().any(|d| d == v))
+        .collect();
+    sorted.sort_by_key(|v| declared.iter().position(|d| d == v).unwrap_or(usize::MAX));
+    sorted.dedup();
+    sorted.join("+")
 }
 
 fn parse_fragment(path: &Path) -> Result<Fragment, ConfigError> {
@@ -319,5 +473,131 @@ mod tests {
         let feats = ["pcrlock-static-files".to_owned()];
         assert!(m.evaluate(&axes(&[("release", "3.0")]), &feats));
         assert!(!m.evaluate(&axes(&[("release", "4.0")]), &feats));
+    }
+
+    // ───────────────────────── composite / disjunction fragment paths ─────────────────────────
+
+    use tempfile::TempDir;
+
+    const MATRIX: &str = "arch: [amd64, arm64]\nboot: [grub, uki]\nverity: [none, root, usr]\nmode: [dev, test, prod]\n";
+
+    fn axisvals(yaml: &str) -> AxisValues {
+        serde_yaml_ng::from_str(yaml).unwrap()
+    }
+
+    /// Build a temp image dir containing `image.yaml` plus the given `by-*` fragment files.
+    fn image(files: &[&str]) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join(BASE_DOCUMENT), "config: {}\n").unwrap();
+        for rel in files {
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "config: {}\n").unwrap();
+        }
+        dir
+    }
+
+    fn discover_labels(dir: &TempDir) -> Vec<String> {
+        let frags = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap();
+        frags.into_iter().skip(1).map(|f| f.label).collect()
+    }
+
+    fn find<'a>(frags: &'a [LoadedFragment], label: &str) -> &'a LoadedFragment {
+        frags.iter().find(|f| f.label == label).unwrap()
+    }
+
+    #[test]
+    fn composite_conjunction_applies_to_the_pair_only() {
+        let dir = image(&["by-boot+verity/uki+root.yaml"]);
+        let frags = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap();
+        let frag = find(&frags, "by-boot+verity/uki+root.yaml");
+        assert!(frag.applies(&axes(&[("boot", "uki"), ("verity", "root")]), &[]));
+        assert!(!frag.applies(&axes(&[("boot", "uki"), ("verity", "usr")]), &[]));
+        assert!(!frag.applies(&axes(&[("boot", "grub"), ("verity", "root")]), &[]));
+    }
+
+    #[test]
+    fn single_axis_disjunction_applies_to_any_listed_value() {
+        let dir = image(&["by-mode/dev+test.yaml"]);
+        let frags = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap();
+        let frag = find(&frags, "by-mode/dev+test.yaml");
+        assert!(frag.applies(&axes(&[("mode", "dev")]), &[]));
+        assert!(frag.applies(&axes(&[("mode", "test")]), &[]));
+        assert!(!frag.applies(&axes(&[("mode", "prod")]), &[]));
+    }
+
+    #[test]
+    fn precedence_orders_by_arity_then_axis_then_breadth() {
+        let dir = image(&[
+            "by-arch/amd64.yaml",
+            "by-boot/grub.yaml",
+            "by-boot/uki.yaml",
+            "by-verity/root.yaml",
+            "by-mode/dev.yaml",
+            "by-mode/dev+test.yaml",
+            "by-boot+verity/uki+root.yaml",
+        ]);
+        assert_eq!(
+            discover_labels(&dir),
+            [
+                "by-arch/amd64.yaml", // axis 0
+                "by-boot/grub.yaml",  // axis 1
+                "by-boot/uki.yaml",
+                "by-verity/root.yaml",          // axis 2
+                "by-mode/dev+test.yaml",        // axis 3, broader (breadth 2) first
+                "by-mode/dev.yaml",             // axis 3, narrower (breadth 1) → wins
+                "by-boot+verity/uki+root.yaml"  // arity 2, after every single-axis fragment
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_fragment_axis_is_rejected() {
+        let dir = image(&["by-nope/x.yaml"]);
+        let err = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::UnknownFragmentAxis { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_value_is_rejected() {
+        let dir = image(&["by-arch/x86.yaml"]);
+        let err = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::UnknownFragmentValue { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn composite_arity_mismatch_is_rejected() {
+        let dir = image(&["by-boot+verity/uki.yaml"]);
+        let err = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::InvalidFragmentPath { reason, .. } if reason.contains("one value per axis")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn composite_axes_out_of_declared_order_is_rejected() {
+        let dir = image(&["by-verity+boot/root+uki.yaml"]);
+        let err = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::InvalidFragmentPath { reason, .. } if reason.contains("declared order")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn disjunction_values_out_of_declared_order_is_rejected() {
+        let dir = image(&["by-mode/test+dev.yaml"]);
+        let err = discover(dir.path(), Some(&axisvals(MATRIX)), &[]).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::InvalidFragmentPath { reason, .. } if reason.contains("dev+test")),
+            "got {err:?}"
+        );
     }
 }

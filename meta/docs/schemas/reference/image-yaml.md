@@ -15,8 +15,7 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 | `architectures` | [[Arch](./types.md#arch)] | no | `defaults.architectures` | Target arches (the arch axis). |
 | `matrix` | [Matrix](./types.md#matrix) | no | one cell | Axes + values whose product is the set of cells built. |
 | `outputs` | [[OutputSpec](./types.md#outputspec)] | no | `defaults.outputs` | Output formats; each cell × format is one IC run → one artifact, named by its [cell slug](./types.md#output-naming-cell-slug). |
-| `base` | [BaseSource](./types.md#basesource) | cond | — | The base image. **Exactly one** of `base` / `baseByArch` (may instead be supplied by a fragment). |
-| `baseByArch` | map<[Arch](./types.md#arch) → [BaseSource](./types.md#basesource)> | cond | — | Per-arch bases (for local files that differ by arch). Mutually exclusive with `base`. |
+| `base` | [BaseSource](./types.md#basesource) | cond | — | The base image source; the resolved cell has exactly one base (may instead be supplied by a fragment). Includes the `image: <name>` kind for `tailor.yaml` `baseImages` entries. |
 | `features` | [string] | no | — | Image-level **feature flags** (e.g. `pcrlock-static-files`); enable `by-feature/<name>.yaml` fragments. |
 | `params` | [Params](./types.md#params) | no | — | Named scalar constants for `${...}` interpolation. |
 | `rpmSources` | [string] | no | — | Extra IC `--rpm-source` entries (a dir of RPMs or a `.repo` file). |
@@ -29,7 +28,7 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 > fragments. The IC *operation* knobs are the separate top-level `operation:` and `injectFiles:`
 > fields (this differs from an earlier draft that nested them under `features:`).
 
-> **`base` / `baseByArch` may come from a fragment.** An image with a `matrix` whose base differs per
+> **`base` may come from a fragment.** An image with a `matrix` whose base differs per
 > axis often sets no `base` at the top level — `by-arch/`/`by-release/` fragments supply it. The
 > *resolved* cell must still end up with exactly one base.
 

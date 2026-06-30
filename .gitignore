@@ -9,3 +9,6 @@
 **/.tailor-work.*
 **/.tailor-farm-*/
 **/.rendered/
+
+comparison/**
+test/**

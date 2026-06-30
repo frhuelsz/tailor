@@ -1,11 +1,8 @@
-# tailor — Declarative image definitions (composition & the version matrix)
+# tailor — Declarative image definitions
 
-> Status: **Proposal for review.** Authored 2026-06-18.
-> A declarative mechanism for defining Image Customizer (IC) image configs with **reuse** and a
-> **multi-axis matrix** (notably AZL release `3.0` **and** `4.0` simultaneously), so a single
-> checked-in definition expands to many concrete IC configs instead of being copy-pasted per
-> variant/version. Complements the [tailor design](./design.md): this is the *image-definition*
-> layer that produces the per-cell IC config and the tailor target.
+> **Status:** Stale · _last reviewed 2026-06-29_
+>
+> Much of the compositor exists in `crates/tailor-config/src/fragment.rs`, `matrix.rs`, `render.rs`, `include.rs`, and `merge.rs`, but this older doc has drift: selectors moved out of `matrix:` into sibling `selectors:`, `$select` is reserved rather than available, and path-string `config:` is still rejected. Reconcile this against `matrix-constraints.md` and `directive-design.md` before treating it as reference.
 
 ---
 
@@ -166,7 +163,7 @@ at a time without rewrites:
   ```
 - **Level 1 — one self-contained `image.yaml` (the entry level).** The simplest definition is a
   **single file**: tailor config at the top level, and the Image Customizer config under `config:`.
-  The two are cleanly namespaced — top level is tailor's (`name`, `base`/`baseByArch`, `outputs`, and
+  The two are cleanly namespaced — top level is tailor's (`name`, `base`, `outputs`, and
   later `matrix`/`params`/`features`), `config:` is the IC `--config-file`. No `base.yaml`, no
   fragments, no `matrix`:
   ```yaml
@@ -550,10 +547,10 @@ base:
     variant: minimal-os
 ```
 
-Since **`arch` is a matrix axis** (§5), each cell is single-arch: a local-file base that differs by
-arch goes in `by-arch/<arch>.yaml`, or uses `${arch}` interpolation in the path. (tailor's own
-`baseByArch` is only relevant if you deliberately leave `arch` **out** of the matrix and let tailor
-fan out architectures; with `arch` in the matrix, each cell carries a single resolved `base`.)
+Since **`arch` is a matrix axis** (§5), each cell is single-arch: for local files that differ by
+arch, define one `baseImages:` catalogue slot per arch (each with its own `path` + `arch`) and put the
+matching `base: { ref: <name> }` reference in `by-arch/<arch>.yaml` (or select the slot name with
+`${arch}` interpolation).
 
 **Optional co-location sugar (`$select`).** If you would rather see the release branches side by side
 in one file instead of in `by-release/*.yaml`, the `$select` directive is available as an *opt-in*
@@ -876,7 +873,7 @@ the existing `3.0.yaml` is untouched. No file was copied, and no file is long.
   as a base config, cell deltas as the leaf), letting IC do the final merge when the pinned IC
   supports it. Default to (a) for portability; offer (b) as an optimization.
 - **tailor targets**: each rendered cell yields a target exactly as in [design.md §5.2](./design.md)
-  — `config` = the composed runnable IC config, `base`/`baseByArch` = the cell's resolved source
+  — `config` = the composed runnable IC config, `base` = the cell's resolved source
   (path | oci | azureLinux, §8.1), `outputs`/`architectures` from the cell. The whole
   build/lock/run/ownership pipeline is reused unchanged. The image-definition matrix is a
   **superset** of tailor's `outputs × arch` matrix, adding `release`/`variant`/`phase` axes.

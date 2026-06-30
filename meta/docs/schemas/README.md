@@ -33,8 +33,8 @@ automatically; fragments need the explicit `#/$defs/Fragment` pointer because th
 - Valid Draft 2020-12 schema (`jsonschema.check_schema`).
 - **All 14 example files validate** (5 `image.yaml`, 8 fragments, 1 `tailor.yaml`); the opaque
   `layouts/storage/*`, `rendered/*`, and `repos/*` files are correctly out of scope.
-- **10 negative cases are rejected** (missing `name`/`toolchains`, typo'd keys, both `base` and
-  `baseByArch`, two base kinds at once, bad output format, unsupported arch, inline toolchain missing
+- **10 negative cases are rejected** (missing `name`/`toolchains`, typo'd keys, unknown base image name,
+  two base kinds at once, bad output format, unsupported arch, inline toolchain missing
   `version`, a matrix in a fragment).
 
 ## Decisions this schema bakes in

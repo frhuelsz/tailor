@@ -21,6 +21,14 @@ const FLAG_IMAGE: &str = "--image";
 const FLAG_IMAGE_CACHE_DIR: &str = "--image-cache-dir";
 const FLAG_IMAGE_FILE: &str = "--image-file";
 const FLAG_LOG_LEVEL: &str = "--log-level";
+const FLAG_LOG_FORMAT: &str = "--log-format";
+const FLAG_LOG_COLOR: &str = "--log-color";
+const FLAG_LOG_FILE: &str = "--log-file";
+const LOG_FORMAT_JSON: &str = "json";
+const LOG_COLOR_NEVER: &str = "never";
+/// IC's `--log-level` default when the manifest/flags set none: run IC at full `debug` so the
+/// in-memory capture and any on-disk log always have the full story (`meta/docs/logging.md` §5.1).
+const DEFAULT_IC_LOG_LEVEL: &str = "debug";
 const FLAG_OUTPUT_IMAGE_FILE: &str = "--output-image-file";
 const FLAG_OUTPUT_IMAGE_FORMAT: &str = "--output-image-format";
 const FLAG_RPM_SOURCE: &str = "--rpm-source";
@@ -46,13 +54,31 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
         ));
     }
 
-    if let Some(log_level) = &context.runtime.log_level {
-        args.extend(flag_value(FLAG_LOG_LEVEL, log_level.clone()));
+    // Always run IC structured (`meta/docs/logging.md` §5.1): JSON on stderr, no ANSI, at `debug`
+    // (or the configured level) so the in-memory capture and any on-disk log have the full story.
+    args.extend(flag_value(FLAG_LOG_FORMAT, LOG_FORMAT_JSON.to_owned()));
+    args.extend(flag_value(FLAG_LOG_COLOR, LOG_COLOR_NEVER.to_owned()));
+    args.extend(flag_value(
+        FLAG_LOG_LEVEL,
+        context
+            .runtime
+            .log_level
+            .clone()
+            .unwrap_or_else(|| DEFAULT_IC_LOG_LEVEL.to_owned()),
+    ));
+    // Opt-in on-disk persistence (§5.5): write the per-cell debug log into the container path that
+    // maps to `<log-dir>/<slug>.log` on the host.
+    if let Some(log_file) = log_file_path(cell, context) {
+        args.extend(flag_value(
+            FLAG_LOG_FILE,
+            path_translate::to_container_path(&log_file, &context.runtime.host_root),
+        ));
     }
 
     args.extend(flag_value(FLAG_BUILD_DIR, BUILD_DIR.to_owned()));
     args.extend(base_args(
         &cell.base,
+        context.base_ref.as_deref(),
         &cell.target.dir,
         &context.runtime,
         operation,
@@ -78,7 +104,7 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
             args.extend(flag_value(
                 FLAG_RPM_SOURCE,
                 path_translate::to_container_path(
-                    &path_translate::absolutize(source, &cell.target.dir),
+                    &tailor_config::absolutize(source, &cell.target.dir),
                     &context.runtime.host_root,
                 ),
             ));
@@ -101,6 +127,18 @@ pub(crate) fn artifact_path(cell: &Cell, context: &ExecutionContext) -> PathBuf 
         .join(artifact_name(cell.slug.as_ref(), cell.output.format))
 }
 
+/// The host path of the per-cell IC log when on-disk persistence is enabled, else `None`
+/// (`meta/docs/logging.md` §5.5). A `--clones` run suffixes the slug so clones never collide.
+pub(crate) fn log_file_path(cell: &Cell, context: &ExecutionContext) -> Option<PathBuf> {
+    context.runtime.log_dir.as_ref().map(|dir| {
+        let name = match context.clone_index {
+            Some(clone) => format!("{}_clone{clone}.log", cell.slug.as_ref()),
+            None => format!("{}.log", cell.slug.as_ref()),
+        };
+        dir.join(name)
+    })
+}
+
 fn subcommand(operation: Operation) -> &'static str {
     match operation {
         Operation::Customize => SUBCOMMAND_CUSTOMIZE,
@@ -110,6 +148,7 @@ fn subcommand(operation: Operation) -> &'static str {
 
 fn base_args(
     base: &BaseSource,
+    base_ref: Option<&str>,
     image_dir: &std::path::Path,
     runtime: &RuntimeConfig,
     operation: Operation,
@@ -118,18 +157,27 @@ fn base_args(
         (BaseSource::Path { path }, _) => flag_value(
             FLAG_IMAGE_FILE,
             path_translate::to_container_path(
-                &path_translate::absolutize(path, image_dir),
+                &tailor_config::absolutize(path, image_dir),
                 &runtime.host_root,
             ),
         ),
-        (BaseSource::Oci { oci }, Operation::Customize) => {
-            flag_value(FLAG_IMAGE, format!("{OCI_PREFIX}{}", oci.uri))
-        }
+        // A registry base: pass the digest-pinned `oci:<repo>@<digest>` resolved during planning
+        // (reproducible). `--dry-run` resolves no digest, so fall back to the un-pinned reference for
+        // the preview only.
+        (BaseSource::Oci { oci }, Operation::Customize) => flag_value(
+            FLAG_IMAGE,
+            base_ref.map_or_else(|| format!("{OCI_PREFIX}{}", oci.uri), ToOwned::to_owned),
+        ),
         (BaseSource::AzureLinux { azure_linux }, Operation::Customize) => flag_value(
             FLAG_IMAGE,
-            format!(
-                "{OCI_PREFIX}mcr.microsoft.com/azurelinux/{}/image/{}",
-                azure_linux.version, azure_linux.variant
+            base_ref.map_or_else(
+                || {
+                    format!(
+                        "{OCI_PREFIX}mcr.microsoft.com/azurelinux/{}/image/{}",
+                        azure_linux.version, azure_linux.variant
+                    )
+                },
+                ToOwned::to_owned,
             ),
         ),
         (BaseSource::Oci { oci }, Operation::Convert) => {
@@ -142,6 +190,9 @@ fn base_args(
                 azure_linux.version, azure_linux.variant
             ),
         ),
+        // A catalogue reference is collapsed to a `path` base during cell expansion, so it never
+        // reaches the argument builder; treat its absolute path like a `path` base if it does.
+        (BaseSource::Ref { reference }, _) => flag_value(FLAG_IMAGE_FILE, reference.clone()),
     }
 }
 
@@ -214,7 +265,8 @@ mod tests {
 
     use serde_yaml_ng::{Mapping, Value};
     use tailor_config::{
-        Arch, BaseSource, ImageDefinition, OciBase, Operation, OutputFormat, OutputSpec,
+        Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OciBase, Operation,
+        OutputArtifactsPolicy, OutputFormat, OutputSpec,
     };
     use tailor_core::{Cell, CellSlug, ExecutionContext, RuntimeConfig, Target};
 
@@ -236,6 +288,10 @@ mod tests {
                 "customize",
                 "--config-file",
                 "/host/images/.tailor-render.sample_cosi.ic.yaml",
+                "--log-format",
+                "json",
+                "--log-color",
+                "never",
                 "--log-level",
                 "debug",
                 "--build-dir",
@@ -340,10 +396,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn customize_uses_the_pinned_base_ref_when_present() {
+        // A real build threads the digest-pinned `base_ref`; it must win over the manifest uri.
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::AzureLinux {
+                azure_linux: tailor_config::AzureLinuxBase {
+                    version: "3.0".to_owned(),
+                    variant: "minimal-os".to_owned(),
+                },
+            },
+        );
+        let mut context = sample_context();
+        context.base_ref =
+            Some("oci:mcr.microsoft.com/azurelinux/3.0/image/minimal-os@sha256:dead".to_owned());
+
+        let args = build_ic_args(&cell, &context);
+
+        assert!(args.windows(2).any(|pair| pair
+            == [
+                FLAG_IMAGE,
+                "oci:mcr.microsoft.com/azurelinux/3.0/image/minimal-os@sha256:dead"
+            ]));
+    }
+
+    #[test]
+    fn always_runs_ic_structured_at_debug_by_default() {
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+            },
+        );
+        let mut context = sample_context();
+        // No explicit log level: IC must still run structured at the `debug` default (§5.1).
+        context.runtime.log_level = None;
+
+        let args = build_ic_args(&cell, &context);
+
+        assert!(args.windows(2).any(|p| p == [FLAG_LOG_FORMAT, "json"]));
+        assert!(args.windows(2).any(|p| p == [FLAG_LOG_COLOR, "never"]));
+        assert!(args.windows(2).any(|p| p == [FLAG_LOG_LEVEL, "debug"]));
+        // Persistence is off by default: no `--log-file`.
+        assert!(!args.iter().any(|arg| arg == FLAG_LOG_FILE));
+    }
+
+    #[test]
+    fn persists_per_cell_log_when_log_dir_is_set() {
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+            },
+        );
+        let mut context = sample_context();
+        context.runtime.log_dir = Some(PathBuf::from("/logs"));
+
+        let args = build_ic_args(&cell, &context);
+
+        assert!(
+            args.windows(2)
+                .any(|p| p == [FLAG_LOG_FILE, "/host/logs/sample_cosi.log"])
+        );
+    }
+
     fn sample_context() -> ExecutionContext {
         ExecutionContext {
             output_dir: PathBuf::from("/out"),
             ic_image_ref: "ic@sha256:abc".to_owned(),
+            base_ref: None,
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: false,
@@ -353,6 +475,7 @@ mod tests {
                 build_dir: None,
                 log_level: Some("debug".to_owned()),
                 image_cache_dir: Some(PathBuf::from("/cache")),
+                log_dir: None,
                 janitor_image: "janitor@sha256:def".to_owned(),
             },
         }
@@ -365,6 +488,9 @@ mod tests {
                 dir: PathBuf::from("/images"),
                 architectures: vec![Arch::Amd64],
                 default_outputs: Vec::new(),
+                output_artifacts: OutputArtifactsPolicy::default(),
+                root: PathBuf::from("/images"),
+                base_images: BaseImageCatalogue::default(),
             }),
             axes: BTreeMap::new(),
             arch: Arch::Amd64,
@@ -376,6 +502,7 @@ mod tests {
             slug: CellSlug("sample_cosi".to_owned()),
             ic_config: Value::Mapping(Mapping::default()),
             base,
+            base_image: None,
             rpm_sources: vec![PathBuf::from("/rpms/one")],
         }
     }

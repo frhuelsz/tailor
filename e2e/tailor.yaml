@@ -1,0 +1,16 @@
+# tailor.yaml — the E2E workspace. Intentionally minimal: it sets only the toolchain, and relies on
+# tailor's built-in defaults for runtime.imageCacheDir (.tailor/cache) and runtime.janitorImage. The
+# E2E workflow runs `tailor build` against this and asserts the artifacts are produced.
+schemaVersion: 1
+
+toolchains:
+  default: ic
+  entries:
+    ic:
+      container: mcr.microsoft.com/azurelinux/imagecustomizer
+      tag: "latest"
+
+defaults:
+  architectures: [amd64]
+  outputs:
+    - format: cosi

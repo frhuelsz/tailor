@@ -52,10 +52,26 @@ base:
     version: "3.0"
     variant: minimal-os
 config:
+  # azureLinux/oci bases are downloaded via IC's OCI input, a preview feature; tailor never edits
+  # your IC config, so you enable it here.
+  previewFeatures: [input-image-oci]
   os:
     hostname: hello
+    bootloader:
+      resetType: hard-reset
     packages:
       install: [openssh-server, vim]
+  storage:
+    bootType: efi
+    disks:
+      - partitionTableType: gpt
+        maxSize: 4G
+        partitions:
+          - { id: esp, type: esp, size: 8M }
+          - { id: rootfs, size: grow }   # grow the rootfs so package installs fit
+    filesystems:
+      - { deviceId: esp, type: fat32, mountPoint: { path: /boot/efi, options: "umask=0077" } }
+      - { deviceId: rootfs, type: ext4, mountPoint: { path: / } }
 ```
 
 Build it (add `--dry-run` to preview without launching the container):
@@ -64,7 +80,7 @@ Build it (add `--dry-run` to preview without launching the container):
 tailor build
 ```
 
-From those few lines tailor resolves the base image, assembles the full privileged Image Customizer invocation — host paths rewritten into the `/host` mount, the platform set, the output format applied — and runs it:
+From that definition tailor resolves the base image, assembles the full privileged Image Customizer invocation — host paths rewritten into the `/host` mount, the platform set, the output format applied — and runs it:
 
 ```text
 docker run \

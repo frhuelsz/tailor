@@ -30,12 +30,13 @@ How an [image](./image-yaml.md) selects its toolchain (the `toolchain:` field). 
 
 ## BaseSource
 
-The base OS image. **Exactly one** of three kinds. Drives IC's input image via the command line
+The base OS image. **Exactly one** of four kinds. Drives IC's input image via the command line
 (overrides any `input.image` in the IC config).
 
 | Kind | Shape | Notes |
 | ---- | ----- | ----- |
-| local file | `path: ./artifacts/core.vhdx` | Single-arch; for per-arch local files use `baseByArch`. |
+| local file | `path: ./artifacts/core.vhdx` | Single-arch; for per-arch local files use the `baseImages` catalogue with one slot per arch. |
+| named catalogue image | `image: azure-linux-3-amd64` | References a `tailor.yaml` `baseImages` entry. |
 | OCI | `oci: { uri, platform? }` | Any registry; `platform` defaults to `linux/<arch>` per cell. Digest pinned in lock. |
 | Azure Linux (MCR) | `azureLinux: { version, variant }` | Sugar over `oci`. Multi-arch manifest ⇒ one source covers every arch. |
 
@@ -46,16 +47,8 @@ base:
     variant: minimal-os
 ```
 
-**`baseByArch`** — a map of [Arch](#arch) → BaseSource, mutually exclusive with `base`. Required when
-local-file bases differ per arch; every selected architecture must have an entry.
-
-```yaml
-baseByArch:
-  amd64:
-    path: ../artifacts/core.amd64.vhdx
-  arm64:
-    path: ../artifacts/core.arm64.vhdx
-```
+For per-arch local files, define one `baseImages` catalogue slot per architecture in `tailor.yaml`,
+then use `by-arch/<arch>.yaml` fragments to set `base: { ref: <slot> }`.
 
 ## OutputSpec
 
@@ -155,7 +148,7 @@ to interpolation without being declared.
 
 `customize` (default) | `convert`. The tailor-level IC operation.
 
-- **`customize`** — the normal path; `config` required (per cell), `base`/`baseByArch` required, full
+- **`customize`** — the normal path; `config` required (per cell), `base` required, full
   output-format set.
 - **`convert`** — `config` **forbidden**, base must be a local `path`, `rpmSources`/`injectFiles`
   forbidden, output formats restricted to the convert subset (see [OutputFormat](#outputformat)).

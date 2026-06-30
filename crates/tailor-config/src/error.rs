@@ -47,8 +47,13 @@ pub enum ConfigError {
         value: String,
     },
 
-    #[error("matrix `include` selector is incomplete: it does not pin axis `{axis}`")]
-    IncludeIncomplete { axis: String },
+    #[error(
+        "`selectors` selected no cells from a non-empty matrix (every candidate cell was excluded)"
+    )]
+    EmptySelection,
+
+    #[error("`selectors:` requires a `matrix:` block, but `{slug}` declares none")]
+    SelectorsWithoutMatrix { slug: String },
 
     #[error(
         "conflicting values for `{path}`: `{existing}` is already set, but {fragment} sets `{incoming}`; \
@@ -73,6 +78,21 @@ pub enum ConfigError {
 
     #[error("directive `{directive}` at `{path}` must be the sole key of its mapping")]
     DirectiveNotSole { directive: String, path: String },
+
+    #[error(
+        "directives `{directives}` at `{path}` cannot be combined; only `$prepend`, `$append`, and \
+         `$remove` may share a mapping (`$set` and `$replace` are exclusive)"
+    )]
+    ConflictingDirectives { directives: String, path: String },
+
+    #[error(
+        "directive `{directive}` at `{path}` is reserved but not implemented; select a value by axis \
+         with a `by-<axis>/<value>.yaml` fragment, or a combination with a composite `by-a+b/x+y.yaml` path"
+    )]
+    ReservedDirective {
+        directive: &'static str,
+        path: String,
+    },
 
     #[error("directive `{directive}` at `{path}` expects {expected}")]
     DirectiveShape {
@@ -122,6 +142,9 @@ pub enum ConfigError {
         value: String,
         file: String,
     },
+
+    #[error("invalid fragment path `{file}`: {reason}")]
+    InvalidFragmentPath { file: String, reason: String },
 
     #[error("parameter `{name}` is set to conflicting values `{existing}` and `{incoming}`")]
     ParamConflict {

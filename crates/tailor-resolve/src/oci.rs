@@ -62,7 +62,7 @@ pub(crate) fn platform_for_arch(arch: Arch) -> String {
     format!("{LINUX_OS}/{arch}")
 }
 
-fn parse_reference(reference: &str) -> Result<Reference, ResolveError> {
+pub(crate) fn parse_reference(reference: &str) -> Result<Reference, ResolveError> {
     reference
         .parse()
         .map_err(|err: ParseError| ResolveError::Registry {
@@ -71,7 +71,7 @@ fn parse_reference(reference: &str) -> Result<Reference, ResolveError> {
         })
 }
 
-fn platform_client(platform: &str) -> Result<Client, ResolveError> {
+pub(crate) fn platform_client(platform: &str) -> Result<Client, ResolveError> {
     let (os, architecture) = parse_platform(platform)?;
     let config = ClientConfig {
         platform_resolver: Some(Box::new(move |manifests| {

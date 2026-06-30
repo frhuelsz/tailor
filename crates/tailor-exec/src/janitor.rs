@@ -55,6 +55,13 @@ async fn run_janitor<R: ContainerRuntime>(
     paths: &[PathBuf],
     cancel: CancellationToken,
 ) -> Result<(), ExecError> {
+    if runtime_config.janitor_image.is_empty() {
+        return Err(ExecError::Runtime(
+            "no janitor image configured: set `runtime.janitorImage` in tailor.yaml to normalize \
+             ownership of Image Customizer's root-owned outputs"
+                .to_owned(),
+        ));
+    }
     runtime.pull_image(&runtime_config.janitor_image).await?;
     let result = runtime
         .create_and_run(
@@ -65,6 +72,8 @@ async fn run_janitor<R: ContainerRuntime>(
                 args,
                 binds: paths.iter().map(|path| identity_bind(path)).collect(),
                 privileged: false,
+                cell_slug: String::new(),
+                log_file: None,
             },
             cancel,
         )

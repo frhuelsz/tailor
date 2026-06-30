@@ -75,6 +75,22 @@ pub enum Operation {
     Convert,
 }
 
+/// How tailor manages an IC `output.artifacts` staging directory for a cell with no resolved
+/// `signing:` profile (`meta/docs/output-artifacts-staging.md` §3.3). Only consulted when the cell
+/// opts into the `output-artifacts` preview feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputArtifactsPolicy {
+    /// Relocate the extracted artifacts to the output directory, chown them to the caller, and keep
+    /// them as a real cell output (never destroys a user-requested output).
+    #[default]
+    Managed,
+    /// Treat the artifacts as signing scratch even when unsigned: extract, then reclaim sudo-free.
+    Scratch,
+    /// Drop the `output.artifacts` block so IC never extracts.
+    Strip,
+}
+
 /// IC `--log-level`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
