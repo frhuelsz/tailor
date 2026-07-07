@@ -23,11 +23,12 @@ An image is the authoring unit. It has top-level tailor fields such as `name`, `
 
 ```yaml
 matrix:
-  edition: [lite, pro]
   arch: [amd64, arm64]
+  edition: [lite, pro]
 ```
 
-This creates four axis tuples before outputs are considered.
+This creates four axis tuples before outputs are considered. Declare axes widest → most-specific, so
+`arch` comes first.
 
 ## Slugs
 
@@ -40,7 +41,7 @@ A cell slug is:
 For example:
 
 ```text
-gizmo_lite_amd64_cosi
+gizmo_amd64_lite_cosi
 ```
 
 Axis values cannot contain `_`, because `_` separates slug components.
@@ -52,10 +53,10 @@ Fragments are per-axis deltas:
 ```text
 gizmo/
   image.yaml
-  by-edition/lite.yaml
-  by-edition/pro.yaml
   by-arch/amd64.yaml
   by-arch/arm64.yaml
+  by-edition/lite.yaml
+  by-edition/pro.yaml
 ```
 
 `by-edition/pro.yaml` applies only to cells where `edition=pro`. `by-feature/<name>.yaml` applies when the image lists that feature; features do not multiply the matrix.

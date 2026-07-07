@@ -203,8 +203,8 @@ those slots.
 
 ### 5.1 Arch
 
-A slot declares its **`arch`** (`amd64` \| `arm64`) — the same vocabulary as the `arch` axis and
-`architectures`, not a `linux/...` platform string. `download` pulls the source for
+A slot declares its **`arch`** (`amd64` \| `arm64`) — the same vocabulary as the `arch` axis, not a
+`linux/...` platform string. `download` pulls the source for
 `linux/<arch>`, and at build time the slot's arch **reconciles** with the referencing cell's arch:
 they must agree, or either fills the other in, and a conflict is an error — the matrix in
 [`arch-and-platform.md`](./arch-and-platform.md) §3. This is why slots are arch-specific by name

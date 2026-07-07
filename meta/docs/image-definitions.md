@@ -246,11 +246,10 @@ typo'd axis or an undeclared value is a hard error — you get custom axes *and*
 **Optional repo-wide vocabulary.** A repo with **many** images that must share one validated axis
 vocabulary may add an optional `axes.yaml` declaring the canonical names/values once; per-image
 `matrix` blocks are then checked against it. A single image needs no `axes.yaml` — its `matrix` is the
-declaration (don't duplicate it).
-`architectures: [<cell arch>]`, the cell's resolved `base` (§8.1), the composed config, and the
-cell's `outputs`. (If `matrix.arch` is omitted, it inherits the tool config's
-`defaults.architectures`, default `[amd64]`.) Adding `4.0` to the whole suite is **one edit** to
-`release`.
+declaration (don't duplicate it). Each rendered cell carries its resolved `base` (§8.1), the composed
+config, and the cell's `outputs`. (If `matrix.arch` is omitted, the arch comes from the base's own
+`arch` — a slot or `path` base — else the built-in `amd64` default.) Adding `4.0` to the whole suite is
+**one edit** to `release`.
 
 **Features (image-level flags, not matrix axes).** Besides axes (which *multiply* cells), an image
 may declare boolean **features** it opts into — e.g. `features: [pcrlock-static-files]`. Features do
@@ -874,7 +873,8 @@ the existing `3.0.yaml` is untouched. No file was copied, and no file is long.
   supports it. Default to (a) for portability; offer (b) as an optimization.
 - **tailor targets**: each rendered cell yields a target exactly as in [design.md §5.2](./design.md)
   — `config` = the composed runnable IC config, `base` = the cell's resolved source
-  (path | oci | azureLinux, §8.1), `outputs`/`architectures` from the cell. The whole
+  (path | oci | azureLinux, §8.1), and `outputs` from the cell (its `arch` drives `--platform`). The
+  whole
   build/lock/run/ownership pipeline is reused unchanged. The image-definition matrix is a
   **superset** of tailor's `outputs × arch` matrix, adding `release`/`variant`/`phase` axes.
 

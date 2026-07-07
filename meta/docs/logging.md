@@ -213,10 +213,16 @@ preserve in JSON mode; tailor's own coloring is more consistent).
 (`2026-06-24T23:18:01.003691Z`, ~27 cols) dominates the line and adds little watching a build scroll by;
 the precise instant only matters for post-hoc forensics. So:
 
-- **Live (stderr):** the `tracing` formatter uses a **compact wall-clock `HH:MM:SS`** timer (8 cols) —
-  enough to spot a slow step, a fraction of the width. (Alternatives if preferred: **elapsed since build
-  start**, mirroring IC's own `INFO[0022]` convention, or **no timestamp at all** — the cargo-style
-  status lines already mark phase boundaries. A `--timestamps=(time|elapsed|off)` knob could expose this.)
+- **Live (stderr):** every status line and `tracing` event carries a leading timestamp, chosen by
+  **`--timestamps <mode>`** (a leading dim column so it recedes behind the cargo-style verb):
+  - **`elapsed`** (default) — **seconds since the process started**, `  1.23s`, mirroring IC's own
+    logrus `INFO[0022]` convention. Best for spotting a slow step (e.g. a large base hash).
+  - **`time`** — compact wall-clock `HH:MM:SS` (UTC, 8 cols).
+  - **`off`** — no timestamp; the cargo-style status lines still mark phase boundaries.
+
+  The status lines (stdout-style stderr prints) and the `tracing` timer share one process-start zero
+  point, so they agree. Implemented as `run::start_instant()` + `run::timestamp_prefix()` and a matching
+  `FormatTime` in `main.rs`.
 - **Preserved on-disk log (§5.5):** keeps **full-precision** timestamps. The simplest implementation
   writes IC's **raw JSON** (which already carries a full `time` field) verbatim, so the durable record
   loses nothing — the compacting is purely a live-display choice.
@@ -262,8 +268,8 @@ context (plus a pointer to the on-disk IC log when persisting is enabled).
 
 Concrete transcripts of the intended behavior (illustrative — pre-implementation). tailor's cargo-style
 status lines (right-aligned verbs) always show; IC events are `tracing` lines at target `ic`, gated by
-verbosity, with the **compact `HH:MM:SS`** live timestamp (§5.6); the `cell=` field disambiguates
-matrix/parallel builds.
+verbosity, with the leading **elapsed** timestamp (`--timestamps`, default; §5.6); the `cell=` field
+disambiguates matrix/parallel builds.
 
 **A — success, default verbosity.** Clean: IC emits only `info`/`debug`, all below the default `warn`
 threshold, so nothing from IC appears.

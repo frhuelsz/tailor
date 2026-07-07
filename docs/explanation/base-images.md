@@ -49,5 +49,12 @@ present. A missing file surfaces only when the build (or `tailor bases verify`) 
 to run `tailor bases download`. Catalogue-backed cells expose `baseImage: <name>` in `tailor matrix`,
 making the cell→base dependency machine-readable for CI.
 
+## Change detection
+
+For incremental builds, tailor fingerprints a local base file by its **content**, hashed with XXH3-128
+(a fast non-cryptographic hash — base files are large, often tens of GB). The hash is cached by
+`(path, size, mtime)` under `<output>/.tailor/base-hashes/`, so an unchanged base is not re-read on the
+next build. This applies to `path` and `ref` (file) bases; registry bases are pinned by digest instead.
+
 See [Use a base-image catalogue](../how-to/use-a-base-image-catalogue.md),
 [`baseImages` reference](../reference/tailor-yaml.md), and [`image.yaml` base sources](../reference/image-yaml.md).

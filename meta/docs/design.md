@@ -102,7 +102,7 @@ the registry **tag** to avoid this footgun (see §5.1).
 
 **`input.image` is a oneOf** — exactly one of:
 
-- `path` — local file (vhd/vhdx/qcow2/raw). *(v0.13)*
+- `path` — local file (vhd/vhdx/qcow2/raw), with an optional `arch` declaring the file's architecture (a single-arch file). *(v0.13)*
 - `oci` — `{ uri, platform }`, preview `input-image-oci`, requires `--image-cache-dir`. *(v1.1)*
 - `azureLinux` — `{ version, variant }`, downloads from MCR, preview `input-image-oci`. *(v1.1)*
 
@@ -228,9 +228,14 @@ toolchains:
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"               # optional; informational. Omit to track `latest`.
       # tag: "1.3.0"                  # optional; defaults to `version`, else `latest`
+      # pull: missing                 # missing (default) | always | never — see below
     ic-1.1:
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
+    ic-local:                         # a locally-built IC image (e.g. `just build-ic`), never pushed
+      container: acl-imagecustomizer
+      tag: local                      # `pull: missing` finds it in the daemon; no registry needed
+
 
 # --- Docker/runtime settings for the bollard execution layer ------------------------------------
 # Reproduces the builder's invocation contract. Sensible defaults; rarely overridden.
@@ -252,7 +257,6 @@ runtime:
 
 # --- Defaults applied to every image unless overridden -------------------------------------------
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
 
@@ -281,7 +285,7 @@ defaults:
 | ------------------------- | -------------------------- | --- | ------------------------------------------------------------- |
 | `schemaVersion`           | int                        | yes | tailor manifest schema version (currently `1`). Only `tailor.yaml`/`tailor.lock` carry it. |
 | `toolchains.default`      | string (id)                | yes | Default toolchain id for images that omit `toolchain:`.       |
-| `toolchains.entries`      | map<id, {container,version,tag?}> | yes | One or more pinned IC containers. `version` is semver (gates features); `tag` is the registry tag, default = `version` (no `v`). |
+| `toolchains.entries`      | map<id, {container,version,tag?,pull?}> | yes | One or more pinned IC containers. `version` is semver (gates features); `tag` is the registry tag, default = `version` (no `v`). `pull` is `always`\|`missing`\|`never` (default `missing`). |
 | `runtime.privileged`      | bool                       | no  | Default `true`; IC requires privileged.                       |
 | `runtime.mounts.hostRoot` | string                     | no  | Default `/host`; the container-side mount of host `/` and the prefix for all path translation. |
 | `runtime.mounts.dev`      | bool                       | no  | Default `true`; bind `/dev:/dev`.                             |
@@ -289,9 +293,30 @@ defaults:
 | `runtime.logLevel`        | enum                       | no  | Default `info`; IC `--log-level`.                            |
 | `runtime.imageCacheDir`   | host path                  | cond | Required when any image uses `oci`/`azureLinux`. Created on host; passed host-translated as `--image-cache-dir`. |
 | `runtime.janitorImage`    | {container, tag?}          | no  | Digest-pinned minimal image for sudo-free ownership/cleanup (§7.7). Default a busybox/coreutils-class image. |
-| `defaults.architectures`  | string[]                   | no  | Inherited by images lacking `architectures:`.                |
 | `defaults.outputs`        | output[]                   | no  | Inherited by images lacking `outputs:`.                      |
 | `images`                  | {members?, exclude?, inline?} | no | Image catalogue. **Omit** to auto-discover every `*/image.yaml` at depth 1. Provide to curate the set. |
+
+**Toolchain pull policy & local images.** Each toolchain resolves to a concrete, pinned image
+reference before any build. A **pin-aware** take on Docker's `--pull` and Kubernetes'
+`imagePullPolicy`, `pull:` controls how:
+
+- **`missing`** (default) — a digest already in `tailor.lock` wins (reproducible, offline); else the
+  image is used if it is **present in the local daemon**; else its registry manifest digest is
+  resolved, pinned, and pulled. A present image is pinned from `docker inspect`: its portable
+  `RepoDigest` (`repo@sha256:…`) when it has one, else — for an image **built locally and never
+  pushed** — its config `Id` (`sha256:…`).
+- **`always`** — always resolve a fresh registry manifest digest and pull (bypasses the lock and any
+  local copy). For a mutable tag like `:latest` in CI.
+- **`never`** — require the image present locally; never resolve or pull. Air-gapped / local dev.
+
+This makes a **locally-built IC image** (e.g. `acl-imagecustomizer:local` from `just build-ic`) work
+with no registry round-trip: `missing` finds it in the daemon and runs it by digest without pulling.
+Consistent with tailor's rule that *local inputs are tracked by presence, not the lock* (§3), a
+local-only image's config `Id` is folded into the build fingerprint (so a rebuilt image invalidates
+stale cells) but is **not** written to the portable `tailor.lock`. Because `tailor lock` / `tailor
+resolve` are registry-only (no daemon), they **skip `pull: never` toolchains**; a local-only image
+that a build resolves via the daemon under `missing` is simply not lockable — mark it `pull: never`
+to exclude it cleanly from the lock.
 
 ### 5.2 Image config — `image.yaml` ("configure the image")
 
@@ -318,11 +343,15 @@ matrix:
 outputs:
   - format: cosi
 
-# Base image source (registry bases are multi-arch; per-arch local files use `baseImages:` catalogue slots).
+# Base image source (registry bases are multi-arch; per-arch local files use `baseImages:` catalogue
+# slots, or a `path` base with its own `arch:`).
 base:
   azureLinux:
     version: "3.0"
     variant: core
+  # Or a local file with its architecture (so a single-arch image needn't set `architectures:`):
+  #   path: ./bases/gb200.vhd
+  #   arch: arm64
 
 # Image-level feature flags (gates by-feature/<name>.yaml fragments).
 features: [pcrlock-static-files]
@@ -369,10 +398,9 @@ config:
 | ---------------------- | -------------------------------------- | --- | ----------------------------------------------------------- |
 | `name`                 | string (`[A-Za-z0-9.-]+`, no `_`)      | yes | Unique image id; used in output filenames and CLI. `_` is reserved as the slug separator. |
 | `toolchain`            | string (id) \| {container,version,tag?} | no | Id-ref (workspace) OR inline entry (standalone). Defaults to `toolchains.default` or tailor's built-in default. |
-| `matrix`               | map<axisName, [values]> + include/exclude | no | User-defined axes. Omit for a single-cell image. `arch` may appear as an axis or via `architectures`. |
-| `architectures`        | string[] (`amd64`\|`arm64`)            | no  | Defaults from `defaults.architectures`. Equivalent to a `matrix.arch` axis. |
+| `matrix`               | map<axisName, [values]> + include/exclude | no | User-defined axes. Omit for a single-cell image. `arch` is the one reserved axis. |
 | `outputs`              | [{format, cosiCompressionLevel?, name?}] | no | Defaults from `defaults.outputs`. `name` is a `${...}` template override for the output basename (§10). |
-| `base`                 | oneOf {image \| path \| oci{uri,platform?} \| azureLinux{version,variant}} | yes | Exactly one base source. A registry base (oci/azureLinux) is multi-arch ⇒ one `base` covers all arches. Per-arch local files use `baseImages:` catalogue slots and `base: { ref: <name> }` per cell. |
+| `base`                 | oneOf {image \| path{path,arch?} \| oci{uri,platform?} \| azureLinux{version,variant}} | yes | Exactly one base source. A registry base (oci/azureLinux) is multi-arch ⇒ one `base` covers all arches. Per-arch local files use `baseImages:` catalogue slots and `base: { ref: <name> }` per cell, or a `path` base with its own `arch:`. |
 | `features`             | string[]                               | no  | Image-level feature flag list. Gates `by-feature/<name>.yaml` fragment inclusion. |
 | `params`               | map<string, scalar>                    | no  | Named constants for `${...}` interpolation into `config:` string values. |
 | `rpmSources`           | path[]                                 | no  | Each entry is a directory of RPMs OR a `.repo` file → IC `--rpm-source` (customize only). |
@@ -393,8 +421,8 @@ Operation-specific validation (enforced at load time):
 
 Matrix/base validation (after defaults + `--arch` are applied, enforced before running):
 
-- `architectures` and `outputs` must each be **non-empty**; otherwise the image produces no cells
-  (error).
+- `outputs` must be **non-empty**; otherwise the image produces no cells (error). Architecture comes
+  from the `arch` matrix axis or the base's own `arch` (slot/`path`), else the `amd64` default.
 - Each rendered cell must resolve exactly one `base`; no cell may end up without a base.
 - A single `base.oci.platform`/`base.path` shared across multiple architectures is **warned** (a
   local file is single-arch; an explicit `oci.platform` that does not match the cell's architecture

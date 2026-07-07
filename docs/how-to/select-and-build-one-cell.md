@@ -5,7 +5,7 @@ Use `-s/--select` for axis slices and `--cell` for exact slugs.
 ## Select by axis values
 
 ```bash
-tailor build gizmo -s variant=full,arch=amd64 --dry-run
+tailor build gizmo -s arch=amd64,variant=full --dry-run
 ```
 
 Unset axes still expand. For example, if `channel` has two values, the command above selects two cells.
@@ -14,8 +14,8 @@ Unset axes still expand. For example, if `channel` has two values, the command a
 
 ```bash
 tailor build gizmo \
-  --select variant=full \
   --select arch=amd64 \
+  --select variant=full \
   --dry-run
 ```
 

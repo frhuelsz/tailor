@@ -15,11 +15,14 @@ The `advanced` template creates:
 ```text
 tailor.yaml
 gizmo/image.yaml
-gizmo/by-variant/minimal.yaml
-gizmo/by-variant/full.yaml
 gizmo/by-arch/amd64.yaml
 gizmo/by-arch/arm64.yaml
+gizmo/by-variant/minimal.yaml
+gizmo/by-variant/full.yaml
 ```
+
+Its matrix declares `arch` first, then `variant` — axes go widest → most-specific, and that order sets
+both the slug order and fragment precedence (see [Architectures](../explanation/architectures.md)).
 
 ## 2. Inspect the matrix
 
@@ -30,10 +33,10 @@ tailor matrix gizmo --format slugs
 Expected output:
 
 ```text
-gizmo_minimal_amd64_cosi
-gizmo_minimal_arm64_cosi
-gizmo_full_amd64_cosi
-gizmo_full_arm64_cosi
+gizmo_amd64_minimal_cosi
+gizmo_amd64_full_cosi
+gizmo_arm64_minimal_cosi
+gizmo_arm64_full_cosi
 ```
 
 The slug format is `<image>_<axis values in matrix order>_<format>`.
@@ -48,8 +51,8 @@ This appends a placeholder value to `gizmo/image.yaml` and creates `gizmo/by-cha
 
 ```yaml
 matrix:
-  variant: [minimal, full]
   arch:    [amd64, arm64]
+  variant: [minimal, full]
   channel: [stable, edge]
 ```
 
@@ -83,44 +86,49 @@ EOF
 tailor matrix gizmo --format slugs
 ```
 
-Expected shape: eight slugs, because `variant[2] × arch[2] × channel[2] × outputs[1] = 8`.
+Expected shape: eight slugs, because `arch[2] × variant[2] × channel[2] × outputs[1] = 8`. The last
+axis varies fastest:
 
 ```text
-gizmo_minimal_amd64_stable_cosi
-gizmo_minimal_amd64_edge_cosi
-...
-gizmo_full_arm64_edge_cosi
+gizmo_amd64_minimal_stable_cosi
+gizmo_amd64_minimal_edge_cosi
+gizmo_amd64_full_stable_cosi
+gizmo_amd64_full_edge_cosi
+gizmo_arm64_minimal_stable_cosi
+gizmo_arm64_minimal_edge_cosi
+gizmo_arm64_full_stable_cosi
+gizmo_arm64_full_edge_cosi
 ```
 
-## 5. Inspect rendered Image Customizer YAML
+## 5. Inspect the merge order
 
 ```bash
-tailor explain gizmo -s variant=full,arch=amd64,channel=edge
+tailor explain gizmo -s arch=amd64,variant=full,channel=edge
 ```
 
-Expected shape:
+`explain` picks the selected cell and prints the ordered list of files that merge to produce it (top =
+base, bottom wins) — the same order the axes are declared in:
 
 ```text
-gizmo: 1 cell(s)
+cell  gizmo_amd64_full_edge_cosi   (arch=amd64, channel=edge, variant=full)
 
-── gizmo_full_amd64_edge_cosi ──
-os:
-  hostname: gizmo
-  packages:
-    install:
-      - openssh-server
-      - grub2-efi-x64
-      - vim
-      - git
-      - gizmo-edge
+merge order (top = base, bottom wins):
+   1  image.yaml            base
+   2  by-arch/amd64.yaml    arch=amd64
+   3  by-variant/full.yaml  variant=full
+   4  by-channel/edge.yaml  channel=edge
 ```
 
-The exact config depends on your edits. The important point: `explain` shows the fully merged IC config for selected cells.
+Add `--with-config` to also print the fully merged Image Customizer config for the cell:
+
+```bash
+tailor explain gizmo -s arch=amd64,variant=full,channel=edge --with-config
+```
 
 ## 6. Dry-run one selected cell
 
 ```bash
-tailor build gizmo -s variant=full,arch=amd64,channel=edge --dry-run
+tailor build gizmo -s arch=amd64,variant=full,channel=edge --dry-run
 ```
 
 You now have a small workspace that demonstrates axes, fragments, interpolation, cell selection, and dry-run builds.

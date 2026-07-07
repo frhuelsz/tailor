@@ -2,14 +2,13 @@
 
 > **Status:** Implemented · _last reviewed 2026-06-29_
 >
-> The reserved `arch` axis, amd64 default, catalogue-slot arch reconciliation, and OCI platform mismatch validation are implemented in `crates/tailor-config/src/schema.rs` and `crates/tailor-core/src/orchestrator.rs`. Per-image `architectures` is gone; only `Defaults.architectures` remains.
+> The reserved `arch` axis, the built-in amd64 default, catalogue-slot **and local `path` base** arch reconciliation, and OCI platform mismatch validation are implemented in `crates/tailor-config/src/schema.rs` and `crates/tailor-core/src/orchestrator.rs`. The `architectures` field is **gone entirely** — both the per-image field and the workspace `defaults.architectures`. A cell's arch comes from the `arch` matrix axis or a base's own `arch` (slot / `path` / `oci.platform`), else the built-in `amd64` default.
 
 `arch` is tailor's one **reserved** matrix axis: it looks like any other axis, but it is *typed* and
-wired to the container platform and base selection. That is true today but quiet, and it carries two
-**silent footguns** — the `arch`-axis-vs-`architectures` precedence, and a base whose architecture can
-diverge from the cell's arch. This doc makes the reserved status explicit, defines how a cell's
-**effective arch** is reconciled from the image and the base image, and proposes validating it so a
-mismatch fails loudly instead of producing a broken image.
+wired to the container platform and base selection. That is true today but quiet, and it carries a
+**silent footgun** — a base whose architecture can diverge from the cell's arch. This doc makes the
+reserved status explicit, defines how a cell's **effective arch** is reconciled from the image and the
+base image, and validates it so a mismatch fails loudly instead of producing a broken image.
 
 ---
 
@@ -19,23 +18,19 @@ Every other axis (`variant`, `runtime`, `type`, `edition`, …) is an **opaque l
 `[A-Za-z0-9.-]` string, meaningful only for partitioning the matrix, `${axis}` interpolation, `by-axis/`
 fragments, and `--select`. `arch` is all of that **plus** real semantics tailor reaches into *by name*:
 
-> **Terminology** (three related names, *not* separate features):
+> **Terminology** (two related names, *not* separate features):
 > - **architecture** — the concept: a CPU target, `amd64` or `arm64`. Wherever this doc writes
 >   "architecture" in plain text (e.g. "a base whose architecture is arm64"), it means exactly this.
->   There is **no** singular `architecture:` field anywhere. The default architecture is **`amd64`**.
+>   There is **no** `architecture:` or `architectures:` field anywhere (both were removed). The default
+>   architecture is a fixed built-in **`amd64`**.
 > - **`arch`** — the *name* tailor uses for it everywhere: the matrix axis, `${arch}`, the base swap in
->   `by-arch/<arch>.yaml`, the slug, `--platform linux/<arch>`.
-> - **`architectures:`** — a *field* listing the target architectures: a **workspace default** in
->   `tailor.yaml` (`defaults.architectures`, `schema.rs:306`) that overrides the `amd64` default, and
->   today also a redundant per-image field (`schema.rs:336`) this doc proposes to drop (§3, §5). It is
->   shorthand for an `arch` axis — one cell per listed architecture — so "the `arch` axis or
->   `architectures`" below means either.
->   "the `arch` axis or `architectures`" below means either spelling.
+>   `by-arch/<arch>.yaml`, the slug, `--platform linux/<arch>`. One cell per `arch` axis value; a base's
+>   own `arch` (slot / `path` / `oci.platform`) supplies it when there is no axis.
 
 ```mermaid
 flowchart LR
   A1["matrix.arch axis<br/>(amd64 | arm64)"] --> CA
-  A2["architectures: [...]<br/>(amd64 | arm64)"] --> CA
+  A2["base arch<br/>(slot / path / oci.platform)"] --> CA
   CA["cell.arch : Arch<br/>(exactly one per cell)"]
   CA --> P["--platform linux/&lt;arch&gt;"]
   CA --> BB["by-arch/&lt;arch&gt; base swap"]
@@ -45,17 +40,16 @@ flowchart LR
 
 | Property | Free-form axis (`variant`, …) | Reserved `arch` |
 | --- | --- | --- |
-| Value domain | any `[A-Za-z0-9.-]` string | **closed**: `amd64` \| `arm64` (`parse_arch`; else `MissingArchBase`) — `orchestrator.rs:250` |
-| How it's declared | `matrix:` only | `matrix.arch` axis **or** the `architectures:` field — **equivalent** (`design.md:382`) |
-| Always present? | only if declared | **yes** — `architectures` (image, else `defaults.architectures`) gives every cell a concrete arch, and an `arch` coordinate is injected so `--select`/`${arch}`/`by-arch/` work either way (`orchestrator.rs:248-259`) |
-| Drives the container | no | **`--platform linux/<arch>`** (`orchestrator.rs:142,190` → `arg_builder.rs:215`) |
+| Value domain | any `[A-Za-z0-9.-]` string | **closed**: `amd64` \| `arm64` (`parse_arch`; else `MissingArchBase`) |
+| How it's declared | `matrix:` only | the `matrix.arch` axis, or supplied by a base's own `arch` (slot / `path` / `oci.platform`) |
+| Always present? | only if declared | **yes** — the axis or a base arch gives every cell a concrete arch (else the `amd64` default), and an `arch` coordinate is injected so `--select`/`${arch}`/`by-arch/` work either way |
+| Drives the container | no | **`--platform linux/<arch>`** (`orchestrator.rs` → `arg_builder.rs`) |
 | Drives the base | no | a **`by-arch/<arch>.yaml`** fragment swaps `base` per arch (and a catalogue slot's `arch` must match) |
-| Slug | in declared order | always present; **position differs** by spelling (`slug_for`, `orchestrator.rs:317-333`) |
-| Precedence | by declaration order | treated as the **broadest** axis (`directive-design.md:231`) |
+| Slug | in declared order | always present; **position differs** by whether `arch` is an explicit axis (`slug_for`) |
+| Precedence | by declaration order | treated as the **broadest** axis |
 
-**Footgun A — silent precedence.** If both an `arch` axis *and* `architectures` are set, the axis wins
-and `architectures` is **silently ignored** (`orchestrator.rs:248-254`). The fix is to drop the
-redundant **per-image** `architectures:` field, keeping only the `tailor.yaml` workspace default (§3, §5).
+There is no longer any `architectures:` field, so the old "axis vs field" precedence footgun is gone:
+architecture is set by the `arch` axis or a base's `arch`, and the two are reconciled in §3.
 
 ---
 
@@ -66,21 +60,20 @@ Every cell resolves to exactly one **effective arch**, and that single value dri
 arch is **reconciled**
 from two declarations:
 
-- the **image arch** — the `arch` axis in `image.yaml` (today also the redundant `architectures:` field,
-  §5); and
+- the **image arch** — the `arch` axis in `image.yaml`; and
 - the **base-image arch** — a catalogue slot's `arch` ([`base-image-catalogue.md`](./base-image-catalogue.md) §5.1),
-  or the architecture component of an `oci.platform`.
+  a local `path` base's own `arch`, or the architecture component of an `oci.platform`.
 
 The rule (the full table is §3):
 
-- both unset → **`amd64`** (the declarative default; overridable workspace-wide in `tailor.yaml`);
+- both unset → **`amd64`** (the built-in default);
 - exactly one set → it **fills in** the other;
 - both set → they **must agree**, else it is an **error** (declaring two conflicting arches is invalid
   input).
 
-A `path` / `azureLinux` base declares no arch, so it never conflicts — the image arch decides. A
-catalogue slot's `arch` and an `oci.platform`'s arch component do participate, so a slot can even
-*supply* the arch to an image that declares none.
+An `azureLinux` base is multi-arch, so it declares no arch and never conflicts — the image arch
+decides. A catalogue slot's `arch`, a `path` base's `arch`, and an `oci.platform`'s arch component do
+participate, so any of them can even *supply* the arch to an image that declares none.
 
 ---
 
@@ -92,17 +85,16 @@ catalogue slot's `arch` and an `oci.platform`'s arch component do participate, s
 | **`arm64`** | `arm64` | `arm64` | **error** |
 | **`amd64`** | `amd64` | **error** | `amd64` |
 
-\* The both-unset default is `amd64`, overridable workspace-wide in `tailor.yaml`
-(`defaults.architectures`). It is **not** the host arch — a fixed default keeps a workspace
-reproducible regardless of which machine builds it.
+\* The both-unset default is a fixed built-in `amd64`. It is **not** the host arch — and there is no
+workspace override — so a workspace builds reproducibly regardless of which machine builds it; to build
+a non-default arch you **declare** it (an `arch` axis or a base's `arch`).
 
-- **Either side may supply the arch.** `base: { ref: core_arm64 }` (slot `arch: arm64`) makes the
-  cell arm64 with no `arch` axis at all; symmetrically an `arch` axis makes the cell arm64 even if the
-  base declares nothing.
-- **Both unset → `amd64`** (or the `tailor.yaml` override). To build a non-default arch (e.g. an `arm64`
-  image) you **declare** the target: a catalogue base whose `arch: arm64`, or `arch` in `image.yaml`
-  (axis, or alongside a directly declared base). A base that can't match the resolved arch is **invalid
-  input**, surfaced as an error.
+- **Either side may supply the arch.** `base: { ref: core_arm64 }` (slot `arch: arm64`) or a local
+  `base: { path: ./gb200.vhd, arch: arm64 }` makes the cell arm64 with no `arch` axis at all;
+  symmetrically an `arch` axis makes the cell arm64 even if the base declares nothing.
+- **Both unset → `amd64`.** To build a non-default arch (e.g. an `arm64` image) you **declare** the
+  target: a base whose `arch: arm64` (a catalogue slot or a `path` base), or an `arch` axis in
+  `image.yaml`. A base that can't match the resolved arch is **invalid input**, surfaced as an error.
 - **A conflict is a hard error**, naming the cell, the image arch, and the base-image arch, surfaced by
   `validate` (no I/O needed) — instead of today's silent mispull.
 
@@ -112,23 +104,24 @@ The effective arch is then the *single source of truth*: `--platform linux/<arch
 
 ### Today (the silent divergence this fixes)
 
-- The container `--platform` is **always** `linux/<cell.arch>` (`orchestrator.rs:142,190`), where
-  `cell.arch` comes solely from the image (axis/`architectures`).
+- The container `--platform` is **always** `linux/<cell.arch>` (`orchestrator.rs`), where `cell.arch`
+  comes from the `arch` axis or a base's `arch`, else the `amd64` default.
 - `oci.platform`, if set, overrides **only the base-digest** platform (`oci.rs:13-16`) and is **not**
   checked against `cell.arch`. So `base: { oci: { uri: …, platform: linux/arm64 } }` on an **amd64**
   cell pulls the **arm64** manifest into an **amd64** container → a broken image, no warning. (`path`
   and `azureLinux` cannot diverge — neither declares an arch.) The §3 matrix replaces this with an
   explicit reconcile-or-error.
 
-### Collapse the per-image `architectures:` field
+### The `architectures:` field is gone (done)
 
-Today an arch can come from an `arch` axis **or** an `architectures:` field, and if both are set the
-axis silently wins (`orchestrator.rs:248-254`). The per-image field is redundant: with `amd64` as the
-default, a workspace override in `tailor.yaml` (`defaults.architectures`), and the base-image `arch`
-able to supply the target, the per-image arch sources need only be the **`arch` axis** and the **base
-image**. So the proposal: keep the **workspace default** (`tailor.yaml: defaults.architectures`, the
-only place to override `amd64`), and **drop the per-image `architectures:` field** — removing the
-silent-precedence footgun. Until that lands, both-set should warn (`--strict` error).
+Arch used to come from an `arch` axis **or** an `architectures:` field, and if both were set the axis
+silently won — a footgun. The field was **fully removed**: first the per-image `architectures:`, then
+the workspace `defaults.architectures`. The reasoning: with `amd64` as the built-in default and the
+**base image** able to supply the target arch (a catalogue slot's `arch`, or a local `path` base's
+`arch`), architecture belongs to the base or an explicit `arch` axis — not a separate list field. A
+workspace-wide arch default was itself a footgun (it silently multiplied or re-targeted every
+axis-less image), so it went too. To build multiple arches, declare an `arch: [amd64, arm64]` matrix
+axis; to build a single non-default arch, put `arch:` on the base.
 
 ---
 
@@ -165,9 +158,9 @@ inspects the file — `design.md` §6); a named slot makes the base's arch expli
    still has a `platform` string (for exact-manifest selection, e.g. `linux/arm64/v8`); its arch
    component feeds the §3 matrix. Should the direct `oci` base also move to `arch` + an optional
    variant, so the surface is uniform, or keep `platform` for the raw-registry case?
-3. **Default of `amd64` on an `arm64` host.** The declarative default is `amd64`, so an undeclared
+3. **Default of `amd64` on an `arm64` host.** The default is a fixed built-in `amd64`, so an undeclared
    build on an arm64 host emulates amd64 (or errors if emulation is unavailable). Acceptable for a
-   reproducible default; the workspace overrides via `defaults.architectures` if arm64 is the norm.
+   reproducible default; declare an `arch` axis or a base `arch: arm64` when arm64 is the target.
 4. **Cross-arch host builds** (building an `arm64` image on an `amd64` host via binfmt/qemu) are a
    *runtime* concern (`meta/docs/container-runtimes.md`), orthogonal to this contract — the cell's
    effective arch is still the target, regardless of host.

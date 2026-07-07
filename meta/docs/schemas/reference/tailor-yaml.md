@@ -67,12 +67,10 @@ Applied to any image that does not set the field itself.
 
 | Field | Type | Req | Notes |
 | ----- | ---- | --- | ----- |
-| `architectures` | [[Arch](./types.md#arch)] | no | Inherited by images lacking `architectures:`. |
 | `outputs` | [[OutputSpec](./types.md#outputspec)] | no | Inherited by images lacking `outputs:` (≥ 1). |
 
 ```yaml
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
 ```
@@ -113,7 +111,6 @@ runtime:
   imageCacheDir: ./.tailor/cache
 
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
 ```

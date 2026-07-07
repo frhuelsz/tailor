@@ -70,5 +70,5 @@ verify only what the selected cells use:
 $ tailor matrix --format json | jq -r '.[].baseImage' | sort -u
 ```
 
-See [`baseImages` reference](../reference/tailor-yaml.md), [the `image` base kind](../reference/image-yaml.md),
+See [`baseImages` reference](../reference/tailor-yaml.md), [the `ref` base kind](../reference/image-yaml.md),
 and [Base images](../explanation/base-images.md).

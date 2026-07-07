@@ -10,6 +10,10 @@ Global options:
 | `--strict` | Promote authority/confinement warnings to errors. |
 | `-v`, `--verbose` | Increase verbosity; repeatable. |
 | `-q`, `--quiet` | Decrease verbosity; repeatable. |
+| `--timestamps <elapsed\|time\|off>` | Leading timestamp on status/log lines: `elapsed` seconds since start (default), wall-clock `time` (`HH:MM:SS`), or `off`. |
+| `--log-dir <PATH>` | Persist each cell's full IC debug log to `<PATH>/<slug>.log`. |
+| `--build-dir-base <PATH>` | Absolute host directory under which each cell's IC build-dir is created (`--build-dir /host/<PATH>/<slug>`). Overrides `runtime.buildDirBase`. Use a data mount (separate filesystem from the container rootfs) to avoid IC's ACL overlay `ELOOP`; needs room for a multi-GB raw copy of the base. |
+| `--ic-log-level <LEVEL>` | Set IC's own `--log-level` (default `debug`), independent of `-v`/`-q`. |
 | `--version` | Print version, including commit/build metadata. |
 
 ## `tailor init <name> [base|simple|advanced]`
@@ -20,7 +24,7 @@ Scaffold a project. Omitted template is `base`.
 | --- | --- |
 | `base` | `tailor.yaml` plus `<name>/image.yaml`. |
 | `simple` | Standalone `./image.yaml`; no `tailor.yaml`; uses built-in default IC toolchain. |
-| `advanced` | Like `base`, plus `variant` and `arch` axes, `by-variant/`, `by-arch/`, and `${efiArch}` interpolation. |
+| `advanced` | Like `base`, plus `arch` and `variant` axes, `by-arch/`, `by-variant/`, and `${efiArch}` interpolation. |
 
 ## `tailor add image <name>`
 
@@ -36,7 +40,7 @@ Resolve and run Image Customizer for selected images. Default: all images.
 
 | Flag | Meaning |
 | --- | --- |
-| `-s`, `--select AXIS=VALUE` | Constrain matrix axes. Repeatable. Comma-separated axis pairs are accepted, for example `-s variant=full,arch=amd64`. |
+| `-s`, `--select AXIS=VALUE` | Constrain matrix axes. Repeatable. Comma-separated axis pairs are accepted, for example `-s arch=amd64,variant=full`. |
 | `--cell SLUG` | Select exact cells by slug. Repeatable. |
 | `--locked` | Require a complete `tailor.lock`; fail on missing entries or registry drift. |
 | `--force` | Ignore incremental up-to-date checks. |
@@ -50,12 +54,16 @@ Resolve and run Image Customizer for selected images. Default: all images.
 
 Render every selected cell without building. Catches tailor-owned config and merge errors. Accepts `-s/--select` and `--cell`.
 
-## `tailor matrix [images...] [--format json|slugs]`
+## `tailor matrix [images...] [--format json|slugs|ado] [--ado <VAR>]`
 
 Emit selected matrix cells. Default format is `json`.
 
-JSON entries contain `image`, `slug`, `axes`, and `format`, plus `baseImage` when the cell binds to a
-`baseImages:` catalogue slot.
+- `json` — a JSON array whose entries contain `image`, `slug`, `axes`, and `format`, plus `baseImage`
+  when the cell binds to a `baseImages:` catalogue slot.
+- `slugs` — one cell slug per line (same as `tailor slugs`).
+- `ado` — the bare Azure DevOps matrix object (`{ leg: { var: string, … } }`) for a pipeline
+  `strategy: matrix`. `--ado <VAR>` wraps it in a `##vso[task.setvariable variable=<VAR>;isOutput=true]`
+  logging command so a later stage can consume it; an empty selection fails non-zero.
 
 ## `tailor slugs [images...]`
 
@@ -69,15 +77,15 @@ the fragment precedence model legible. Add `--with-config` to also print the mer
 config. Accepts `-s/--select` and `--cell`; read-only and offline.
 
 ```text
-$ tailor explain gizmo --cell gizmo_pro_arm64_stable_cosi
-cell  gizmo_pro_arm64_stable_cosi   (arch=arm64, channel=stable, edition=pro)
+$ tailor explain gizmo --cell gizmo_arm64_pro_stable_cosi
+cell  gizmo_arm64_pro_stable_cosi   (arch=arm64, channel=stable, edition=pro)
 
 merge order (top = base, bottom wins):
    1  image.yaml                      base
-   2  by-edition/pro.yaml             edition=pro
-   3  by-arch/arm64.yaml              arch=arm64
+   2  by-arch/arm64.yaml              arch=arm64
+   3  by-edition/pro.yaml             edition=pro
    4  by-channel/stable.yaml          channel=stable
-   5  by-edition+arch/pro+arm64.yaml  edition=pro ∧ arch=arm64
+   5  by-arch+edition/arm64+pro.yaml  arch=arm64 ∧ edition=pro
 ```
 
 ## `tailor show <image> [field]`
@@ -107,6 +115,11 @@ Resolve digests/hashes and print the lockfile content without writing it.
 ## `tailor clean [images...]`
 
 Remove generated artifacts and build stamps for selected cells. Accepts `-s/--select` and `--cell`.
+
+## `tailor bases list`
+
+List base-image catalogue slots: each slot's arch, source, on-disk presence, and path. Requires a
+`baseImages:` catalogue in `tailor.yaml`.
 
 ## `tailor bases download [names...] [--force]`
 

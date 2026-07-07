@@ -12,7 +12,6 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 | ----- | ---- | --- | ------- | ----- |
 | `name` | string | **yes** | — | Unique image id (`^[A-Za-z0-9][A-Za-z0-9.-]*$`, no `_`); the first segment of every output [cell slug](./types.md#output-naming-cell-slug), and the CLI handle. |
 | `toolchain` | [ToolchainRef](./types.md#toolchainref) | no | workspace `default` (or built-in) | Select/override the IC version. Id ref in a workspace, or inline when standalone. |
-| `architectures` | [[Arch](./types.md#arch)] | no | `defaults.architectures` | Target arches (the arch axis). |
 | `matrix` | [Matrix](./types.md#matrix) | no | one cell | Axes + values whose product is the set of cells built. |
 | `outputs` | [[OutputSpec](./types.md#outputspec)] | no | `defaults.outputs` | Output formats; each cell × format is one IC run → one artifact, named by its [cell slug](./types.md#output-naming-cell-slug). |
 | `base` | [BaseSource](./types.md#basesource) | cond | — | The base image source; the resolved cell has exactly one base (may instead be supplied by a fragment). Includes the `image: <name>` kind for `tailor.yaml` `baseImages` entries. |

@@ -32,6 +32,32 @@ name: db
 toolchain: ic-1.3
 ```
 
+## Control when tailor pulls
+
+Each toolchain entry takes an optional `pull:` policy — a pin-aware take on Docker's `--pull` and
+Kubernetes' `imagePullPolicy`:
+
+```yaml
+toolchains:
+  default: local-ic
+  entries:
+    local-ic:
+      container: acl-imagecustomizer   # a locally-built image, never pushed to a registry
+      tag: local
+      pull: never
+```
+
+| Policy | Behaviour |
+| --- | --- |
+| `missing` (default) | Use the locked digest if present, else the local image if present, else resolve + pin + pull. |
+| `always` | Always resolve a fresh registry digest, pin it, and pull (best for a mutable tag like `:latest` in CI). |
+| `never` | Require the image already present locally; never resolve or pull (air-gapped / local dev with a locally-built IC). |
+
+With `missing` or `never`, a locally-built image is pinned by its `RepoDigest` (portable, written to
+the lock) or its config id (local-only, tracked for drift but not written to the portable lock).
+
+## Lock and build reproducibly
+
 Write or refresh the lockfile:
 
 ```bash
