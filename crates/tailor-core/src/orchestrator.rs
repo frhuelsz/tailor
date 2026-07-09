@@ -255,13 +255,9 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
                 image: target.name().to_owned(),
                 arch: value.to_owned(),
             })?],
-            // No `arch` axis: a catalogue slot's `arch` supplies it when the image declares none;
-            // otherwise the workspace `defaults.architectures`, else the `amd64` default.
-            None => match slot_arch {
-                Some(slot) if target.architectures == [Arch::Amd64] => vec![slot],
-                _ if target.architectures.is_empty() => vec![Arch::Amd64],
-                _ => target.architectures.clone(),
-            },
+            // No `arch` axis: the base's own arch (a catalogue slot's `arch`, a local `path` base's
+            // `arch`, or an `oci.platform`'s arch component) supplies it, else the `amd64` default.
+            None => vec![slot_arch.unwrap_or(Arch::Amd64)],
         };
         for arch in arches {
             check_platform_arch(target, &rc.base, arch)?;
@@ -302,28 +298,43 @@ fn resolve_base(
     target: &Target,
     base: &BaseSource,
 ) -> Result<(BaseSource, Option<String>, Option<Arch>), CoreError> {
-    let BaseSource::Ref { reference } = base else {
-        return Ok((base.clone(), None, None));
-    };
-    let slot = target
-        .base_images
-        .get(reference)
-        .ok_or_else(|| CoreError::UnknownBaseImage {
-            image: target.name().to_owned(),
-            name: reference.clone(),
-            known: target
-                .base_images
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", "),
-        })?;
-    let path = tailor_config::absolutize(&slot.path, &target.root);
-    Ok((
-        BaseSource::Path { path },
-        Some(reference.clone()),
-        slot.arch,
-    ))
+    match base {
+        BaseSource::Ref { reference } => {
+            let slot =
+                target
+                    .base_images
+                    .get(reference)
+                    .ok_or_else(|| CoreError::UnknownBaseImage {
+                        image: target.name().to_owned(),
+                        name: reference.clone(),
+                        known: target
+                            .base_images
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    })?;
+            let path = tailor_config::absolutize(&slot.path, &target.root);
+            Ok((
+                BaseSource::Path {
+                    path,
+                    arch: slot.arch,
+                },
+                Some(reference.clone()),
+                slot.arch,
+            ))
+        }
+        // A local `path` base's own `arch` supplies the cell arch when no `arch` axis is declared.
+        BaseSource::Path { arch, .. } => Ok((base.clone(), None, *arch)),
+        // A multi-arch registry base pins its arch via `oci.platform`'s arch component.
+        BaseSource::Oci { oci } => Ok((
+            base.clone(),
+            None,
+            oci.platform.as_deref().and_then(platform_arch),
+        )),
+        // `azureLinux` declares no arch, so the cell arch (axis or default) decides.
+        BaseSource::AzureLinux { .. } => Ok((base.clone(), None, None)),
+    }
 }
 
 /// Reconcile a catalogue slot's `arch` against the cell's effective arch — they must agree
@@ -561,7 +572,6 @@ mod tests {
         let target = Arc::new(Target {
             definition,
             dir: tmp.path().to_path_buf(),
-            architectures: vec![Arch::Amd64, Arch::Arm64],
             default_outputs: Vec::new(),
             output_artifacts: OutputArtifactsPolicy::default(),
             root: tmp.path().to_path_buf(),
@@ -692,16 +702,15 @@ mod tests {
         ));
     }
 
-    /// Build a single-cell target from `body`, applying `arches` as the workspace default; an empty
-    /// `arches` mimics a workspace declaring no `defaults.architectures`.
-    fn target_with(body: &str, arches: Vec<Arch>) -> (TempDir, Arc<Target>) {
+    /// Build a single-cell target from `body`. With no `arch` axis and no base arch, a cell resolves
+    /// to the built-in `amd64` default; a base's own `arch` (slot/path/oci) supplies it otherwise.
+    fn target_with(body: &str) -> (TempDir, Arc<Target>) {
         let tmp = TempDir::new().unwrap();
         write(tmp.path(), "image.yaml", body);
         let definition = load_image(tmp.path().join("image.yaml")).unwrap();
         let target = Arc::new(Target {
             definition,
             dir: tmp.path().to_path_buf(),
-            architectures: arches,
             default_outputs: vec![OutputSpec {
                 format: OutputFormat::Cosi,
                 cosi_compression_level: None,
@@ -725,7 +734,7 @@ mod tests {
 
     #[test]
     fn defaults_to_amd64_with_no_arch_axis_and_no_architectures() {
-        let (_tmp, target) = target_with(NO_ARCH_IMAGE, Vec::new());
+        let (_tmp, target) = target_with(NO_ARCH_IMAGE);
         let cells = cells(&target).unwrap();
         assert_eq!(cells.len(), 1);
         assert_eq!(cells[0].arch, Arch::Amd64);
@@ -733,8 +742,16 @@ mod tests {
     }
 
     #[test]
-    fn workspace_architectures_override_default() {
-        let (_tmp, target) = target_with(NO_ARCH_IMAGE, vec![Arch::Arm64]);
+    fn path_base_arch_supplies_cell_arch_when_image_declares_none() {
+        let (_tmp, target) = target_with(indoc! {"
+            name: solo
+            base:
+              path: ./b.img
+              arch: arm64
+            config:
+              os:
+                hostname: solo
+        "});
         let cells = cells(&target).unwrap();
         assert_eq!(cells.len(), 1);
         assert_eq!(cells[0].arch, Arch::Arm64);
@@ -742,8 +759,7 @@ mod tests {
 
     #[test]
     fn arch_axis_drives_one_cell_per_value() {
-        let (_tmp, target) = target_with(
-            indoc! {"
+        let (_tmp, target) = target_with(indoc! {"
                 name: solo
                 matrix:
                   arch: [amd64, arm64]
@@ -752,9 +768,7 @@ mod tests {
                 config:
                   os:
                     hostname: solo
-            "},
-            Vec::new(),
-        );
+            "});
         let mut arches: Vec<Arch> = cells(&target).unwrap().iter().map(|c| c.arch).collect();
         arches.sort_unstable();
         assert_eq!(arches, vec![Arch::Amd64, Arch::Arm64]);
@@ -762,9 +776,29 @@ mod tests {
 
     #[test]
     fn oci_platform_mismatch_is_an_error() {
-        // amd64 default cell with an arm64 base platform → reconcile error (offline, no pull).
-        let (_tmp, target) = target_with(
-            indoc! {"
+        // Image pinned amd64 (axis) but the base pins arm64 → reconcile error (offline, no pull).
+        let (_tmp, target) = target_with(indoc! {"
+                name: solo
+                matrix:
+                  arch: [amd64]
+                base:
+                  oci:
+                    uri: registry.example/base:edge
+                    platform: linux/arm64
+                config:
+                  os:
+                    hostname: solo
+            "});
+        assert!(matches!(
+            cells(&target).unwrap_err(),
+            CoreError::PlatformArchMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn oci_platform_supplies_cell_arch_when_no_axis() {
+        // No arch axis: a fixed `oci.platform` supplies the cell arch (base arch fills in).
+        let (_tmp, target) = target_with(indoc! {"
                 name: solo
                 base:
                   oci:
@@ -773,19 +807,13 @@ mod tests {
                 config:
                   os:
                     hostname: solo
-            "},
-            Vec::new(),
-        );
-        assert!(matches!(
-            cells(&target).unwrap_err(),
-            CoreError::PlatformArchMismatch { .. }
-        ));
+            "});
+        assert_eq!(cells(&target).unwrap()[0].arch, Arch::Arm64);
     }
 
     #[test]
     fn oci_platform_matching_arch_is_accepted() {
-        let (_tmp, target) = target_with(
-            indoc! {"
+        let (_tmp, target) = target_with(indoc! {"
                 name: solo
                 base:
                   oci:
@@ -794,16 +822,13 @@ mod tests {
                 config:
                   os:
                     hostname: solo
-            "},
-            Vec::new(),
-        );
+            "});
         assert_eq!(cells(&target).unwrap()[0].arch, Arch::Amd64);
     }
 
     #[test]
     fn oci_platform_matches_declared_arch_axis() {
-        let (_tmp, target) = target_with(
-            indoc! {"
+        let (_tmp, target) = target_with(indoc! {"
                 name: solo
                 matrix:
                   arch: [arm64]
@@ -814,26 +839,19 @@ mod tests {
                 config:
                   os:
                     hostname: solo
-            "},
-            Vec::new(),
-        );
+            "});
         assert_eq!(cells(&target).unwrap()[0].arch, Arch::Arm64);
     }
 
-    /// Single-cell target plus a `baseImages:` catalogue and workspace `defaults.architectures`,
-    /// for `base: { ref: <name> }` resolution and §3 arch reconciliation.
-    fn target_with_catalogue(
-        body: &str,
-        arches: Vec<Arch>,
-        catalogue: BaseImageCatalogue,
-    ) -> (TempDir, Arc<Target>) {
+    /// Single-cell target plus a `baseImages:` catalogue, for `base: { ref: <name> }` resolution and
+    /// §3 arch reconciliation (the slot's `arch` supplies the cell arch when no axis is declared).
+    fn target_with_catalogue(body: &str, catalogue: BaseImageCatalogue) -> (TempDir, Arc<Target>) {
         let tmp = TempDir::new().unwrap();
         write(tmp.path(), "image.yaml", body);
         let definition = load_image(tmp.path().join("image.yaml")).unwrap();
         let target = Arc::new(Target {
             definition,
             dir: tmp.path().to_path_buf(),
-            architectures: arches,
             default_outputs: vec![OutputSpec {
                 format: OutputFormat::Cosi,
                 cosi_compression_level: None,
@@ -866,10 +884,10 @@ mod tests {
     #[test]
     fn base_image_resolves_to_root_relative_path_and_exposes_name() {
         let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(Some(Arch::Amd64)))]);
-        let (tmp, target) = target_with_catalogue(SLOT_IMAGE, vec![Arch::Amd64], cat);
+        let (tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         let cells = cells(&target).unwrap();
         assert_eq!(cells[0].base_image.as_deref(), Some("baremetal"));
-        let BaseSource::Path { path } = &cells[0].base else {
+        let BaseSource::Path { path, .. } = &cells[0].base else {
             panic!("slot did not collapse to a path base: {:?}", cells[0].base);
         };
         assert_eq!(path, &tmp.path().join("bases/baremetal.vhdx"));
@@ -878,7 +896,7 @@ mod tests {
     #[test]
     fn slot_arch_supplies_cell_arch_when_image_declares_none() {
         let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(Some(Arch::Arm64)))]);
-        let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, vec![Arch::Amd64], cat);
+        let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         assert_eq!(cells(&target).unwrap()[0].arch, Arch::Arm64);
     }
 
@@ -896,7 +914,6 @@ mod tests {
                   os:
                     hostname: solo
             "},
-            Vec::new(),
             cat,
         );
         assert!(
@@ -911,7 +928,7 @@ mod tests {
     #[test]
     fn unknown_base_image_name_is_a_config_error() {
         let cat = BaseImageCatalogue::from([("other".to_owned(), slot(None))]);
-        let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, vec![Arch::Amd64], cat);
+        let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         assert!(
             matches!(
                 cells(&target).unwrap_err(),
@@ -924,7 +941,7 @@ mod tests {
     #[test]
     fn sourceless_slot_arch_unset_defaults_to_amd64() {
         let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(None))]);
-        let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, vec![Arch::Amd64], cat);
+        let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         assert_eq!(cells(&target).unwrap()[0].arch, Arch::Amd64);
     }
 

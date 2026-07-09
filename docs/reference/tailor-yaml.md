@@ -14,7 +14,6 @@ toolchains:
       # tag: "1.3.0"
 
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
 ```
@@ -35,7 +34,6 @@ defaults:
 | `runtime.janitorImage` | `{container, tag?}` | no | Minimal image used for sudo-free ownership cleanup. Default: `mcr.microsoft.com/azurelinux/base/core:3.0`. |
 | `signing.default` | string | no | Signing profile used when an image says `signing: true`. See [Sign an image](../how-to/sign-an-image.md). |
 | `signing.profiles` | map of `{backend, …}` | no | Named signing profiles. `backend` is `local-test-ca`, `keypair` (needs `key`+`cert`), or `azure-key-vault` (needs `vault`+`certificate`). |
-| `defaults.architectures` | arch list | no | Default arch set for images without an `arch` axis. The only override of the built-in `[amd64]` default; per-image declares arch via a `matrix.arch` axis. |
 | `defaults.outputs` | output list | no | Inherited by images without `outputs`. |
 | `baseImages` | map of `{path, arch?, source?}` | no | Base-image catalogue: named slots an image references with `base: { ref: <name> }`. See [base-image catalogue](#base-image-catalogue). |
 | `images` | object | no | Omit to auto-discover every immediate `*/image.yaml`. |

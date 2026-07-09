@@ -306,8 +306,6 @@ pub fn resolve_signing<'a>(
 #[serde(deny_unknown_fields)]
 pub struct Defaults {
     #[serde(default)]
-    pub architectures: Option<Vec<Arch>>,
-    #[serde(default)]
     pub outputs: Option<Vec<OutputSpec>>,
     /// Default `output.artifacts` staging policy for images that opt into the `output-artifacts`
     /// preview feature (`meta/docs/output-artifacts-staging.md` §3.3); omitted ⇒ `managed`.
@@ -415,8 +413,14 @@ pub enum BaseImageSource {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum BaseSource {
-    /// A local base image file, resolved relative to the image directory.
-    Path { path: PathBuf },
+    /// A local base image file, resolved relative to the image directory, with an optional `arch`
+    /// that supplies the cell arch when no `arch` matrix axis is declared
+    /// (`meta/docs/arch-and-platform.md` §3).
+    Path {
+        path: PathBuf,
+        #[serde(default)]
+        arch: Option<Arch>,
+    },
     /// A base image pulled from an OCI registry.
     Oci { oci: OciBase },
     /// Microsoft Container Registry sugar for an Azure Linux base.

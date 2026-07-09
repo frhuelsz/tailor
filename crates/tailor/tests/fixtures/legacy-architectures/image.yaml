@@ -1,5 +1,6 @@
 # Synthetic standalone image (NOT a real config) — uses the removed per-image `architectures:` field,
-# which `deny_unknown_fields` now rejects (use a `matrix.arch` axis or `defaults.architectures`).
+# which `deny_unknown_fields` now rejects (declare a non-default arch with a `matrix.arch` axis, or a
+# `path`/`ref` base's own `arch`).
 name: solo
 architectures: [arm64]
 

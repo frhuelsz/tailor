@@ -116,6 +116,15 @@ fn removed_per_image_architectures_field_is_rejected() {
 }
 
 #[test]
+fn removed_workspace_defaults_architectures_field_is_rejected() {
+    in_dir("legacy-defaults-arch")
+        .arg("validate")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("architectures"));
+}
+
+#[test]
 fn oci_platform_mismatch_fails_validate() {
     in_dir("oci-platform-mismatch")
         .arg("validate")

@@ -121,7 +121,6 @@ mod tests {
         let target = Arc::new(Target {
             definition,
             dir: ".".into(),
-            architectures: vec![Arch::Amd64],
             default_outputs: vec![],
             output_artifacts: OutputArtifactsPolicy::default(),
             root: ".".into(),
@@ -141,7 +140,10 @@ mod tests {
             },
             slug: CellSlug(slug.to_owned()),
             ic_config: Value::Null,
-            base: BaseSource::Path { path: "b".into() },
+            base: BaseSource::Path {
+                path: "b".into(),
+                arch: None,
+            },
             base_image: None,
             rpm_sources: vec![],
         }

@@ -13,6 +13,5 @@ toolchains:
       version: "1.0.0"            # kept so `db` can pin an older toolchain
 
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi

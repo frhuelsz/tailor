@@ -21,17 +21,16 @@ So values are restricted: `amd64` or `arm64`. Anything else is an error.
 A cell's **effective arch** is resolved in this order:
 
 1. the **`arch` matrix axis** — one cell per value;
-2. else the workspace **`defaults.architectures`** in `tailor.yaml`;
+2. else the **base image's own arch** — a `baseImages:` slot's `arch`, a local `path` base's `arch`,
+   or an `oci.platform`'s arch component;
 3. else the built-in default **`amd64`**.
 
 The default is fixed at `amd64` — it is **not** the host arch. A build on an arm64 host still targets
-amd64 unless you declare otherwise, so a workspace produces the same set on every machine. Override
-the default for a whole workspace with `defaults.architectures`; build a single image for another arch
-with the axis.
+amd64 unless you declare otherwise, so a workspace produces the same set on every machine. To build
+another arch, declare the `arch` axis, or let the base image's own arch supply it.
 
-There is no per-image `architectures:` field. An image declares a non-default arch only through the
-`arch` axis (or it inherits the workspace default). This keeps one spelling per scope: the workspace
-default in `tailor.yaml`, the per-image axis in `image.yaml`.
+There is no `architectures:` field — neither per-image nor a workspace default. An image declares a
+non-default arch through the `arch` axis, or inherits it from the base image it resolves to.
 
 ## Declaring arch with the axis
 
@@ -46,7 +45,7 @@ outputs:
   - format: cosi
 ```
 
-With no `arch` axis and no workspace override, `gizmo` builds one `amd64` cell. Order `arch` first in
+With no `arch` axis and no base arch, `gizmo` builds one `amd64` cell. Order `arch` first in
 the matrix so it sits widest in the slug and fragment precedence.
 
 ## `--platform` and the base

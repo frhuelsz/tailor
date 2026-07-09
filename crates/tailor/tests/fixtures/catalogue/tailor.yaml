@@ -10,7 +10,6 @@ toolchains:
       version: "1.0.0"
 
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
 

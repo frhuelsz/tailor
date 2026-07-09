@@ -52,12 +52,14 @@ arch drives `--platform linux/<arch>`, per-arch base selection, the slug, and `$
 has exactly one arch, resolved in this order:
 
 1. the `arch` matrix axis, one cell per value (`matrix.arch: [amd64, arm64]`);
-2. else the workspace `defaults.architectures` in [`tailor.yaml`](tailor-yaml.md);
+2. else the **base image's own arch** — a `baseImages:` slot's `arch`, a local `path` base's `arch`,
+   or an `oci.platform`'s arch component;
 3. else **`amd64`**.
 
-There is no per-image `architectures:` field — declare a non-default arch with the axis (or override
-the whole workspace via `defaults.architectures`). The default is fixed at `amd64` and never the host
-arch, so a workspace builds the same set everywhere. See [Architectures](../explanation/architectures.md)
+There is no `architectures:` field — neither per-image nor a workspace default. Declare a non-default
+arch with the axis, or let the base image's own arch supply it. The default is fixed at `amd64` and
+never the host arch, so a workspace builds the same set everywhere. See
+[Architectures](../explanation/architectures.md)
 and [Cross-arch building](../how-to/cross-arch-building.md).
 
 ## Fragments

@@ -48,16 +48,19 @@ base:
   path: ./bases/gizmo.img      # → gizmo_amd64_cosi
 ```
 
-## Change the default for a workspace
+## Give a local base its own arch
 
-Set `defaults.architectures` in `tailor.yaml` to override `amd64` for every image that has no `arch`
+A local `path` base can declare its own `arch`, which supplies the cell arch when there is no `arch`
 axis:
 
 ```yaml
-# tailor.yaml
-defaults:
-  architectures: [arm64]       # workspace builds arm64 unless an image declares its own axis
+# image.yaml
+base:
+  path: ./bases/gizmo-arm64.img
+  arch: arm64                  # this image builds one arm64 cell
 ```
+
+A `baseImages:` catalogue slot's `arch` works the same way for `base: { ref: <name> }`.
 
 ## Platform must match the arch
 

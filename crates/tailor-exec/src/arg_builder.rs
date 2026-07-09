@@ -154,7 +154,7 @@ fn base_args(
     operation: Operation,
 ) -> Vec<String> {
     match (base, operation) {
-        (BaseSource::Path { path }, _) => flag_value(
+        (BaseSource::Path { path, .. }, _) => flag_value(
             FLAG_IMAGE_FILE,
             path_translate::to_container_path(
                 &tailor_config::absolutize(path, image_dir),
@@ -276,6 +276,7 @@ mod tests {
             Operation::Customize,
             BaseSource::Path {
                 path: "/base.raw".into(),
+                arch: None,
             },
         );
         let context = sample_context();
@@ -318,6 +319,7 @@ mod tests {
             Operation::Convert,
             BaseSource::Path {
                 path: "/base.vhdx".into(),
+                arch: None,
             },
         );
         let context = sample_context();
@@ -339,6 +341,7 @@ mod tests {
             Operation::Customize,
             BaseSource::Path {
                 path: "/base.raw".into(),
+                arch: None,
             },
         );
         let context = sample_context();
@@ -427,6 +430,7 @@ mod tests {
             Operation::Customize,
             BaseSource::Path {
                 path: "/base.raw".into(),
+                arch: None,
             },
         );
         let mut context = sample_context();
@@ -448,6 +452,7 @@ mod tests {
             Operation::Customize,
             BaseSource::Path {
                 path: "/base.raw".into(),
+                arch: None,
             },
         );
         let mut context = sample_context();
@@ -486,7 +491,6 @@ mod tests {
             target: Arc::new(Target {
                 definition: sample_definition(operation),
                 dir: PathBuf::from("/images"),
-                architectures: vec![Arch::Amd64],
                 default_outputs: Vec::new(),
                 output_artifacts: OutputArtifactsPolicy::default(),
                 root: PathBuf::from("/images"),

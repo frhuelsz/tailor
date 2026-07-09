@@ -24,10 +24,18 @@ async fn main() -> ExitCode {
     match run::dispatch(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            if run::use_color() {
-                eprintln!("\u{1b}[1;31merror:\u{1b}[0m {error}");
+            let label = if run::use_color() {
+                "\u{1b}[1;31merror:\u{1b}[0m"
             } else {
-                eprintln!("error: {error}");
+                "error:"
+            };
+            eprintln!("{label} {error}");
+            // Walk the cause chain so wrapped diagnostics (e.g. the serde field that failed to parse)
+            // are visible, not just the top-level "failed to parse …" summary.
+            let mut cause = std::error::Error::source(&error);
+            while let Some(source) = cause {
+                eprintln!("  caused by: {source}");
+                cause = source.source();
             }
             ExitCode::FAILURE
         }

@@ -25,7 +25,7 @@ impl BaseResolver for OciResolver {
             // A relative `path` is authored relative to the image directory; resolve it against
             // `image_dir` (never the process CWD) so this hash/existence check sees the same file IC
             // will (`--image-file` is built the same way in tailor-exec).
-            BaseSource::Path { path } => {
+            BaseSource::Path { path, .. } => {
                 local::resolve(tailor_config::absolutize(path, image_dir)).await
             }
             BaseSource::Oci { oci } => oci::resolve(oci, arch).await,
@@ -57,7 +57,7 @@ mod tests {
         let path = dir.path().join("base.raw");
         let content = b"resolver dispatch";
         fs::write(&path, content).unwrap();
-        let source = BaseSource::Path { path };
+        let source = BaseSource::Path { path, arch: None };
 
         let resolved = OciResolver::new()
             .resolve(&source, Arch::Amd64, dir.path())
@@ -89,6 +89,7 @@ mod tests {
 
         let source = BaseSource::Path {
             path: "../artifacts/base.raw".into(),
+            arch: None,
         };
 
         let resolved = OciResolver::new()

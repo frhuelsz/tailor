@@ -304,7 +304,6 @@ mod tests {
             target: Arc::new(Target {
                 definition,
                 dir: PathBuf::from("/images"),
-                architectures: vec![Arch::Amd64],
                 default_outputs: Vec::new(),
                 output_artifacts: OutputArtifactsPolicy::default(),
                 root: PathBuf::from("/images"),
@@ -321,6 +320,7 @@ mod tests {
             ic_config: Value::Mapping(Mapping::default()),
             base: BaseSource::Path {
                 path: PathBuf::from("/images/base.img"),
+                arch: None,
             },
             base_image: None,
             rpm_sources: Vec::new(),

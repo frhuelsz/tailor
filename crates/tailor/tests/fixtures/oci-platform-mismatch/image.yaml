@@ -1,6 +1,9 @@
-# Synthetic standalone image (NOT a real config) — no arch axis ⇒ amd64 default, but the OCI base
-# pins linux/arm64, so the cell arch and base-image arch conflict (arch-and-platform.md §3).
+# Synthetic standalone image (NOT a real config) — the image is pinned amd64 (arch axis), but the OCI
+# base pins linux/arm64, so the cell arch and base-image arch conflict (arch-and-platform.md §3).
 name: solo
+
+matrix:
+  arch: [amd64]
 
 base:
   oci:

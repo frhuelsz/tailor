@@ -15,8 +15,6 @@ pub struct Target {
     pub definition: ImageDefinition,
     /// The directory containing `image.yaml` (fragment and `$include` resolution root).
     pub dir: PathBuf,
-    /// Architectures to build (the definition's, else workspace defaults).
-    pub architectures: Vec<Arch>,
     /// Output formats to build when a cell declares none (workspace `defaults.outputs`).
     pub default_outputs: Vec<OutputSpec>,
     /// Resolved `output.artifacts` staging policy (per-image override, else workspace default, else

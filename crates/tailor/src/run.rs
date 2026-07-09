@@ -542,7 +542,7 @@ async fn build_lock(
             ) {
                 continue;
             }
-            for arch in cell_arches(&cell, target) {
+            for arch in cell_arches(&cell) {
                 if let ResolvedBase::Oci {
                     reference,
                     platform,
@@ -778,7 +778,7 @@ fn describe_toolchains(tool: &ToolConfig) -> String {
 /// A short, human description of a base source.
 fn describe_base(base: &BaseSource) -> String {
     match base {
-        BaseSource::Path { path } => format!("path: {}", path.display()),
+        BaseSource::Path { path, .. } => format!("path: {}", path.display()),
         BaseSource::Oci { oci } => format!("oci: {}", oci.uri),
         BaseSource::AzureLinux { azure_linux } => {
             format!("azureLinux {}/{}", azure_linux.version, azure_linux.variant)
@@ -947,9 +947,6 @@ fn tool_config(workspace: &Workspace) -> ToolConfig {
 
 fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Target>>, AppError> {
     let defaults = workspace.tool.as_ref().and_then(|t| t.defaults.as_ref());
-    let default_arches = defaults
-        .and_then(|d| d.architectures.clone())
-        .unwrap_or_else(|| vec![Arch::Amd64]);
     let default_outputs = defaults
         .and_then(|d| d.outputs.clone())
         .unwrap_or_else(default_cosi);
@@ -970,7 +967,6 @@ fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Targ
         targets.push(Arc::new(Target {
             definition: image.definition.clone(),
             dir: image.dir.clone(),
-            architectures: default_arches.clone(),
             default_outputs: default_outputs.clone(),
             output_artifacts: image
                 .definition
@@ -998,12 +994,20 @@ fn default_cosi() -> Vec<OutputSpec> {
     }]
 }
 
-fn cell_arches(cell: &RenderedCell, target: &Target) -> Vec<Arch> {
-    match cell.tuple.get("arch").and_then(parse_arch) {
-        Some(arch) => vec![arch],
-        None if target.architectures.is_empty() => vec![Arch::Amd64],
-        None => target.architectures.clone(),
+fn cell_arches(cell: &RenderedCell) -> Vec<Arch> {
+    if let Some(arch) = cell.tuple.get("arch").and_then(parse_arch) {
+        return vec![arch];
     }
+    // No `arch` axis: a multi-arch registry base pins its arch via `oci.platform`; else `amd64`.
+    let base_arch = match &cell.base {
+        BaseSource::Oci { oci } => oci
+            .platform
+            .as_deref()
+            .and_then(|platform| platform.split('/').nth(1))
+            .and_then(parse_arch),
+        _ => None,
+    };
+    vec![base_arch.unwrap_or(Arch::Amd64)]
 }
 
 fn parse_arch(value: &str) -> Option<Arch> {
@@ -1214,7 +1218,6 @@ toolchains:
       # version: \"1.3.0\"   # pin a specific Image Customizer; omit to track the :latest tag
 
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
 ";
@@ -1223,8 +1226,9 @@ const BASE_IMAGE: &str = "\
 # __IMAGE_NAME__/image.yaml — an image definition. Top-level keys are tailor's (name, base, …);
 # everything under `config:` is Image Customizer config, passed through to IC untouched.
 #
-# Architectures and the output format are inherited from the workspace `defaults:`, and the default
-# toolchain is used, so this file only declares what makes the image itself.
+# The output format is inherited from the workspace `defaults:`, the arch defaults to `amd64` (declare
+# an `arch` matrix axis or a base `arch:` to change it), and the default toolchain is used — so this
+# file only declares what makes the image itself.
 name: __IMAGE_NAME__
 
 base:
@@ -1518,7 +1522,8 @@ mod tests {
     fn describe_base_covers_every_source() {
         assert_eq!(
             describe_base(&BaseSource::Path {
-                path: PathBuf::from("./base.img")
+                path: PathBuf::from("./base.img"),
+                arch: None,
             }),
             "path: ./base.img"
         );
