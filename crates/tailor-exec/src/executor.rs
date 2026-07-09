@@ -1,12 +1,17 @@
-use std::{fs, path::PathBuf, slice};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    slice,
+    sync::Arc,
+};
 
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use tailor_config::OutputFormat;
+use tailor_config::{OutputArtifactsPolicy, OutputFormat};
 use tailor_core::{
-    Cell, ContainerConfig, ContainerRuntime, ExecError, ExecutionContext, ExecutionResult,
-    Executor, RuntimeConfig, artifact_name,
+    Cell, ContainerConfig, ContainerResult, ContainerRuntime, ExecError, ExecutionContext,
+    ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, artifact_name,
 };
 
 use crate::{
@@ -15,6 +20,9 @@ use crate::{
 
 const CONTAINER_NAME_PREFIX: &str = "tailor-ic";
 const RPM_FARM_PREFIX: &str = ".tailor-farm";
+/// The manifest IC's `customize` writes into the `output.artifacts` staging dir, describing the boot
+/// artifacts to sign and re-inject (`meta/docs/signing.md` §5).
+const INJECT_FILES_MANIFEST: &str = "inject-files.yaml";
 
 #[derive(Debug, Clone)]
 pub struct IcExecutor<R> {
@@ -42,10 +50,14 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             .output_dir
             .join(artifact_name(cell.slug.as_ref(), cell.output.format));
         if context.dry_run {
-            let command =
-                arg_builder::render_command(&arg_builder::build_run_command(cell, context));
+            let logs = if context.signer.is_some() {
+                arg_builder::render_signed_dry_run(cell, context)
+            } else {
+                let command =
+                    arg_builder::render_command(&arg_builder::build_run_command(cell, context));
+                format!("# {}\n{command}", cell.slug.as_ref())
+            };
             info!(cell = %cell.slug, "dry-run container invocation");
-            let logs = format!("# {}\n{command}", cell.slug.as_ref());
             return Ok(ExecutionResult {
                 artifact_path,
                 exit_code: 0,
@@ -87,11 +99,17 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             .collect::<Vec<_>>();
 
         // Relocate IC's `output.artifacts` scratch to a tailor-owned path so it does not land
-        // root-owned in the source tree (`meta/docs/output-artifacts-staging.md`).
+        // root-owned in the source tree (`meta/docs/output-artifacts-staging.md`). A signed cell
+        // forces `scratch` — the staging is interim, reclaimed after `inject-files` (`signing.md` §5).
         let run_id = output_artifacts::run_id();
+        let policy = if context.signer.is_some() {
+            OutputArtifactsPolicy::Scratch
+        } else {
+            cell.target.output_artifacts
+        };
         let staging = output_artifacts::apply(
             &mut run_cell.ic_config,
-            cell.target.output_artifacts,
+            policy,
             cell.slug.as_ref(),
             &run_id,
             &cell.target.dir,
@@ -118,50 +136,50 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                     source,
                 })?;
 
-        let args = arg_builder::build_ic_args(&run_cell, context);
-        self.runtime.pull_image(&context.ic_image_ref).await?;
-        let result = self
-            .runtime
-            .create_and_run(
-                ContainerConfig {
-                    image_ref: context.ic_image_ref.clone(),
-                    platform: context.platform.clone(),
-                    name: container_name(cell, context),
-                    args,
-                    binds: vec![
-                        arg_builder::host_root_bind(&context.runtime),
-                        DEV_BIND.to_owned(),
-                    ],
-                    privileged: context.runtime.privileged,
-                    cell_slug: cell.slug.as_ref().to_owned(),
-                    log_file: log_file.clone(),
-                },
+        // Run IC: the single-pass `customize`, or the signed three-pass (`customize` → sign →
+        // `inject-files`, `meta/docs/signing.md` §5). Both remove the working copy and reclaim the
+        // staging tree before propagating any failure.
+        let result = if let Some(signer) = context.signer.clone() {
+            self.run_signed_passes(
+                cell,
+                context,
+                &run_cell,
+                staging.as_ref(),
+                &signer,
+                &working_copy_path,
+                log_file.as_ref(),
                 cancel.clone(),
             )
-            .await?;
+            .await?
+        } else {
+            let args = arg_builder::build_ic_args(&run_cell, context);
+            let result = self
+                .run_ic(cell, context, args, log_file.as_ref(), cancel.clone())
+                .await?;
+            let _ = fs::remove_file(&working_copy_path);
 
-        let _ = fs::remove_file(&working_copy_path);
-
-        // Reclaim IC's root-owned staging tree before propagating any IC failure, so a failed build
-        // never strands root-owned scratch (§3.4): chown to the caller always; scratch also removes.
-        if let Some(plan) = &staging {
-            janitor::chown_paths(
-                &self.runtime,
-                slice::from_ref(&plan.dir),
-                &context.runtime,
-                cancel.clone(),
-            )
-            .await?;
-            if plan.reclaim {
-                janitor::remove_paths(
+            // Reclaim IC's root-owned staging tree before propagating any IC failure, so a failed
+            // build never strands root-owned scratch (§3.4): chown always; scratch also removes.
+            if let Some(plan) = &staging {
+                janitor::chown_paths(
                     &self.runtime,
                     slice::from_ref(&plan.dir),
                     &context.runtime,
                     cancel.clone(),
                 )
                 .await?;
+                if plan.reclaim {
+                    janitor::remove_paths(
+                        &self.runtime,
+                        slice::from_ref(&plan.dir),
+                        &context.runtime,
+                        cancel.clone(),
+                    )
+                    .await?;
+                }
             }
-        }
+            result
+        };
 
         if result.exit_code != 0 {
             return Err(ExecError::IcFailed {
@@ -198,6 +216,170 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
         cancel: CancellationToken,
     ) -> Result<(), ExecError> {
         janitor::remove_paths(&self.runtime, paths, runtime, cancel).await
+    }
+}
+
+impl<R: ContainerRuntime> IcExecutor<R> {
+    /// Run one IC container pass (`customize`/`inject-files`) with the standard host-root + `/dev`
+    /// binds, returning the raw container result (the caller maps a non-zero exit to `IcFailed`).
+    async fn run_ic(
+        &self,
+        cell: &Cell,
+        context: &ExecutionContext,
+        args: Vec<String>,
+        log_file: Option<&PathBuf>,
+        cancel: CancellationToken,
+    ) -> Result<ContainerResult, ExecError> {
+        self.runtime.pull_image(&context.ic_image_ref).await?;
+        self.runtime
+            .create_and_run(
+                ContainerConfig {
+                    image_ref: context.ic_image_ref.clone(),
+                    platform: context.platform.clone(),
+                    name: container_name(cell, context),
+                    args,
+                    binds: vec![
+                        arg_builder::host_root_bind(&context.runtime),
+                        DEV_BIND.to_owned(),
+                    ],
+                    privileged: context.runtime.privileged,
+                    cell_slug: cell.slug.as_ref().to_owned(),
+                    log_file: log_file.cloned(),
+                },
+                cancel,
+            )
+            .await
+    }
+
+    /// The signed three-pass (`meta/docs/signing.md` §5): `customize` → raw intermediate → chown the
+    /// staging → host-side `sign` → `inject-files` → final image. Returns the final pass's container
+    /// result; always reclaims the staging tree and raw intermediate (best-effort) before returning.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the signed pass needs all of the run inputs"
+    )]
+    async fn run_signed_passes(
+        &self,
+        cell: &Cell,
+        context: &ExecutionContext,
+        run_cell: &Cell,
+        staging: Option<&output_artifacts::StagingPlan>,
+        signer: &Arc<dyn Signer>,
+        working_copy_path: &Path,
+        log_file: Option<&PathBuf>,
+        cancel: CancellationToken,
+    ) -> Result<ContainerResult, ExecError> {
+        // A signed cell must stage `output.artifacts` — that is how IC emits the boot artifacts and
+        // the `inject-files.yaml` manifest. No staging ⇒ the config declared no `output.artifacts`.
+        let Some(plan) = staging else {
+            let _ = fs::remove_file(working_copy_path);
+            return Err(ExecError::Other(format!(
+                "image `{}` requests `signing:` but its IC config declares no `output.artifacts` \
+                 (add the `output-artifacts` preview feature and an `output.artifacts` block)",
+                cell.slug.as_ref()
+            )));
+        };
+        let intermediate = arg_builder::intermediate_path(cell, context);
+
+        // Pass 1 — customize → raw intermediate.
+        let customize = self
+            .run_ic(
+                cell,
+                context,
+                arg_builder::build_signed_customize_args(run_cell, context, &intermediate),
+                log_file,
+                cancel.clone(),
+            )
+            .await;
+        let _ = fs::remove_file(working_copy_path);
+        let customize = customize?;
+        if customize.exit_code != 0 {
+            self.reclaim_scratch(&plan.dir, &intermediate, &context.runtime, cancel.clone())
+                .await;
+            return Err(ExecError::IcFailed {
+                cell: cell.slug.as_ref().to_owned(),
+                code: customize.exit_code,
+                dump: customize.failure_dump.unwrap_or_default(),
+            });
+        }
+
+        // Chown the staging dir to the caller BEFORE signing — IC wrote it root-owned and the host
+        // signer must read the unsigned artifacts and write signed replacements back into it.
+        janitor::chown_paths(
+            &self.runtime,
+            slice::from_ref(&plan.dir),
+            &context.runtime,
+            cancel.clone(),
+        )
+        .await?;
+
+        let inject_files_yaml = plan.dir.join(INJECT_FILES_MANIFEST);
+        if !inject_files_yaml.exists() {
+            self.reclaim_scratch(&plan.dir, &intermediate, &context.runtime, cancel.clone())
+                .await;
+            return Err(ExecError::Other(format!(
+                "image `{}` requests `signing:` but IC emitted no `{INJECT_FILES_MANIFEST}` \
+                 (its `output.artifacts` extracted nothing to sign)",
+                cell.slug.as_ref()
+            )));
+        }
+
+        // Sign in place on a blocking thread (openssl/sbsign are synchronous).
+        let sign_plan = SigningPlan {
+            inject_files_yaml: inject_files_yaml.clone(),
+            artifacts_dir: plan.dir.clone(),
+            leaf_id: leaf_id(cell, context),
+            ca_cert_dest: context
+                .output_dir
+                .join(output_artifacts::ca_cert_name(cell.slug.as_ref())),
+        };
+        let signer = Arc::clone(signer);
+        let sign_result = tokio::task::spawn_blocking(move || signer.sign(&sign_plan))
+            .await
+            .map_err(|err| ExecError::Other(format!("signing task failed: {err}")))?;
+        if let Err(err) = sign_result {
+            self.reclaim_scratch(&plan.dir, &intermediate, &context.runtime, cancel.clone())
+                .await;
+            return Err(ExecError::Other(err.to_string()));
+        }
+
+        // Pass 2 — inject-files → the cell's final output format.
+        let final_image = arg_builder::artifact_path(cell, context);
+        let inject = self
+            .run_ic(
+                cell,
+                context,
+                arg_builder::build_inject_files_args(
+                    cell,
+                    context,
+                    &intermediate,
+                    &inject_files_yaml,
+                    &final_image,
+                ),
+                log_file,
+                cancel.clone(),
+            )
+            .await;
+
+        // Reclaim the interim scratch (staging + raw intermediate) regardless of the inject outcome.
+        self.reclaim_scratch(&plan.dir, &intermediate, &context.runtime, cancel)
+            .await;
+        inject
+    }
+
+    /// Best-effort sudo-free reclaim of a signed cell's interim scratch (staging dir + raw
+    /// intermediate). Cleanup never masks the primary result; the crash sweep (§3.5) catches leftovers.
+    async fn reclaim_scratch(
+        &self,
+        staging: &Path,
+        intermediate: &Path,
+        runtime: &RuntimeConfig,
+        cancel: CancellationToken,
+    ) {
+        let paths = [staging.to_path_buf(), intermediate.to_path_buf()];
+        if let Err(err) = janitor::remove_paths(&self.runtime, &paths, runtime, cancel).await {
+            tracing::warn!(error = %err, "failed to reclaim signed build scratch (will be swept next run)");
+        }
     }
 }
 
@@ -259,6 +441,15 @@ fn container_name(cell: &Cell, context: &ExecutionContext) -> String {
             cell.slug.as_ref(),
             std::process::id()
         ),
+    }
+}
+
+/// A per-cell (and per-clone) identifier for the signing leaf key, so parallel/clone signs never
+/// share a leaf (`meta/docs/signing.md` §7).
+fn leaf_id(cell: &Cell, context: &ExecutionContext) -> String {
+    match context.clone_index {
+        Some(clone) => format!("{}_clone{clone}", cell.slug.as_ref()),
+        None => cell.slug.as_ref().to_owned(),
     }
 }
 
@@ -355,5 +546,43 @@ mod tests {
             .expect("dry-run must not require a container engine");
         assert_eq!(result.exit_code, 0);
         assert!(result.logs.contains("sample_cosi"));
+    }
+
+    #[derive(Debug)]
+    struct MockSigner;
+
+    impl Signer for MockSigner {
+        fn preflight(&self) -> Result<(), tailor_core::SignError> {
+            Ok(())
+        }
+        fn sign(
+            &self,
+            _plan: &SigningPlan,
+        ) -> Result<tailor_core::SigningResult, tailor_core::SignError> {
+            Ok(tailor_core::SigningResult::default())
+        }
+    }
+
+    // A signed `--dry-run` renders the real three-pass (customize → raw intermediate, sign, then
+    // inject-files → final) without contacting the runtime (`NoopRuntime` errors on any call).
+    #[tokio::test]
+    async fn signed_dry_run_renders_the_three_pass_without_a_runtime() {
+        let executor = IcExecutor::new(NoopRuntime);
+        let mut context = dry_run_context();
+        context.signer = Some(Arc::new(MockSigner));
+        let result = executor
+            .execute(&dry_run_cell(), &context, CancellationToken::new())
+            .await
+            .expect("signed dry-run must not require a container engine");
+        assert_eq!(result.exit_code, 0);
+        assert!(
+            result.logs.contains("--output-image-format raw"),
+            "pass 1 customizes to a raw intermediate:\n{}",
+            result.logs
+        );
+        assert!(result.logs.contains("sample_cosi.intermediate.raw"));
+        assert!(result.logs.contains("inject-files"), "pass 3 injects files");
+        assert!(result.logs.contains("sign"), "pass 2 signs");
+        assert!(result.logs.contains("ca_cert.pem"));
     }
 }

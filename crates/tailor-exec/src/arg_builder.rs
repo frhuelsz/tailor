@@ -35,6 +35,10 @@ const FLAG_RPM_SOURCE: &str = "--rpm-source";
 const OCI_PREFIX: &str = "oci:";
 const SUBCOMMAND_CONVERT: &str = "convert";
 const SUBCOMMAND_CUSTOMIZE: &str = "customize";
+const SUBCOMMAND_INJECT_FILES: &str = "inject-files";
+/// The intermediate image format a signed `customize` writes; the final format is produced by the
+/// `inject-files` pass (`meta/docs/signing.md` §5).
+const OUTPUT_FORMAT_RAW: &str = "raw";
 
 pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
     let operation = cell
@@ -119,6 +123,118 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
     }
 
     args
+}
+
+/// The `customize` pass of a signed build: identical to a normal customize except it writes a **raw
+/// intermediate** (`<slug>.intermediate.raw`) with no cosi compression — the final format is produced
+/// by the `inject-files` pass (`meta/docs/signing.md` §5). The user's relocated `output.artifacts`
+/// still rides along in the working copy, so IC extracts the boot artifacts + `inject-files.yaml`.
+pub(crate) fn build_signed_customize_args(
+    cell: &Cell,
+    context: &ExecutionContext,
+    intermediate: &std::path::Path,
+) -> Vec<String> {
+    let mut args = vec![SUBCOMMAND_CUSTOMIZE.to_owned()];
+    args.extend(flag_value(
+        FLAG_CONFIG_FILE,
+        path_translate::to_container_path(
+            &working_copy::working_copy_path(cell, context.clone_index),
+            &context.runtime.host_root,
+        ),
+    ));
+    push_log_flags(&mut args, cell, context);
+    args.extend(flag_value(FLAG_BUILD_DIR, BUILD_DIR.to_owned()));
+    args.extend(base_args(
+        &cell.base,
+        context.base_ref.as_deref(),
+        &cell.target.dir,
+        &context.runtime,
+        Operation::Customize,
+    ));
+    args.extend(flag_value(
+        FLAG_OUTPUT_IMAGE_FORMAT,
+        OUTPUT_FORMAT_RAW.to_owned(),
+    ));
+    args.extend(flag_value(
+        FLAG_OUTPUT_IMAGE_FILE,
+        path_translate::to_container_path(intermediate, &context.runtime.host_root),
+    ));
+    for source in &cell.rpm_sources {
+        args.extend(flag_value(
+            FLAG_RPM_SOURCE,
+            path_translate::to_container_path(
+                &tailor_config::absolutize(source, &cell.target.dir),
+                &context.runtime.host_root,
+            ),
+        ));
+    }
+    if let Some(cache_dir) = &context.runtime.image_cache_dir {
+        args.extend(flag_value(
+            FLAG_IMAGE_CACHE_DIR,
+            path_translate::to_container_path(cache_dir, &context.runtime.host_root),
+        ));
+    }
+    args
+}
+
+/// The `inject-files` pass of a signed build: re-inject the now-signed artifacts from
+/// `inject-files.yaml` into the raw intermediate and produce the cell's **final** output format
+/// (`meta/docs/signing.md` §5). `cosiCompressionLevel` applies only here.
+pub(crate) fn build_inject_files_args(
+    cell: &Cell,
+    context: &ExecutionContext,
+    intermediate: &std::path::Path,
+    inject_files_yaml: &std::path::Path,
+    final_image: &std::path::Path,
+) -> Vec<String> {
+    let translate = |path: &std::path::Path| {
+        path_translate::to_container_path(path, &context.runtime.host_root)
+    };
+    let mut args = vec![SUBCOMMAND_INJECT_FILES.to_owned()];
+    args.extend(flag_value(FLAG_BUILD_DIR, BUILD_DIR.to_owned()));
+    // `inject-files` reuses `--config-file` for the inject-files.yaml manifest.
+    args.extend(flag_value(FLAG_CONFIG_FILE, translate(inject_files_yaml)));
+    args.extend(flag_value(FLAG_IMAGE_FILE, translate(intermediate)));
+    push_log_flags(&mut args, cell, context);
+    args.extend(flag_value(
+        FLAG_OUTPUT_IMAGE_FORMAT,
+        cell.output.format.as_str().to_owned(),
+    ));
+    args.extend(flag_value(FLAG_OUTPUT_IMAGE_FILE, translate(final_image)));
+    if let Some(level) = cell.output.cosi_compression_level {
+        args.extend(flag_value(FLAG_COSI_COMPRESSION_LEVEL, level.to_string()));
+    }
+    args
+}
+
+/// IC's structured-logging flags (`meta/docs/logging.md` §5.1), shared by every pass.
+fn push_log_flags(args: &mut Vec<String>, cell: &Cell, context: &ExecutionContext) {
+    args.extend(flag_value(FLAG_LOG_FORMAT, LOG_FORMAT_JSON.to_owned()));
+    args.extend(flag_value(FLAG_LOG_COLOR, LOG_COLOR_NEVER.to_owned()));
+    args.extend(flag_value(
+        FLAG_LOG_LEVEL,
+        context
+            .runtime
+            .log_level
+            .clone()
+            .unwrap_or_else(|| DEFAULT_IC_LOG_LEVEL.to_owned()),
+    ));
+    if let Some(log_file) = log_file_path(cell, context) {
+        args.extend(flag_value(
+            FLAG_LOG_FILE,
+            path_translate::to_container_path(&log_file, &context.runtime.host_root),
+        ));
+    }
+}
+
+/// The host path of a signed build's raw intermediate image, `<output_dir>/<slug>.intermediate.raw`
+/// (clone-suffixed so clones never collide).
+pub(crate) fn intermediate_path(cell: &Cell, context: &ExecutionContext) -> PathBuf {
+    let name = match context.clone_index {
+        Some(clone) => format!("{}_clone{clone}.intermediate.raw", cell.slug.as_ref()),
+        None => format!("{}.intermediate.raw", cell.slug.as_ref()),
+    };
+    context.output_dir.join(name)
 }
 
 pub(crate) fn artifact_path(cell: &Cell, context: &ExecutionContext) -> PathBuf {
@@ -211,6 +327,14 @@ pub(crate) fn host_root_bind(runtime: &RuntimeConfig) -> String {
 /// privilege, platform, image, and Image Customizer argument vector) so the preview is faithful;
 /// the ephemeral `--name` is omitted for readability.
 pub(crate) fn build_run_command(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
+    let mut argv = docker_prelude(context);
+    argv.extend(build_ic_args(cell, context));
+    argv
+}
+
+/// The `docker run` prelude (`--rm [--privileged] --platform … -v /:host -v /dev … <ic-image>`) that
+/// precedes any IC arg vector.
+fn docker_prelude(context: &ExecutionContext) -> Vec<String> {
     let mut argv = vec![DOCKER.to_owned(), DOCKER_RUN.to_owned(), FLAG_RM.to_owned()];
     if context.runtime.privileged {
         argv.push(FLAG_PRIVILEGED.to_owned());
@@ -219,8 +343,31 @@ pub(crate) fn build_run_command(cell: &Cell, context: &ExecutionContext) -> Vec<
     argv.extend([FLAG_VOLUME.to_owned(), host_root_bind(&context.runtime)]);
     argv.extend([FLAG_VOLUME.to_owned(), DEV_BIND.to_owned()]);
     argv.push(context.ic_image_ref.clone());
-    argv.extend(build_ic_args(cell, context));
     argv
+}
+
+/// Render a signed cell's three-pass for `--dry-run` (`meta/docs/signing.md` §5): the real
+/// `customize` → raw-intermediate `docker run`, then a note describing the host sign step and the
+/// `inject-files` → final-format pass. No daemon is contacted.
+pub(crate) fn render_signed_dry_run(cell: &Cell, context: &ExecutionContext) -> String {
+    let intermediate = intermediate_path(cell, context);
+    let mut customize = docker_prelude(context);
+    customize.extend(build_signed_customize_args(cell, context, &intermediate));
+    let ca_cert = context
+        .output_dir
+        .join(crate::output_artifacts::ca_cert_name(cell.slug.as_ref()));
+    format!(
+        "# {slug} — signed 3-pass (meta/docs/signing.md §5)\n\
+         # pass 1/3: customize -> raw intermediate ({intermediate})\n{customize}\n\n\
+         # pass 2/3: host-side sign the staged boot artifacts (openssl + sbsign); publish CA -> {ca}\n\
+         # pass 3/3: inject-files -> final {fmt} ({final})",
+        slug = cell.slug.as_ref(),
+        intermediate = intermediate.display(),
+        customize = render_command(&customize),
+        ca = ca_cert.display(),
+        fmt = cell.output.format.as_str(),
+        final = artifact_path(cell, context).display(),
+    )
 }
 
 /// Render an argv as a copy-pasteable multiline shell command (bash backslash continuations), with

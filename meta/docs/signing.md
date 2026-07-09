@@ -167,37 +167,55 @@ sequenceDiagram
   participant E as executor (bollard)
   participant J as janitor
   participant G as Signer (port)
-  T->>G: preflight(profiles) — once, before any IC run
+  T->>G: preflight(signers) — once, before any IC run
   G-->>T: ok ✔ / missing tool·key·creds ✘ (fail fast, no build starts)
-  T->>E: IC customize (config has output.artifacts)
-  E-->>T: image + output-artifacts/ (root-owned) + inject-files.yaml
-  T->>J: chown output-artifacts/ to caller (sudo-free)
-  T->>G: sign(inject-files.yaml, artifacts dir, profile)
-  G-->>T: signed artifacts in place (+ published CA cert)
-  T->>E: IC inject-files (inject-files.yaml)
-  E-->>T: final signed image
-  T->>J: chown final image to caller
+  T->>E: IC customize → RAW intermediate (output.artifacts staged to .tailor-stage.<slug>.<run-id>)
+  E-->>T: <slug>.intermediate.raw + staging dir (root-owned) + inject-files.yaml
+  T->>J: chown staging dir to caller (sudo-free, BEFORE signing)
+  T->>G: sign(inject-files.yaml, staging dir, leaf_id, ca_cert_dest)
+  G-->>T: signed artifacts in place (+ published CA cert to <output_dir>/<slug>.ca_cert.pem)
+  T->>E: IC inject-files (raw intermediate + inject-files.yaml) → final format
+  E-->>T: final signed image (<slug>.<fmt>)
+  T->>J: chown final image; reclaim staging + raw intermediate
 ```
 
-1. **Customize** exactly as today (the user's `output.artifacts` rides along in the working-copy
-   config). Output dir is the cell's artifact dir.
+1. **Customize → a raw intermediate.** A signed cell **forces scratch staging** (the
+   `output-artifacts` gate + relocate of `output.artifacts.path` to `./.tailor-stage.<slug>.<run-id>/`,
+   `meta/docs/output-artifacts-staging.md` §3.2), and customize runs with
+   **`--output-image-format raw --output-image-file <slug>.intermediate.raw`** — the final format is
+   produced by the `inject-files` pass, not here. Two dedicated arg vectors,
+   `build_signed_customize_args` (raw output) and `build_inject_files_args`, sit beside `build_ic_args`.
 2. **Detect signing work — presence-based, not config parsing.** After customize, if the image has a
-   `signing:` profile **and** IC emitted an `inject-files.yaml` (+ artifacts dir), proceed; otherwise:
+   `signing:` profile **and** IC emitted an `inject-files.yaml` in the staging dir, proceed; otherwise:
    - `signing:` set but **no** `inject-files.yaml` ⇒ the IC config declared no `output.artifacts`
      → **hard error** ("`signing:` requested but the IC config produced no `output.artifacts`").
    - no `signing:` ⇒ skip (single-pass, today's behavior). This keeps tailor config-opaque:
      it reacts to IC's *output*, never reads the input `config:`.
-3. **Normalize ownership** of the artifacts dir via the janitor so signing runs as the caller.
-4. **Sign** via the resolved `Signer` (§6), in place: `unsignedSource` → `source` for every entry in
-   `inject-files.yaml`, by artifact type.
-5. **inject-files** IC pass: a new arg vector
-   `inject-files --build-dir /tmp --image-file <customized> --inject-files-config <inject-files.yaml>
-    --output-image-format <fmt> --output-image-file <final>` (exact flags TBD against IC — §10),
-   with all host paths translated to the `/host` mount as usual.
-6. **Normalize ownership** of the final image; write the build stamp.
+3. **Normalize ownership** of the staging dir via the janitor **before** signing (IC wrote it as root;
+   the host signer must read the unsigned artifacts and write signed replacements back into it).
+4. **Sign** via the resolved `Signer` (§6), in place, for every entry in `inject-files.yaml` by
+   artifact type (PE → `sbsign`, verity-hash → `openssl smime`). The CA cert is published to the real
+   output dir at `<output_dir>/<slug>.ca_cert.pem` (never into the swept staging dir).
+5. **inject-files** IC pass: the `build_inject_files_args` vector runs
+   `inject-files --image-file <slug>.intermediate.raw --inject-files-config <inject-files.yaml>
+    --output-image-format <fmt> --output-image-file <slug>.<fmt>` (host paths translated to `/host`).
+   **`cosiCompressionLevel` applies only to this final pass**, never the raw intermediate.
+6. **Normalize ownership** of the final image; **reclaim the staging dir and the raw intermediate**
+   (janitor `rm`, failure-safe); write the build stamp.
 
-`--dry-run` prints all three steps (the two `docker run` invocations and the signing commands)
-without executing — so the signed flow is as inspectable as the unsigned one.
+**Wiring.** The signer is threaded per cell via `ExecutionContext.signer`. `Orchestrator::build()` /
+`dry_run()` take a `signer_for: &dyn Fn(&Cell) -> Option<Arc<dyn Signer>>` resolver that the
+composition root (`run.rs`) fills via `tailor_sign::build_signer` — `tailor-core` never depends on the
+signing adapter. `tailor clean` also removes each signed cell's `<slug>.ca_cert.pem` (the
+`ca_cert_name` helper) alongside its image and stamp.
+
+`--dry-run` renders the real 3-pass for a signed cell — `customize … --output-image-format raw …
+<slug>.intermediate.raw`, then the sign step, then `inject-files → <slug>.<fmt>` — so the signed flow
+is as inspectable as the unsigned one, with no daemon contacted.
+
+> **Not yet implemented (known gaps).** The fingerprint still keys off the legacy `injectFiles` bool
+> rather than **signer identity** (`signing-status.md`), so signed outputs are not yet cached on the
+> signing profile; and the inert `injectFiles` image field is **retained** (not retired) for now.
 
 ### 5.1 Preflight — fail fast before building
 

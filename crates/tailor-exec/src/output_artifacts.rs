@@ -23,8 +23,17 @@ const ARTIFACTS_KEY: &str = "artifacts";
 const PATH_KEY: &str = "path";
 /// Prefix of the hidden, tailor-named staging directories (so the crash sweep can recognise its own).
 const STAGE_PREFIX: &str = ".tailor-stage";
+/// Suffix of the enrollable CA cert dropped beside a signed image (`meta/docs/signing.md` §6).
+const CA_CERT_SUFFIX: &str = "ca_cert.pem";
 
 static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// The per-cell published CA cert filename, `<slug>.ca_cert.pem` — paired 1:1 with the image so
+/// concurrent tailor instances never clobber a shared cert (`meta/docs/signing.md` §6). Used by the
+/// executor to place the cert and by `tailor clean` to remove it.
+pub fn ca_cert_name(slug: &str) -> String {
+    format!("{slug}.{CA_CERT_SUFFIX}")
+}
 
 /// What tailor does with the staging directory after IC runs (§3.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +52,7 @@ pub(crate) fn run_id() -> String {
 }
 
 /// The activation gate (§3.1): does this cell opt into the `output-artifacts` preview feature?
-pub(crate) fn uses_output_artifacts(ic_config: &Value) -> bool {
+pub fn uses_output_artifacts(ic_config: &Value) -> bool {
     ic_config
         .get(PREVIEW_FEATURES_KEY)
         .and_then(Value::as_sequence)
