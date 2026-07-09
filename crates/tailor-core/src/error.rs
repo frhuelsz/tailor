@@ -64,6 +64,9 @@ pub enum CoreError {
     #[error(transparent)]
     Exec(#[from] ExecError),
 
+    #[error(transparent)]
+    Sign(#[from] crate::signing::SignError),
+
     #[error("tailor.lock is missing a `{platform}` entry for `{reference}`; run `tailor lock`")]
     LockMissing { reference: String, platform: String },
 

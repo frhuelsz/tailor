@@ -5,6 +5,7 @@
 use std::{
     future::Future,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use tailor_config::{Arch, BaseImageSource, BaseSource, ToolchainEntry};
@@ -13,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     domain::Cell,
     error::{ExecError, ResolveError},
+    signing::SignError,
 };
 
 /// The Image Customizer execution port: run IC in a container for one cell, end to end.
@@ -52,8 +54,48 @@ pub struct ExecutionContext {
     pub clone_index: Option<u32>,
     /// Print the resolved IC argument vector without running.
     pub dry_run: bool,
+    /// The resolved signer for this cell, when its image opts into `signing:` (`meta/docs/signing.md`
+    /// §5/§6). `None` for unsigned cells — the executor then runs the single-pass `customize`. Held as
+    /// a `dyn Signer` so per-cell profiles can differ; the executor calls it on a blocking thread.
+    pub signer: Option<Arc<dyn Signer>>,
     /// Runtime knobs (path translation root, privilege, janitor image, …).
     pub runtime: RuntimeConfig,
+}
+
+/// The host-side signing port: sign the boot artifacts IC emits from a `customize` pass, in place,
+/// so IC's `inject-files` pass can re-inject them (`meta/docs/signing.md` §6). Object-safe and
+/// **synchronous** — held as `dyn Signer` in [`ExecutionContext`]; the executor invokes it on a
+/// blocking thread so the async runtime is never blocked on `openssl`/`sbsign`.
+pub trait Signer: Send + Sync + std::fmt::Debug {
+    /// Cheap, side-effect-free check that this backend can sign: required host binaries present
+    /// (`openssl`, and `sbsign` when PE artifacts are expected) and key material resolvable. Called
+    /// once per build, before any IC run (`meta/docs/signing.md` §5.1).
+    fn preflight(&self) -> Result<(), SignError>;
+
+    /// Sign every entry in the `inject-files.yaml` IC emitted, in place (`unsignedSource` → `source`),
+    /// returning any published CA cert.
+    fn sign(&self, plan: &SigningPlan) -> Result<SigningResult, SignError>;
+}
+
+/// The inputs a [`Signer`] needs to sign one cell's artifacts (`meta/docs/signing.md` §6).
+#[derive(Debug, Clone)]
+pub struct SigningPlan {
+    /// The `inject-files.yaml` IC emitted alongside the customized image — lists each artifact's
+    /// `unsignedSource`/`source`/`type`.
+    pub inject_files_yaml: PathBuf,
+    /// The directory holding the (un)signed boot artifacts.
+    pub artifacts_dir: PathBuf,
+    /// A per-cell/clone identifier, so parallel signs never share a leaf key.
+    pub leaf_id: String,
+    /// Where to publish the CA cert (`<slug>.ca_cert.pem`), for `local-test-ca`.
+    pub ca_cert_dest: PathBuf,
+}
+
+/// The outcome of signing one cell (`meta/docs/signing.md` §6).
+#[derive(Debug, Clone, Default)]
+pub struct SigningResult {
+    /// The published CA cert (`local-test-ca` only), for firmware enrollment; `None` for `keypair`.
+    pub published_ca_cert: Option<PathBuf>,
 }
 
 /// The result of one cell execution.

@@ -474,6 +474,7 @@ mod tests {
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: false,
+            signer: None,
             runtime: RuntimeConfig {
                 host_root: PathBuf::from("/host"),
                 privileged: true,

@@ -143,6 +143,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                 platform: format!("linux/{}", planned.cell.arch),
                 clone_index: options.clone_index,
                 dry_run: options.dry_run,
+                signer: None,
                 runtime: runtime.clone(),
             };
             progress(BuildProgress::Building {
@@ -191,6 +192,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     platform: format!("linux/{}", cell.arch),
                     clone_index: None,
                     dry_run: true,
+                    signer: None,
                     runtime: runtime.clone(),
                 };
                 results.push(

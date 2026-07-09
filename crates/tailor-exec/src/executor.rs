@@ -335,6 +335,7 @@ mod tests {
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: true,
+            signer: None,
             runtime: RuntimeConfig::default(),
         }
     }

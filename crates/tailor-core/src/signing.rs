@@ -31,30 +31,39 @@ pub struct MissingPrerequisite {
     pub images: Vec<String>,
 }
 
-/// The aggregated signing-preflight failure: *every* unmet prerequisite, so the user fixes them all
-/// in one pass rather than one failed build at a time (`meta/docs/signing.md` §5.1).
+/// The signing feature's error. Preflight aggregates *every* unmet prerequisite so the user fixes
+/// them all in one pass rather than one failed build at a time (`meta/docs/signing.md` §5.1);
+/// execution failures wrap the failing step.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignError {
-    /// Every prerequisite that failed.
-    pub missing: Vec<MissingPrerequisite>,
+pub enum SignError {
+    /// Preflight found unmet prerequisites — a missing tool binary, an unreadable key, etc. Reported
+    /// in aggregate, before any (slow, privileged) IC run.
+    Preflight { missing: Vec<MissingPrerequisite> },
+    /// A signing step failed during execution (openssl/sbsign, `inject-files.yaml` handling, or IO).
+    Execution { detail: String },
 }
 
 impl std::fmt::Display for SignError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "signing preflight failed — fix every prerequisite below, then rebuild:"
-        )?;
-        for item in &self.missing {
-            write!(
-                formatter,
-                "\n  - profile `{}` (needed by: {}): {}",
-                item.profile_id,
-                item.images.join(", "),
-                item.detail
-            )?;
+        match self {
+            SignError::Preflight { missing } => {
+                write!(
+                    formatter,
+                    "signing preflight failed — fix every prerequisite below, then rebuild:"
+                )?;
+                for item in missing {
+                    write!(
+                        formatter,
+                        "\n  - profile `{}` (needed by: {}): {}",
+                        item.profile_id,
+                        item.images.join(", "),
+                        item.detail
+                    )?;
+                }
+                Ok(())
+            }
+            SignError::Execution { detail } => write!(formatter, "signing failed: {detail}"),
         }
-        Ok(())
     }
 }
 
@@ -142,7 +151,7 @@ pub fn preflight(
     if missing.is_empty() {
         Ok(())
     } else {
-        Err(SignError { missing })
+        Err(SignError::Preflight { missing })
     }
 }
 
@@ -264,8 +273,11 @@ mod tests {
 
         let err = preflight(&requirements, dir.path()).unwrap_err();
         // Both the missing key and the missing cert of the `byo` profile are reported.
-        assert_eq!(err.missing.len(), 2);
-        assert!(err.missing.iter().all(|item| item.profile_id == "byo"));
+        let SignError::Preflight { missing } = &err else {
+            panic!("expected a preflight error, got {err:?}");
+        };
+        assert_eq!(missing.len(), 2);
+        assert!(missing.iter().all(|item| item.profile_id == "byo"));
         let rendered = err.to_string();
         assert!(rendered.contains("byo"));
         assert!(rendered.contains("appliance"));

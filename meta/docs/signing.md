@@ -1,8 +1,14 @@
 # tailor — Signing & `inject-files`
 
-> **Status:** Partially implemented (S1 foundation only) · _last reviewed 2026-06-29_
+> **Status:** Implemented (S1) — as-built design · _last reviewed 2026-07-08_
 >
-> The `signing:` schema, profile validation, preflight reporting, and `--dry-run` behavior exist in `crates/tailor-config/src/schema.rs`, `crates/tailor-core/src/signing.rs`, and `crates/tailor/src/run.rs`. The actual signed execution pipeline is still absent: signed builds hard-error via `signing_not_implemented`; see `signing-status.md` for the detailed gap analysis.
+> **Stack (as built in sessions 262/263/268; being reconstructed after the 2026-07-06 data loss):**
+> external **host** tools only — **`openssl`** mints the per-build CA and per-cell code-signing leaf and
+> signs verity-hash (detached CMS/DER), and **`sbsign`** signs PE/Authenticode boot artifacts. No
+> `rcgen`, no bundled crypto crate, no separate signing container. The `Signer` port lives in
+> `tailor-core`, the backends in a `tailor-sign` crate, and the executor gains a three-pass
+> (`customize` → sign → `inject-files`) mode. Preflight fails fast **at build start** if `openssl` /
+> `sbsign` (or a BYO key/cert) is missing — before any slow, privileged IC run.
 
 ---
 
@@ -74,13 +80,13 @@ flowchart LR
 
 - Produce Secure Boot–signed images from a declarative manifest: a single `signing:` profile, no
   bespoke scripts.
-- **Minimize external dependencies**: do the trivial parts in pure Rust (cert generation via `rcgen`,
-  orchestration, optionally verity-hash CMS) and keep exactly **one** vetted external tool for the
-  non-trivial PE/Authenticode signing (`sbsign`), run in a container so the host still needs only a
-  Docker daemon (§6).
-- **Fail fast**: verify every signing prerequisite — the signer tool/image, BYO key+cert files,
-  remote credentials — **once, up front, before any (slow, privileged) IC run**. Never customize N
-  cells only to discover at the signing step that `sbsign` or a key is missing.
+- **Lean, explicit external toolchain**: `openssl` (CA + per-cell leaf + verity-hash CMS) and `sbsign`
+  (PE/Authenticode), both **host** binaries. Orchestration and `inject-files.yaml` handling are pure
+  Rust. No bundled crypto crate; no separate signing container (§6).
+- **Fail fast**: verify every signing prerequisite — the signer tool **binaries** (`openssl`, and
+  `sbsign` when PE artifacts are expected), BYO key+cert files, remote credentials — **once, up front,
+  before any (slow, privileged) IC run**. Never customize N cells only to discover at the signing step
+  that `sbsign` or a key is missing.
 - Stay **config-opaque** (design §8): tailor must not parse the IC `config:` to discover
   `output.artifacts`. Drive the pipeline off the **artifacts IC actually emits**.
 - Keep the **no-`sudo`** guarantee: sign host-side after the janitor normalizes ownership.
@@ -110,7 +116,7 @@ from the user surface (it is currently an inert no-op; see §1).
 signing:
   default: test-ca                 # the profile used when an image says `signing: true`
   profiles:
-    test-ca:                       # MVP: self-signed CA minted per build (pure-Rust port of sign.py)
+    test-ca:                       # MVP: self-signed CA minted per build with openssl (port of sign.py)
       backend: local-test-ca
       publishCaCert: ./artifacts/ca_cert.pem   # where to write the enrollable CA cert
     byo:                           # bring-your-own signing key + cert (no CA generation)
@@ -204,10 +210,11 @@ first IC invocation**:
 1. Collect the **distinct signing profiles** across the selected cells (a build may mix signed and
    unsigned images; only signed ones contribute).
 2. For each, call the backend's `preflight()` (§6) — a **cheap, side-effect-free** capability probe:
-   - **signer tool present** — `sbsign` resolvable on `PATH` (host mode), or the **signer image is
-     present/pullable** (container mode);
+   - **signer tools present** — `openssl`, and (when PE artifacts will be signed) `sbsign`, resolvable
+     on `PATH`. This binary-presence check runs **at build start**, so a missing tool fails
+     immediately rather than minutes into a customize;
    - **key material resolvable** — for `keypair`, the `key`/`cert` files exist, are readable, and
-     parse; for `local-test-ca`, that `rcgen` can mint (always true — pure Rust);
+     parse; for `local-test-ca`, that `openssl` is present to mint the CA/leaf;
    - **remote reachable** — for `azure-key-vault`/`pkcs11`/`remote-service`, required credentials/modules are
      present and a cheap auth/handshake (or at least config completeness) succeeds.
 3. If **anything** is missing, **abort the whole build before any cell is customized**, with an error
@@ -228,14 +235,16 @@ A new port in `tailor-core`, implemented in a new `tailor-sign` crate (keeps key
 and unit-testable, and keeps `tailor-exec` focused on containers):
 
 ```rust
-// tailor-core::ports
-pub trait Signer {
-    /// Cheap, side-effect-free check that this backend can sign: tool/image present, key material
-    /// resolvable, remote reachable. Called once per build, before any IC run (§5.1).
-    async fn preflight(&self) -> Result<(), SignError>;
+// tailor-core::ports — object-safe and synchronous. Held as `dyn Signer` in `ExecutionContext`; the
+// executor calls `sign` on a blocking thread so the async runtime is never blocked on openssl/sbsign.
+pub trait Signer: Send + Sync {
+    /// Cheap, side-effect-free check that this backend can sign: required host binaries present
+    /// (`openssl`, and `sbsign` when PE artifacts are expected) and key material resolvable. Called
+    /// once per build, before any IC run (§5.1).
+    fn preflight(&self) -> Result<(), SignError>;
 
     /// Sign every entry in inject-files.yaml in place (unsignedSource -> source).
-    async fn sign(&self, plan: &SigningPlan) -> Result<SigningResult, SignError>;
+    fn sign(&self, plan: &SigningPlan) -> Result<SigningResult, SignError>;
 }
 
 pub struct SigningPlan {
@@ -246,58 +255,51 @@ pub struct SigningPlan {
 pub struct SigningResult { pub published_ca_cert: Option<PathBuf> }
 ```
 
-Each backend implements `preflight()` to assert its own prerequisites — `sbsign`-based backends check
-the binary/image; `keypair` stats and parses the `key`/`cert`; remote backends probe credentials —
-so the fail-fast gate (§5.1) needs no special-casing in the orchestrator.
+Each backend implements `preflight()` to assert its own prerequisites — `openssl`/`sbsign` on `PATH`,
+and for `keypair` the `key`/`cert` are stat'd and parsed — so the fail-fast gate (§5.1) needs no
+special-casing in the orchestrator.
 
-**Use pure Rust for the trivial pieces; keep a battle-tested external tool for the one non-trivial
-piece (PE signing).** `sign.py` shells out to four tools, but only one does anything hard:
+**Two external host binaries, no bundled crypto.** `sign.py` shells out to five NSS/`pesign` tools;
+tailor collapses that to `openssl` + `sbsign`:
 
-| Operation | `sign.py` uses | Recommendation | Why |
-| --------- | -------------- | -------------- | --- |
-| **Key + cert generation** (CA, per-image leaf, code-signing EKU) | `efikeygen`, `certutil`, `pk12util` (NSS) | **pure Rust — `rcgen`** | Trivial: just mints an X.509 CA + leaf. Deletes the whole NSS chain; keys live in memory/PEM. |
-| **Orchestration / `inject-files.yaml`** | (python) | **pure Rust — `serde_yaml` + std** | Already tailor's wheelhouse. |
-| **verity-hash signature** (detached CMS/PKCS#7 DER) | `openssl smime -sign` | **either** — RustCrypto `cms`, or keep `openssl` | Small and clean in Rust, but it *is* signature-format code; not worth agonizing over. |
-| **PE/Authenticode signing** (UKIs, shim, systemd-boot `.efi`) | `pesign` | **external — `sbsign`** | Non-trivial + security-critical; no mature pure-Rust drop-in. Keep a vetted tool. |
+| Operation | `sign.py` uses | tailor uses | Why |
+| --------- | -------------- | ----------- | --- |
+| **Key + cert generation** (CA, per-cell leaf, code-signing EKU) | `efikeygen`, `certutil`, `pk12util` (NSS) | **`openssl`** | Mints a self-signed X.509 CA + a code-signing leaf as PEM; drops the entire NSS chain. |
+| **Orchestration / `inject-files.yaml`** | (python) | **pure Rust — `serde_yaml_ng` + std** | Already tailor's wheelhouse. |
+| **verity-hash signature** (detached CMS/PKCS#7 DER) | `openssl smime -sign` | **`openssl smime -sign -noattr -binary -outform der`** | The same command `sign.py` uses; a detached DER signature. |
+| **PE/Authenticode signing** (UKIs, shim, systemd-boot `.efi`) | `pesign` | **`sbsign`** | Non-trivial + security-critical; `sbsign` takes a PEM `--key`/`--cert`, pairing cleanly with the openssl-minted leaf. |
 
-So the recommended **lean stack** keeps exactly one external signing tool:
+So the **as-built stack** is two external host binaries:
 
-> **`rcgen` (certs, pure Rust) + `sbsign` (PE signing, external) + verity-hash via `cms` (pure Rust)
-> or `openssl` (external).**
+> **`openssl` (CA + per-cell leaf + verity-hash CMS) + `sbsign` (PE/Authenticode).**
 
 A useful detail: **`sbsign` takes a PEM `--key`/`--cert`** whereas `pesign` wants an NSS db. Pairing
-`rcgen`'s PEM output with `sbsign` drops the *entire* `efikeygen`/`certutil`/`pk12util`/NSS/`pesign`
-chain — **one** external tool instead of five. The external signer runs **in a container** (host needs
-only Docker) or on the host.
+`openssl`'s PEM output with `sbsign` drops the *entire* `efikeygen`/`certutil`/`pk12util`/NSS/`pesign`
+chain — **two** external tools instead of five, both run on the host.
 
-> **Fully pure-Rust is possible but optional.** Replacing `sbsign` too means a first-party
-> **Authenticode PE writer** — the PE Authenticode hash, an `SpcIndirectDataContent` CMS `SignedData`,
-> and the PE attribute-certificate-table embedding. Fully specified (`sbsign`/`osslsigncode` are the
-> references) and bounded, but security-critical first-party crypto — so a *later, optional* hardening,
-> not a prerequisite. It becomes most attractive for **remote-key backends** (an HSM can't feed
-> `sbsign`), where tailor would build the structures and ask the HSM only for the raw signature; the
-> `signature::Signer` trait keeps that pluggable. Crypto stays RustCrypto + `ring` (never `aws-lc-rs`),
-> so none of this adds a C/system dependency to the binary.
+> **Fully pure-Rust is possible but optional (S3).** Replacing both tools means a first-party
+> **Authenticode PE writer** and RustCrypto-based cert/CMS generation — fully specified but
+> security-critical first-party crypto, so a *later, optional* hardening. It becomes most attractive
+> for **remote-key backends** (an HSM can't feed `sbsign`), where tailor would build the structures and
+> ask the HSM only for the raw signature; the `signature::Signer` trait keeps that pluggable.
 
 **Backends:**
 
 The three backends are **key-source profiles** (where the signing key comes from); the PE signer is
-orthogonal (`sbsign` for local keys, the first-party writer for remote keys, §6):
+orthogonal (`sbsign` for local keys, a first-party writer for remote keys, §6):
 
-- **`local-test-ca`** (MVP, CI) — mint a self-signed CA once per build and a leaf per `leaf_id` with
-  `rcgen`; sign PE with `sbsign` and verity-hash with `cms`; publish `ca_cert.pem`. Pure-Rust certs;
-  **not** a production trust root.
+- **`local-test-ca`** (MVP, CI) — mint a self-signed CA once per build and a code-signing leaf per
+  `leaf_id` with `openssl`; sign PE with `sbsign` and verity-hash with `openssl smime`; publish the CA
+  as `<slug>.ca_cert.pem` beside each image. **Not** a production trust root.
 - **`keypair`** (BYO) — load a PEM key + cert and sign with `sbsign`. The "we already have a Secure
   Boot cert" case.
 - **`azure-key-vault` / `pkcs11` / `remote-service`** (future) — the key can't be handed to `sbsign`, so tailor
   builds the Authenticode/CMS structures itself (the first-party PE writer, §6) and asks the remote
   signer only for the raw signature; the private key never leaves the HSM/service.
 
-> **Verdict on external deps:** the lean stack is `rcgen` + `sbsign` (one external signing tool, run
-> in a container so the host needs only Docker) + verity-hash via `cms`/`openssl`. Pure Rust covers
-> every trivial piece *and* the key generation; `sbsign` covers the one non-trivial, security-critical
-> piece (PE/Authenticode). A fully pure-Rust signer (first-party Authenticode writer) is an optional
-> later step, most useful once remote-key backends arrive.
+> **Verdict on external deps:** two host binaries — `openssl` (certs + verity CMS) and `sbsign` (PE).
+> Both are checked for presence at **build-start preflight** so a missing tool fails immediately. A
+> fully pure-Rust signer (first-party Authenticode writer) remains an optional later step (S3).
 
 ---
 
@@ -340,8 +342,7 @@ orthogonal (`sbsign` for local keys, the first-party writer for remote keys, §6
 - **Published CA cert is public** by design (it is the enrollment artifact); only the CA/leaf
   *private* keys are sensitive.
 - The signed pipeline keeps IC's existing `--privileged` + `/:/host` blast radius (design §15); it
-  adds a `sbsign` signer (host or container) and a little pure-Rust crypto (`rcgen`/`cms`), all
-  unprivileged.
+  adds `openssl` + `sbsign` host signing, all unprivileged.
 
 ---
 
@@ -350,11 +351,11 @@ orthogonal (`sbsign` for local keys, the first-party writer for remote keys, §6
 1. **Exact `inject-files` IC arg vector** and the `inject-files.yaml` schema across IC versions
    (`source`/`unsignedSource`/`type`; MIC v1.1+ reuses one path) — validate against IC docs and a
    real run before wiring `arg_builder.rs`.
-2. **PE signer choice.** Confirm `sbsign` (PEM key, runs in a container) as the standing PE signer —
-   it pairs with `rcgen`'s PEM output and avoids NSS/`pesign`. A first-party pure-Rust Authenticode
-   writer (`object`/`goblin` + `cms`) stays optional/later, becoming worthwhile mainly for remote-key
-   backends (where `sbsign` can't reach the key); verify either against `sbsign` output on a real
-   UKI/shim. Also decide verity-hash: RustCrypto `cms` vs. keeping `openssl`.
+2. **PE signer choice — decided.** `sbsign` (PEM key, host binary) is the standing PE signer: it
+   pairs with the `openssl`-minted PEM leaf and avoids NSS/`pesign`. Verity-hash is `openssl smime`
+   (detached DER). A first-party pure-Rust Authenticode writer (`object`/`goblin` + `cms`) stays
+   optional/later (S3), becoming worthwhile mainly for remote-key backends where `sbsign` can't reach
+   the key.
 3. **Output-artifacts directory location** relative to the working-copy config (IC resolves
    `output.artifacts.path` relative to the config file, like other paths — §7.6) and its
    translation into `/host`.
@@ -369,15 +370,15 @@ orthogonal (`sbsign` for local keys, the first-party writer for remote keys, §6
 
 ```mermaid
 graph LR
-  S1["S1: pipeline + lean stack<br/>(rcgen + sbsign-in-container)"] --> S2["S2: remote backends<br/>(Key Vault / PKCS#11 / remote-service)"]
+  S1["S1: pipeline + host stack<br/>(openssl + sbsign)"] --> S2["S2: remote backends<br/>(Key Vault / PKCS#11 / remote-service)"]
   S2 --> S3["S3 (optional): pure-Rust<br/>Authenticode writer (drop sbsign)"]
 ```
 
-- **S1 — pipeline + the lean stack.** Three-pass executor mode (`customize` → sign → `inject-files`),
-  **fail-fast preflight (§5.1)**, presence-based detection, janitor ownership, `--dry-run`, and the
-  fingerprint change. Certs in pure Rust (`rcgen`), PE signing via `sbsign` **in a container**
-  (Docker-only, no host tools), verity-hash via `cms`. Backends `keypair` (BYO) + `local-test-ca`;
-  one real signed E2E cell as the correctness bar.
+- **S1 — pipeline + the host stack.** Three-pass executor mode (`customize` → sign → `inject-files`),
+  **fail-fast preflight (§5.1)** including `openssl`/`sbsign` binary-presence, presence-based detection,
+  janitor ownership, `--dry-run`, and the fingerprint change. Certs + verity-hash via `openssl`, PE
+  signing via `sbsign` — both host binaries. Backends `keypair` (BYO) + `local-test-ca`; one real
+  signed E2E cell as the correctness bar.
 - **S2 — remote backends.** `azure-key-vault` / `pkcs11` / `remote-service` behind the same `Signer` trait. As
   `sbsign` can't reach a remote key, this is where the first-party Authenticode/CMS structure-building
   lands for PE artifacts (tailor builds, the HSM/service signs).
@@ -391,10 +392,9 @@ graph LR
 
 tailor can't sign today — `injectFiles` is an inert placeholder. This design adds a **config-opaque,
 no-`sudo`, dependency-lean, backend-pluggable** signed pipeline: tailor runs IC `customize`, reacts
-to the `inject-files.yaml`/artifacts IC emits, signs them through a `Signer` port — the trivial parts
-in pure Rust (cert generation via `rcgen`, verity-hash via `cms`) and the one non-trivial part
-(PE/Authenticode) via `sbsign` in a container, so the host needs only Docker — then runs IC
-`inject-files` to produce the final Secure Boot–signed image. It's all driven by a **single `signing:`
-profile** (the redundant `injectFiles` flag is retired), with the user's `output.artifacts` left
-untouched in their IC config. A fully pure-Rust signer (first-party Authenticode writer) remains an
-optional later step.
+to the `inject-files.yaml`/artifacts IC emits, signs them through a `Signer` port — certs and
+verity-hash via `openssl` and PE/Authenticode via `sbsign`, two external **host** binaries checked for
+presence up front — then runs IC `inject-files` to produce the final Secure Boot–signed image. It's
+all driven by a **single `signing:` profile** (the redundant `injectFiles` flag is retired), with the
+user's `output.artifacts` left untouched in their IC config. A fully pure-Rust signer (first-party
+Authenticode writer) remains an optional later step.

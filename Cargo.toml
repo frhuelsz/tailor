@@ -6,6 +6,7 @@ members = [
     "crates/tailor-core",
     "crates/tailor-exec",
     "crates/tailor-resolve",
+    "crates/tailor-sign",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ tailor-config = { path = "crates/tailor-config" }
 tailor-core = { path = "crates/tailor-core" }
 tailor-exec = { path = "crates/tailor-exec" }
 tailor-resolve = { path = "crates/tailor-resolve" }
+tailor-sign = { path = "crates/tailor-sign" }
 
 # --- async runtime ---
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "fs", "signal", "process"] }
