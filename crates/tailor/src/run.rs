@@ -2,7 +2,7 @@
 //! and implements each CLI verb (`meta/docs/design.md` §11).
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -13,12 +13,12 @@ use tailor_config::{
     expand, find_manifest, merge_plan, render_image, write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, CoreError, Executor, LockedBase, LockedContainer, Lockfile,
-    Orchestrator, ResolvedBase, Selector, SigningRequirement, SlotSource, SlotSummary, Target,
-    ado_matrix, cells_selected, download, is_valid_var_name, preflight_profile, runtime_config,
-    summarize, verify,
+    BaseResolver, BuildOptions, Cell, CoreError, Executor, LockedBase, LockedContainer, Lockfile,
+    MissingPrerequisite, Orchestrator, ResolvedBase, Selector, SignError, Signer,
+    SigningRequirement, SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download,
+    is_valid_var_name, runtime_config, summarize, verify,
 };
-use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, resolve};
+use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
 use tokio_util::sync::CancellationToken;
 
@@ -244,10 +244,10 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
     }
     // Surface signing prerequisites non-fatally (meta/docs/signing.md §5.1) so they are discoverable
     // without starting a real build.
-    report_signing(
+    report_signing(&build_signers(
         &signing_requirements(&targets, tool.signing.as_ref())?,
         &workspace.root,
-    );
+    ));
     Ok(())
 }
 
@@ -581,34 +581,40 @@ async fn build(
         std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?,
     );
     let signing = signing_requirements(&targets, tool.signing.as_ref())?;
+    // Build one signer per required profile (a shared CA per build); `signer_for` resolves a cell to
+    // its signer via the image name (meta/docs/signing.md §6). Empty when nothing signs.
+    let signers = build_signers(&signing, &workspace.root);
+    let image_signer: HashMap<&str, Arc<dyn Signer>> = signers
+        .iter()
+        .flat_map(|(requirement, signer)| {
+            requirement
+                .images
+                .iter()
+                .map(move |image| (image.as_str(), Arc::clone(signer)))
+        })
+        .collect();
+    let signer_for = |cell: &Cell| image_signer.get(cell.target.name()).cloned();
 
-    // Dry-run prints each selected cell's container invocation without resolving digests, running,
-    // or contacting any engine — so it stays daemon-free via a no-op runtime.
+    // Dry-run prints each selected cell's container invocation (the signed 3-pass for signed cells)
+    // without resolving digests, running, or contacting any engine — daemon-free via a no-op runtime.
     if args.dry_run {
         let orchestrator = Orchestrator::new(IcExecutor::new(NoopRuntime), OciResolver::new());
         let results = orchestrator
-            .dry_run(&targets, &tool, &selection, &output_dir)
+            .dry_run(&targets, &tool, &selection, &output_dir, &signer_for)
             .await?;
         println!("{} cell(s) (dry-run)\n", results.len());
         for result in results {
             println!("{}\n", result.logs);
         }
         if !signing.is_empty() {
-            report_signing(&signing, &workspace.root);
-            println!(
-                "note: signing execution is not yet implemented; this dry-run shows the unsigned \
-                 customize invocation (meta/docs/signing.md §11)."
-            );
+            report_signing(&signers);
         }
         return Ok(());
     }
 
-    // Fail fast on signing prerequisites *before* any IC run (meta/docs/signing.md §5.1); then, since
-    // signing execution is not yet wired, refuse rather than emit a silently-unsigned image.
-    if !signing.is_empty() {
-        tailor_core::preflight(&signing, &workspace.root)?;
-        return Err(signing_not_implemented(&signing));
-    }
+    // Fail fast on every signing prerequisite — including the `openssl`/`sbsign` binaries — before any
+    // (slow, privileged) IC run (meta/docs/signing.md §5.1).
+    preflight_signers(&signers)?;
 
     // A real build contacts the engine: resolve it and fail fast now if it is missing or
     // unreachable (`meta/docs/container-runtimes.md` §4-§5).
@@ -669,6 +675,7 @@ async fn build(
                 &options,
                 CancellationToken::new(),
                 &mut on_progress,
+                &signer_for,
             )
             .await?;
     }
@@ -695,11 +702,23 @@ async fn clean(
 
     let mut paths = Vec::new();
     for target in &targets {
+        // A signed image also drops an enrollable CA cert beside each cell's image (§6); remove it
+        // too. Lenient on config: `validate` surfaces signing errors; cleanup should not fail on them.
+        let signed = tailor_config::resolve_signing(
+            target.definition.signing.as_ref(),
+            tool.signing.as_ref(),
+        )
+        .ok()
+        .flatten()
+        .is_some();
         for cell in cells_selected(target, selector)? {
             paths.push(output_dir.join(tailor_core::artifact_name(
                 cell.slug.as_ref(),
                 cell.output.format,
             )));
+            if signed {
+                paths.push(output_dir.join(ca_cert_name(cell.slug.as_ref())));
+            }
         }
     }
 
@@ -897,43 +916,80 @@ fn signing_requirements<'a>(
     Ok(requirements)
 }
 
-/// Report signing-preflight status **without failing** — for `validate` and `--dry-run`
-/// (`meta/docs/signing.md` §5.1). Relative key/cert paths resolve against `base_dir`.
-fn report_signing(requirements: &[SigningRequirement<'_>], base_dir: &Path) {
-    for requirement in requirements {
-        let unmet = preflight_profile(requirement.profile, base_dir);
-        if unmet.is_empty() {
-            println!(
-                "✓ signing profile `{}` ready (image(s): {})",
-                requirement.profile_id,
-                requirement.images.join(", ")
-            );
-        } else {
-            for detail in unmet {
-                println!(
-                    "⚠ signing profile `{}` not ready: {} (image(s): {})",
-                    requirement.profile_id,
-                    detail,
-                    requirement.images.join(", ")
-                );
+/// A required signing profile paired with its resolved [`Signer`].
+type ProfileSigner<'a> = (&'a SigningRequirement<'a>, Arc<dyn Signer>);
+
+/// Build one [`Signer`] per required profile — a shared CA per build (`meta/docs/signing.md` §6).
+/// Relative `keypair` key/cert paths resolve against the workspace root.
+fn build_signers<'a>(
+    requirements: &'a [SigningRequirement<'a>],
+    root: &Path,
+) -> Vec<ProfileSigner<'a>> {
+    requirements
+        .iter()
+        .map(|requirement| {
+            (
+                requirement,
+                tailor_sign::build_signer(&requirement.profile_id, requirement.profile, root),
+            )
+        })
+        .collect()
+}
+
+/// Fail-fast signing gate (`meta/docs/signing.md` §5.1): run every signer's preflight (tool binaries
+/// and key material), aggregating all unmet prerequisites — with the requesting images — into one
+/// error, so the user fixes them in a single pass before any IC run.
+fn preflight_signers(signers: &[ProfileSigner<'_>]) -> Result<(), AppError> {
+    let mut missing: Vec<MissingPrerequisite> = Vec::new();
+    for (requirement, signer) in signers {
+        match signer.preflight() {
+            Ok(()) => {}
+            Err(SignError::Preflight { missing: unmet }) => {
+                for mut item in unmet {
+                    // The signer does not know which images requested it; fill that in for the report.
+                    item.images.clone_from(&requirement.images);
+                    missing.push(item);
+                }
             }
+            Err(SignError::Execution { detail }) => missing.push(MissingPrerequisite {
+                profile_id: requirement.profile_id.clone(),
+                detail,
+                images: requirement.images.clone(),
+            }),
         }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(SignError::Preflight { missing }.into())
     }
 }
 
-/// The hard error returned for a signed build while signing **execution** is not yet implemented
-/// (`meta/docs/signing.md` §11). tailor refuses rather than emit a silently-unsigned image.
-fn signing_not_implemented(requirements: &[SigningRequirement<'_>]) -> AppError {
-    let profiles: Vec<&str> = requirements
-        .iter()
-        .map(|requirement| requirement.profile_id.as_str())
-        .collect();
-    AppError::Message(format!(
-        "signing is requested (profile(s): {}) and its prerequisites are satisfied, but the signing \
-         pipeline is not yet implemented (Milestone S1 in progress — see meta/docs/signing.md §11). \
-         Refusing to build a silently-unsigned image; remove `signing:` to build unsigned.",
-        profiles.join(", ")
-    ))
+/// Report signing-preflight status **without failing** — for `validate` and `--dry-run`
+/// (`meta/docs/signing.md` §5.1). Runs each signer's preflight so missing `openssl`/`sbsign` binaries
+/// surface too.
+fn report_signing(signers: &[ProfileSigner<'_>]) {
+    for (requirement, signer) in signers {
+        let images = requirement.images.join(", ");
+        match signer.preflight() {
+            Ok(()) => println!(
+                "✓ signing profile `{}` ready (image(s): {images})",
+                requirement.profile_id
+            ),
+            Err(SignError::Preflight { missing }) => {
+                for item in missing {
+                    println!(
+                        "⚠ signing profile `{}` not ready: {} (image(s): {images})",
+                        requirement.profile_id, item.detail
+                    );
+                }
+            }
+            Err(SignError::Execution { detail }) => println!(
+                "⚠ signing profile `{}` not ready: {detail} (image(s): {images})",
+                requirement.profile_id
+            ),
+        }
+    }
 }
 
 // ───────────────────────────── helpers ─────────────────────────────

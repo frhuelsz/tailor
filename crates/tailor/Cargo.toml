@@ -16,6 +16,7 @@ tailor-core = { workspace = true }
 tailor-config = { workspace = true }
 tailor-resolve = { workspace = true }
 tailor-exec = { workspace = true }
+tailor-sign = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

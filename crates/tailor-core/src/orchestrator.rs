@@ -21,6 +21,7 @@ use crate::{
     lockfile::Lockfile,
     ports::{
         BaseResolver, ExecutionContext, ExecutionResult, Executor, ResolvedBase, RuntimeConfig,
+        Signer,
     },
     selector::Selector,
     stamp,
@@ -125,6 +126,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         options: &BuildOptions,
         cancel: CancellationToken,
         progress: &mut dyn FnMut(BuildProgress<'_>),
+        signer_for: &dyn Fn(&Cell) -> Option<Arc<dyn Signer>>,
     ) -> Result<Vec<ExecutionResult>, CoreError> {
         let runtime = runtime_config(tool, lock);
         let mut results = Vec::new();
@@ -143,7 +145,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                 platform: format!("linux/{}", planned.cell.arch),
                 clone_index: options.clone_index,
                 dry_run: options.dry_run,
-                signer: None,
+                signer: signer_for(&planned.cell),
                 runtime: runtime.clone(),
             };
             progress(BuildProgress::Building {
@@ -176,6 +178,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         tool: &ToolConfig,
         selector: &Selector,
         output_dir: &Path,
+        signer_for: &dyn Fn(&Cell) -> Option<Arc<dyn Signer>>,
     ) -> Result<Vec<ExecutionResult>, CoreError> {
         let runtime = runtime_config(tool, &Lockfile::default());
         let mut results = Vec::new();
@@ -192,7 +195,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     platform: format!("linux/{}", cell.arch),
                     clone_index: None,
                     dry_run: true,
-                    signer: None,
+                    signer: signer_for(&cell),
                     runtime: runtime.clone(),
                 };
                 results.push(
@@ -637,6 +640,7 @@ mod tests {
                 &BuildOptions::default(),
                 CancellationToken::new(),
                 &mut |_| {},
+                &|_| None,
             )
             .await
             .unwrap();
@@ -667,7 +671,13 @@ mod tests {
         let out = TempDir::new().unwrap();
 
         let results = orchestrator
-            .dry_run(&[target], &tool_config(), &Selector::default(), out.path())
+            .dry_run(
+                &[target],
+                &tool_config(),
+                &Selector::default(),
+                out.path(),
+                &|_| None,
+            )
             .await
             .unwrap();
 

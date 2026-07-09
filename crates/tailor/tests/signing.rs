@@ -1,9 +1,9 @@
 //! End-to-end CLI integration tests for the signing foundation (`meta/docs/signing.md`).
 //!
 //! These drive the real `tailor` binary against the synthetic `tests/fixtures/signing/` workspace.
-//! They cover the implemented slice — the `signing:` config surface, profile resolution, and the
-//! fail-fast preflight — and assert that signing *execution* (not yet wired) is refused rather than
-//! silently skipped. No Docker or network is involved: every signing path resolves before the engine.
+//! They cover the `signing:` config surface, profile resolution, the fail-fast preflight, and the
+//! signed dry-run rendering the three-pass. No Docker or network is involved: every signing path
+//! resolves before the engine, and the dry-run renders the passes without running them.
 //!
 //! The `keys/db.{key,crt}` fixtures are PEM-armored stubs (header only), not real key material —
 //! enough for the preflight's PEM-shape check.
@@ -64,35 +64,23 @@ fn build_fails_fast_when_a_signing_key_is_missing() {
 }
 
 #[test]
-fn build_refuses_a_signed_image_until_execution_is_implemented() {
-    // Prerequisites satisfied (local-test-ca is always ready), but execution is unimplemented:
-    // tailor refuses rather than emit a silently-unsigned image.
+fn dry_run_byo_renders_the_signed_pass_after_preflight() {
+    // `ok-byo` references the committed PEM stubs, so the keypair preflight passes; a dry-run then
+    // renders the signed pass daemon-free (no real signing happens, so the stub keys are fine).
     tailor()
-        .args(["build", "ok-default"])
+        .args(["build", "--dry-run", "ok-byo"])
         .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("not yet implemented").and(predicate::str::contains(
-                "Refusing to build a silently-unsigned image",
-            )),
+        .success()
+        .stdout(
+            predicate::str::contains("signing profile `byo` ready")
+                .and(predicate::str::contains("inject-files")),
         );
 }
 
 #[test]
-fn build_byo_passes_preflight_then_refuses_execution() {
-    // `ok-byo` references the committed PEM stubs, so the keypair preflight passes; the build then
-    // stops at the not-yet-implemented gate (proving the preflight succeeded).
-    tailor()
-        .args(["build", "ok-byo"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("not yet implemented").and(predicate::str::contains("byo")),
-        );
-}
-
-#[test]
-fn dry_run_of_a_signed_image_is_daemon_free_and_notes_signing() {
+fn dry_run_of_a_signed_image_is_daemon_free_and_renders_the_three_pass() {
+    // Signing is implemented: a signed dry-run renders the real three-pass (customize → raw
+    // intermediate, sign, inject-files) without contacting any engine.
     tailor()
         .args(["build", "--dry-run", "ok-default"])
         .assert()
@@ -100,9 +88,9 @@ fn dry_run_of_a_signed_image_is_daemon_free_and_notes_signing() {
         .stdout(
             predicate::str::contains("(dry-run)")
                 .and(predicate::str::contains("signing profile `test-ca` ready"))
-                .and(predicate::str::contains(
-                    "signing execution is not yet implemented",
-                )),
+                .and(predicate::str::contains("--output-image-format raw"))
+                .and(predicate::str::contains("inject-files"))
+                .and(predicate::str::contains("ca_cert.pem")),
         );
 }
 
