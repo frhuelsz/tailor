@@ -1,16 +1,24 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tailor_config::{Arch, BaseSource, ToolchainEntry, ToolsDirSourceInline};
 use tailor_core::{BaseResolver, ResolveError, ResolvedBase};
 
 use crate::{azure_linux, local, oci, toolchain};
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct OciResolver;
+#[derive(Debug, Default, Clone)]
+pub struct OciResolver {
+    cache_dir: Option<PathBuf>,
+}
 
 impl OciResolver {
     pub fn new() -> Self {
-        Self
+        Self { cache_dir: None }
+    }
+
+    pub fn with_cache_dir(cache_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            cache_dir: Some(cache_dir.into()),
+        }
     }
 }
 
@@ -26,7 +34,11 @@ impl BaseResolver for OciResolver {
             // `image_dir` (never the process CWD) so this hash/existence check sees the same file IC
             // will (`--image-file` is built the same way in tailor-exec).
             BaseSource::Path { path, .. } => {
-                local::resolve(tailor_config::absolutize(path, image_dir)).await
+                local::resolve(
+                    tailor_config::absolutize(path, image_dir),
+                    self.cache_dir.as_deref(),
+                )
+                .await
             }
             BaseSource::Oci { oci } => oci::resolve(oci, arch).await,
             BaseSource::AzureLinux { azure_linux } => azure_linux::resolve(azure_linux, arch).await,
@@ -55,8 +67,8 @@ mod tests {
 
     use std::fs;
 
-    use sha2::{Digest, Sha256};
     use tempfile::tempdir;
+    use xxhash_rust::xxh3;
 
     #[tokio::test]
     async fn dispatches_local_sources() {
@@ -71,11 +83,11 @@ mod tests {
             .await
             .unwrap();
 
-        let expected: [u8; 32] = Sha256::digest(content).into();
+        let expected = xxh3::xxh3_128(content).to_le_bytes();
         assert_eq!(
             resolved,
             ResolvedBase::LocalFile {
-                sha256: expected,
+                content_hash: expected,
                 size: content.len() as u64,
             }
         );
@@ -104,11 +116,11 @@ mod tests {
             .await
             .unwrap();
 
-        let expected: [u8; 32] = Sha256::digest(content).into();
+        let expected = xxh3::xxh3_128(content).to_le_bytes();
         assert_eq!(
             resolved,
             ResolvedBase::LocalFile {
-                sha256: expected,
+                content_hash: expected,
                 size: content.len() as u64,
             }
         );

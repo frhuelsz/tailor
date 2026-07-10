@@ -18,6 +18,18 @@ pipeline cannot do, and not pinned to one verified artifact. A `path` base avoid
 image repeats the same `../../../artifacts/<name>.vhdx`, and the `../` count breaks when the layout
 moves.
 
+## Change detection
+
+For local file bases (`path` and catalogue `ref` slots), tailor computes an **XXH3-128** content
+hash plus the file size before planning. This hash is only for rebuild/change detection; it is not a
+security or provenance digest, and local files are not pinned in `tailor.lock`.
+
+Large bases are cached on the build path. After the first hash, `tailor build` stores a versioned
+entry under `<output>/.tailor/base-hashes/` keyed by the base path and guarded by the stored absolute
+path, size, and mtime. If the size and mtime still match, the cached XXH3-128 value is reused and
+the base file is not re-read; if anything is missing, malformed, unwritable, or changed, tailor just
+hashes the file again.
+
 ## The catalogue model
 
 A **base-image catalogue** (`baseImages:` in `tailor.yaml`) resolves both problems. Each named **slot**

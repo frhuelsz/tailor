@@ -33,7 +33,7 @@ impl BaseResolver for FakeResolver {
             // Catalogue references collapse to a `path` base before resolution; treat any leftover as
             // a local file so test doubles stay deterministic.
             BaseSource::Path { .. } | BaseSource::Ref { .. } => ResolvedBase::LocalFile {
-                sha256: [0; 32],
+                content_hash: [0; 16],
                 size: 0,
             },
             BaseSource::Oci { oci } => ResolvedBase::Oci {

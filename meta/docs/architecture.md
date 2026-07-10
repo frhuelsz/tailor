@@ -449,7 +449,7 @@ pub trait BaseResolver: Send + Sync {
 }
 
 pub enum ResolvedBase {
-    LocalFile { sha256: [u8; 32], size: u64 },
+    LocalFile { content_hash: [u8; 16], size: u64 },
     Oci { digest: String, platform: String, uri: String },
 }
 

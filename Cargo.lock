@@ -1917,13 +1917,13 @@ dependencies = [
  "hex",
  "oci-client",
  "semver",
- "sha2",
  "tailor-config",
  "tailor-core",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -2750,6 +2750,12 @@ dependencies = [
  "libc",
  "rustix",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d93c89cdc2d3a63c3ec48ffe926931bdc069eafa8e4402fe6d8f790c9d1e576"
 
 [[package]]
 name = "yoke"

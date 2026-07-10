@@ -1334,7 +1334,7 @@ mod tests {
             Some("oci:mcr.microsoft.com/azurelinux/3.0/image/minimal-os@sha256:dead")
         );
         let local = ResolvedBase::LocalFile {
-            sha256: [0; 32],
+            content_hash: [0; 16],
             size: 0,
         };
         assert_eq!(base_image_ref(&local), None);

@@ -3,6 +3,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry},
+    fs,
     future::Future,
     path::{Path, PathBuf},
     sync::Arc,
@@ -35,6 +36,8 @@ use crate::{
 
 const LOCK_FILE: &str = "tailor.lock";
 const ARTIFACTS_DIR: &str = "artifacts";
+const TAILOR_STATE_DIR: &str = ".tailor";
+const BASE_HASH_CACHE_DIR: &str = "base-hashes";
 
 /// A per-invocation engine/endpoint override from the global `--engine` / `--host` flags
 /// (`meta/docs/container-runtimes.md` §3). Both sit above the manifest in the precedence ladder.
@@ -868,7 +871,9 @@ async fn build(
     // A real build contacts the engine: resolve it and fail fast now if it is missing or
     // unreachable (`meta/docs/container-runtimes.md` §4-§5).
     let runtime = establish_runtime(engine, &tool).await?;
-    let resolver = OciResolver::new();
+    let base_hash_cache_dir = output_dir.join(TAILOR_STATE_DIR).join(BASE_HASH_CACHE_DIR);
+    let _ = fs::create_dir_all(&base_hash_cache_dir);
+    let resolver = OciResolver::with_cache_dir(base_hash_cache_dir);
     let lock = Lockfile::read(&workspace.root.join(LOCK_FILE))?;
     let toolchains = resolve_toolchains(&targets, &tool, &runtime, &resolver, &lock).await?;
     let tools_dir_sources = resolve_tools_dir_sources(&targets, &runtime, &resolver, &lock).await?;
@@ -1071,7 +1076,7 @@ fn describe_artifact(artifact: &Path) -> String {
         .ok()
         .and_then(|cwd| artifact.strip_prefix(&cwd).ok().map(Path::to_path_buf))
         .unwrap_or_else(|| artifact.to_path_buf());
-    match std::fs::metadata(artifact) {
+    match fs::metadata(artifact) {
         Ok(meta) => format!("{} ({})", shown.display(), format_bytes(meta.len())),
         Err(_) => shown.display().to_string(),
     }
@@ -1467,11 +1472,11 @@ fn add_image(name: &str) -> Result<(), AppError> {
         .unwrap_or(&image_dir)
         .to_string_lossy()
         .replace('\\', "/");
-    let text = std::fs::read_to_string(&manifest)
+    let text = fs::read_to_string(&manifest)
         .map_err(|e| AppError::Message(format!("read {}: {e}", manifest.display())))?;
     let updated = scaffold::register_member(&text, &rel).map_err(AppError::Message)?;
     if updated != text {
-        std::fs::write(&manifest, updated)
+        fs::write(&manifest, updated)
             .map_err(|e| AppError::Message(format!("write {}: {e}", manifest.display())))?;
         println!("  updated {}", manifest.display());
     }
@@ -1507,15 +1512,15 @@ fn add_axis(image: Option<&str>, axis: &str) -> Result<(), AppError> {
     };
 
     let image_file = target.dir.join(IMAGE_FILE);
-    let text = std::fs::read_to_string(&image_file)
+    let text = fs::read_to_string(&image_file)
         .map_err(|e| AppError::Message(format!("read {}: {e}", image_file.display())))?;
     let updated = scaffold::add_axis(&text, axis, AXIS_PLACEHOLDER).map_err(AppError::Message)?;
-    std::fs::write(&image_file, updated)
+    fs::write(&image_file, updated)
         .map_err(|e| AppError::Message(format!("write {}: {e}", image_file.display())))?;
     println!("  updated {}", image_file.display());
 
     let by_dir = target.dir.join(format!("by-{axis}"));
-    std::fs::create_dir_all(&by_dir)
+    fs::create_dir_all(&by_dir)
         .map_err(|e| AppError::Message(format!("create {}: {e}", by_dir.display())))?;
     println!("  created {}/", by_dir.display());
 
@@ -1536,10 +1541,10 @@ fn write_new(path: &Path, contents: &str) -> Result<(), AppError> {
         )));
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        fs::create_dir_all(parent)
             .map_err(|e| AppError::Message(format!("create {}: {e}", parent.display())))?;
     }
-    std::fs::write(path, contents)
+    fs::write(path, contents)
         .map_err(|e| AppError::Message(format!("write {}: {e}", path.display())))?;
     println!("  created {}", path.display());
     Ok(())

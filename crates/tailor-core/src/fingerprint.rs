@@ -35,8 +35,8 @@ pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
         inputs.toolchain_digest.as_bytes(),
     );
     match inputs.base {
-        ResolvedBase::LocalFile { sha256, size } => {
-            field(&mut hasher, b"base.local", sha256);
+        ResolvedBase::LocalFile { content_hash, size } => {
+            field(&mut hasher, b"base.local", content_hash);
             field(&mut hasher, b"base.size", &size.to_le_bytes());
         }
         ResolvedBase::Oci {
@@ -92,7 +92,7 @@ mod tests {
 
     fn base() -> ResolvedBase {
         ResolvedBase::LocalFile {
-            sha256: [1; 32],
+            content_hash: [1; 16],
             size: 100,
         }
     }

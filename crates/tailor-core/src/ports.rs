@@ -268,7 +268,7 @@ pub trait BaseResolver: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedBase {
     /// A local `path:` base — hashed to *detect* drift (not re-fetchable; not in the lock).
-    LocalFile { sha256: [u8; 32], size: u64 },
+    LocalFile { content_hash: [u8; 16], size: u64 },
     /// A registry (`oci`/`azureLinux`) base — digest-pinned and recorded in the lock.
     Oci {
         reference: String,

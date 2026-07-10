@@ -498,9 +498,9 @@ flowchart TD
   B -->|oci| O["OCI artifact"]
   B -->|azureLinux| AL["MCR azureLinux version+variant"]
 
-  P --> PH["stream SHA-256 + size"]
+  P --> PH["stream XXH3-128 + size<br/>(cached by size + mtime)"]
   PH --> PCLI["--image-file hostRoot/&lt;abs&gt;"]
-  PH --> PL["lock[path, arch]: {sha256, size}"]
+  PH --> PL["fingerprint[path, arch]: {contentHash, size}"]
 
   O --> OPRE["inject previewFeature input-image-oci<br/>require runtime.imageCacheDir<br/>require IC &gt;= 1.1"]
   OPRE --> ORES["resolve registry digest for platform linux/&lt;arch&gt;"]
@@ -517,7 +517,11 @@ flowchart TD
   multi-arch image define one `baseImages:` catalogue slot per arch (each with its own `path` +
   `arch`) and select the right slot per cell with `base: { ref: <name> }`. A shared `base.path`
   across architectures is allowed but warned, since one file cannot be correct for two arches.
-  tailor streams a **SHA-256** (+ size) for the lock; the path is host-translated and passed as
+  tailor streams an **XXH3-128** content hash (+ size) for change detection; this is deliberately
+  non-cryptographic (local files are not security/provenance pins and are not recorded as
+  re-fetchable lock entries). During `tailor build`, unchanged large bases skip the read via a
+  `(size, mtime)` cache under `<output>/.tailor/base-hashes/`; malformed, missing, or unwritable
+  cache entries are ignored and the file is re-hashed. The path is host-translated and passed as
   `--image-file <hostRoot>/<abs>`.
 - **`oci`** — requires the pinned IC to support `input-image-oci` (≥ v1.1) and a configured
   `runtime.imageCacheDir`. The cell's **platform defaults to `linux/<arch>`** unless `oci.platform`
@@ -551,9 +555,9 @@ flowchart TD
 > `base: { ref: <name> }`.
 
 Digest resolution uses a registry client (`oci-client`, already a Trident dependency) or bollard's
-image inspect; local hashing uses streamed `sha2`. Because every kind is reduced to a digest-pinned
-reference or a content hash before execution, `--locked` builds are reproducible without trusting a
-floating tag (see §9.3).
+image inspect; local hashing uses streamed XXH3-128 for fast change detection. Because every kind is
+reduced to a digest-pinned reference or a content hash before execution, `--locked` builds are
+reproducible without trusting a floating tag (see §9.3).
 
 ---
 
