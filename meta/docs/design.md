@@ -222,13 +222,13 @@ schemaVersion: 1
 # like `:1.3.0`), and to `latest` when neither `tag` nor `version` is given. Override `tag` for a
 # pinned or date-stamped tag. The resolved registry DIGEST (authoritative) is written into tailor.lock.
 toolchains:
-  default: ic-1.3                    # id used when an image omits `toolchain:`
+  default: ic-1.3                    # name used when an image omits `toolchain:`
   entries:
-    ic-1.3:
+    - name: ic-1.3
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"               # optional; informational. Omit to track `latest`.
       # tag: "1.3.0"                  # optional; defaults to `version`, else `latest`
-    ic-1.1:
+    - name: ic-1.1
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
 
@@ -280,8 +280,8 @@ defaults:
 | Field                     | Type                       | Req | Notes                                                          |
 | ------------------------- | -------------------------- | --- | ------------------------------------------------------------- |
 | `schemaVersion`           | int                        | yes | tailor manifest schema version (currently `1`). Only `tailor.yaml`/`tailor.lock` carry it. |
-| `toolchains.default`      | string (id)                | yes | Default toolchain id for images that omit `toolchain:`.       |
-| `toolchains.entries`      | map<id, {container,version,tag?}> | yes | One or more pinned IC containers. `version` is semver (gates features); `tag` is the registry tag, default = `version` (no `v`). |
+| `toolchains.default`      | string (name)              | yes | Default toolchain name for images that omit `toolchain:`.       |
+| `toolchains.entries`      | list<{name,container,version?,tag?}> | yes | One or more pinned IC containers. Names must be unique; `tag` is the registry tag, default = `version` (no `v`). |
 | `runtime.privileged`      | bool                       | no  | Default `true`; IC requires privileged.                       |
 | `runtime.mounts.hostRoot` | string                     | no  | Default `/host`; the container-side mount of host `/` and the prefix for all path translation. |
 | `runtime.mounts.dev`      | bool                       | no  | Default `true`; bind `/dev:/dev`.                             |
@@ -303,8 +303,8 @@ structurally (with directives from fragments) and passes the result to IC via `-
 ```yaml
 name: trident-vm-testimage
 
-# Toolchain selection: EITHER an id referencing tailor.yaml toolchains.entries (workspace mode),
-# OR an inline {container, version, tag?} (standalone mode). Omitted => workspace default (or
+# Toolchain selection: EITHER a name referencing tailor.yaml toolchains.entries (workspace mode),
+# OR an inline {name, container, version, tag?} (standalone mode). Omitted => workspace default (or
 # tailor's built-in default when standalone).
 toolchain: ic-1.3
 
@@ -368,11 +368,11 @@ config:
 | Field                  | Type                                   | Req | Notes                                                       |
 | ---------------------- | -------------------------------------- | --- | ----------------------------------------------------------- |
 | `name`                 | string (`[A-Za-z0-9.-]+`, no `_`)      | yes | Unique image id; used in output filenames and CLI. `_` is reserved as the slug separator. |
-| `toolchain`            | string (id) \| {container,version,tag?} | no | Id-ref (workspace) OR inline entry (standalone). Defaults to `toolchains.default` or tailor's built-in default. |
+| `toolchain`            | string (name) \| {name,container,version?,tag?} | no | Name-ref (workspace) OR inline entry (standalone). Defaults to `toolchains.default` or tailor's built-in default. |
 | `matrix`               | map<axisName, [values]> + include/exclude | no | User-defined axes. Omit for a single-cell image. `arch` may appear as an axis or via `architectures`. |
 | `architectures`        | string[] (`amd64`\|`arm64`)            | no  | Defaults from `defaults.architectures`. Equivalent to a `matrix.arch` axis. |
 | `outputs`              | [{format, cosiCompressionLevel?, name?}] | no | Defaults from `defaults.outputs`. `name` is a `${...}` template override for the output basename (§10). |
-| `base`                 | oneOf {image \| path \| oci{uri,platform?} \| azureLinux{version,variant}} | yes | Exactly one base source. A registry base (oci/azureLinux) is multi-arch ⇒ one `base` covers all arches. Per-arch local files use `baseImages:` catalogue slots and `base: { ref: <name> }` per cell. |
+| `base`                 | oneOf {ref \| path \| oci{uri,platform?} \| azureLinux{version,variant}} | yes | Exactly one base source. A registry base (oci/azureLinux) is multi-arch ⇒ one `base` covers all arches. Per-arch local files use `baseImages:` catalogue slots and `base: { ref: <name> }` per cell. |
 | `features`             | string[]                               | no  | Image-level feature flag list. Gates `by-feature/<name>.yaml` fragment inclusion. |
 | `params`               | map<string, scalar>                    | no  | Named constants for `${...}` interpolation into `config:` string values. |
 | `rpmSources`           | path[]                                 | no  | Each entry is a directory of RPMs OR a `.repo` file → IC `--rpm-source` (customize only). |

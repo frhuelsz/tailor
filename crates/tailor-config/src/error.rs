@@ -156,6 +156,9 @@ pub enum ConfigError {
     #[error("cell `{slug}` resolves to no `base`; set one in `image.yaml` or a per-axis fragment")]
     MissingBase { slug: String },
 
+    #[error("duplicate name `{name}` in `{catalogue}` catalogue")]
+    DuplicateCatalogueName { catalogue: String, name: String },
+
     #[error("cell `{slug}` has an invalid `{field}`: {detail}")]
     InvalidField {
         slug: String,

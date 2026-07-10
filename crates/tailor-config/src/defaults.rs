@@ -6,8 +6,6 @@
 //! - [`DEFAULT_IC_TAG`] — the tag pulled when a toolchain pins neither a `tag` nor a `version`
 //!   (see [`ToolchainEntry::effective_tag`](crate::ToolchainEntry::effective_tag)).
 
-use std::collections::BTreeMap;
-
 use crate::schema::{ToolConfig, ToolchainEntry, Toolchains};
 
 /// The default Image Customizer container image, used in standalone mode when there is no
@@ -30,22 +28,19 @@ pub const DEFAULT_JANITOR_TAG: &str = "3.0";
 /// manifest sets no `runtime.imageCacheDir`. IC requires a cache dir for `oci`/`azureLinux` bases.
 pub const DEFAULT_IMAGE_CACHE_DIR: &str = ".tailor/cache";
 
-/// The id of the built-in toolchain entry created in standalone mode.
+/// The name of the built-in toolchain entry created in standalone mode.
 const DEFAULT_TOOLCHAIN_ID: &str = "ic";
 
 /// The toolchain configuration used in standalone mode (no `tailor.yaml`): a single entry pointing
 /// at [`DEFAULT_IC_CONTAINER`] with no pinned tag/version, so it resolves to [`DEFAULT_IC_TAG`].
 #[must_use]
 pub fn default_tool_config() -> ToolConfig {
-    let mut entries = BTreeMap::new();
-    entries.insert(
-        DEFAULT_TOOLCHAIN_ID.to_owned(),
-        ToolchainEntry {
-            container: DEFAULT_IC_CONTAINER.to_owned(),
-            version: None,
-            tag: None,
-        },
-    );
+    let entries = vec![ToolchainEntry {
+        name: DEFAULT_TOOLCHAIN_ID.to_owned(),
+        container: DEFAULT_IC_CONTAINER.to_owned(),
+        version: None,
+        tag: None,
+    }];
     ToolConfig {
         schema_version: 1,
         toolchains: Toolchains {
@@ -67,7 +62,7 @@ mod tests {
     #[test]
     fn standalone_default_is_latest_image_customizer() {
         let tc = default_tool_config();
-        let entry = &tc.toolchains.entries[&tc.toolchains.default];
+        let entry = tc.toolchains.get(&tc.toolchains.default).unwrap();
         assert_eq!(entry.container, DEFAULT_IC_CONTAINER);
         assert_eq!(entry.effective_tag(), DEFAULT_IC_TAG);
         assert_eq!(entry.effective_tag(), "latest");

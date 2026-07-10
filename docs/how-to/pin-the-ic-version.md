@@ -8,7 +8,7 @@ schemaVersion: 1
 toolchains:
   default: ic-1.3
   entries:
-    ic-1.3:
+    - name: ic-1.3
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"
 ```
@@ -19,7 +19,7 @@ toolchains:
 toolchains:
   default: nightly
   entries:
-    nightly:
+    - name: nightly
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       tag: latest
 ```

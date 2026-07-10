@@ -180,7 +180,7 @@ mod tests {
         toolchains:
           default: ic
           entries:
-            ic:
+            - name: ic
               container: registry.example/imagecustomizer
               version: 1.0.0
     "};

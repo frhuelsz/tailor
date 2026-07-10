@@ -98,23 +98,27 @@
       "properties": {
         "default": {
           "type": "string",
-          "description": "Id (key in `entries`) used by any image that omits `toolchain:`."
+          "description": "Name of the entry in `entries` used by any image that omits `toolchain:`."
         },
         "entries": {
-          "type": "object",
-          "minProperties": 1,
-          "description": "Map of toolchain id -> pinned IC container. One or more may coexist.",
-          "additionalProperties": { "$ref": "#/$defs/ToolchainEntry" }
+          "type": "array",
+          "minItems": 1,
+          "description": "List of named pinned IC containers. Each item carries a unique `name`.",
+          "items": { "$ref": "#/$defs/ToolchainEntry" }
         }
       }
     },
 
     "ToolchainEntry": {
       "type": "object",
-      "description": "An Image Customizer container. Only `container` is required; the pull tag defaults to `tag`, else `version`, else `latest`.",
+      "description": "An Image Customizer container. `name` and `container` are required; the pull tag defaults to `tag`, else `version`, else `latest`.",
       "additionalProperties": false,
-      "required": ["container"],
+      "required": ["name", "container"],
       "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique toolchain name within `toolchains.entries`."
+        },
         "container": {
           "type": "string",
           "description": "Registry path of the IC image, e.g. mcr.microsoft.com/azurelinux/imagecustomizer."
@@ -132,9 +136,9 @@
     },
 
     "ToolchainRef": {
-      "description": "Per-image toolchain selection. EITHER an id referencing tailor.yaml `toolchains.entries` (workspace mode), OR an inline ToolchainEntry (standalone mode, no tailor.yaml). Omit entirely to use the workspace default (or tailor's built-in default when standalone).",
+      "description": "Per-image toolchain selection. EITHER a name referencing tailor.yaml `toolchains.entries` (workspace mode), OR an inline ToolchainEntry (standalone mode, no tailor.yaml). Omit entirely to use the workspace default (or tailor's built-in default when standalone).",
       "oneOf": [
-        { "type": "string", "description": "Id of a toolchain defined in tailor.yaml." },
+        { "type": "string", "description": "Name of a toolchain defined in tailor.yaml." },
         { "$ref": "#/$defs/ToolchainEntry" }
       ]
     },
@@ -216,18 +220,22 @@
     },
 
     "BaseImageCatalogue": {
-      "type": "object",
-      "description": "Named base image catalogue for image.yaml `base: { ref: <name> }` references. Use one entry per architecture for per-arch local files, selected from by-arch/<arch>.yaml fragments.",
-      "minProperties": 1,
-      "additionalProperties": { "$ref": "#/$defs/BaseImageEntry" }
+      "type": "array",
+      "description": "Named base image catalogue for image.yaml `base: { ref: <name> }` references. Each item carries a unique `name`. Use one entry per architecture for per-arch local files, selected from by-arch/<arch>.yaml fragments.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/BaseImageEntry" }
     },
 
     "BaseImageEntry": {
       "type": "object",
       "description": "A named base image file, optionally scoped to one architecture and annotated with its original upstream source.",
       "additionalProperties": false,
-      "required": ["path"],
+      "required": ["name", "path"],
       "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique slot name within `baseImages`; referenced by image.yaml `base: { ref: <name> }`."
+        },
         "path": { "type": "string", "description": "Local image file path resolved relative to tailor.yaml." },
         "arch": { "$ref": "#/$defs/Arch" },
         "source": { "$ref": "#/$defs/BaseImageSource" }

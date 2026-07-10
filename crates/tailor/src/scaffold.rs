@@ -187,7 +187,7 @@ schemaVersion: 1
 toolchains:
   default: ic
   entries:
-    ic:
+    - name: ic
       container: registry.example/ic
 ";
 

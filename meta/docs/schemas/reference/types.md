@@ -10,6 +10,7 @@ A pinned Image Customizer container. The resolved registry **digest** (not the t
 
 | Field | Type | Req | Notes |
 | ----- | ---- | --- | ----- |
+| `name` | string | **yes** | Unique name within `toolchains.entries`. |
 | `container` | string | **yes** | Registry path, e.g. `mcr.microsoft.com/azurelinux/imagecustomizer`. |
 | `version` | string (semver) | no | Optional, informational IC version (tailor does not gate IC versions). Used as the pull tag when `tag` is absent. |
 | `tag` | string | no | Registry tag pulled. Default = `version` (MCR publishes unprefixed tags, e.g. `:1.3.0`), else `latest` when neither is set. |
@@ -18,11 +19,12 @@ A pinned Image Customizer container. The resolved registry **digest** (not the t
 
 How an [image](./image-yaml.md) selects its toolchain (the `toolchain:` field). One of:
 
-- **string id** — references a `toolchains.entries` key in `tailor.yaml` (workspace mode):
+- **string id** — references a `toolchains.entries` name in `tailor.yaml` (workspace mode):
   `toolchain: ic-1.1`
 - **inline [ToolchainEntry](#toolchainentry)** — self-contained (standalone mode, no `tailor.yaml`):
   ```yaml
   toolchain:
+    name: ic-inline
     container: mcr.microsoft.com/azurelinux/imagecustomizer
     version: "1.3.0"
   ```
@@ -36,7 +38,7 @@ The base OS image. **Exactly one** of four kinds. Drives IC's input image via th
 | Kind | Shape | Notes |
 | ---- | ----- | ----- |
 | local file | `path: ./artifacts/core.vhdx` | Single-arch; for per-arch local files use the `baseImages` catalogue with one slot per arch. |
-| named catalogue image | `image: azure-linux-3-amd64` | References a `tailor.yaml` `baseImages` entry. |
+| named catalogue image | `ref: azure-linux-3-amd64` | References a `tailor.yaml` `baseImages` entry. |
 | OCI | `oci: { uri, platform? }` | Any registry; `platform` defaults to `linux/<arch>` per cell. Digest pinned in lock. |
 | Azure Linux (MCR) | `azureLinux: { version, variant }` | Sugar over `oci`. Multi-arch manifest ⇒ one source covers every arch. |
 

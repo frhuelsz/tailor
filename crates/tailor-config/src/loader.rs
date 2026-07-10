@@ -9,7 +9,9 @@ use crate::{
 
 /// Parse a `tailor.yaml` workspace/tool config.
 pub fn load_tool_config(path: impl AsRef<Path>) -> Result<ToolConfig, ConfigError> {
-    parse_yaml(path.as_ref())
+    let tool_config: ToolConfig = parse_yaml(path.as_ref())?;
+    tool_config.validate()?;
+    Ok(tool_config)
 }
 
 /// Parse an `image.yaml` image definition (base document).
@@ -55,10 +57,10 @@ mod tests {
                 toolchains:
                   default: ic-main
                   entries:
-                    ic-main:
+                    - name: ic-main
                       container: registry.example/imagecustomizer
                       version: 2.0.0
-                    ic-old:
+                    - name: ic-old
                       container: registry.example/imagecustomizer
                       version: 1.0.0
             "},
@@ -66,7 +68,58 @@ mod tests {
         let tc = load_tool_config(&path).unwrap();
         assert_eq!(tc.schema_version, 1);
         assert_eq!(tc.toolchains.default, "ic-main");
-        assert!(tc.toolchains.entries.contains_key("ic-old"));
+        assert!(tc.toolchains.get("ic-old").is_some());
+    }
+
+    #[test]
+    fn duplicate_toolchain_names_are_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+                    - name: ic
+                      container: registry.example/imagecustomizer-old
+            "},
+        );
+        let err = load_tool_config(&path).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::DuplicateCatalogueName { catalogue, name } if catalogue == "toolchains.entries" && name == "ic"),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_base_image_names_are_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+                baseImages:
+                  - name: baremetal
+                    path: bases/a.vhdx
+                  - name: baremetal
+                    path: bases/b.vhdx
+            "},
+        );
+        let err = load_tool_config(&path).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::DuplicateCatalogueName { catalogue, name } if catalogue == "baseImages" && name == "baremetal"),
+            "got {err:?}"
+        );
     }
 
     #[test]

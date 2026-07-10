@@ -18,7 +18,7 @@ reference** base kind for image definitions.
 
 | Piece | Where | Summary |
 | --- | --- | --- |
-| `baseImages:` catalogue | `tailor.yaml` (`ToolConfig`) | Named slots: `name → { path, source? }`. |
+| `baseImages:` catalogue | `tailor.yaml` (`ToolConfig`) | List of slots: `{ name, path, source? }`. |
 | `base: { ref: <name> }` | `image.yaml` (`BaseSource`) | Reference a catalogue slot; resolves to its file. |
 | `tailor bases download` / `verify` | CLI | Materialise catalogue slots from their `source`; or assert referenced slots exist. |
 
@@ -107,7 +107,7 @@ check). The build is identical: a `path` base under the hood.
 ```yaml
 # tailor.yaml
 baseImages:
-  baremetal:
+  - name: baremetal
     arch: amd64
     # Where the file lives / where `download` writes it (relative to the workspace root).
     path: ../../artifacts/baremetal.vhdx
@@ -117,7 +117,7 @@ baseImages:
         version: "3.0"
         variant: baremetal
 
-  core_arm64:
+  - name: core_arm64
     arch: arm64
     path: ../../artifacts/core_arm64.vhdx
     source:
@@ -125,7 +125,7 @@ baseImages:
         version: "3.0"
         variant: core
 
-  qemu_guest:
+  - name: qemu_guest
     arch: amd64
     # No `source`: this slot is filled by the pipeline feed only; `download` skips it.
     path: ../../artifacts/qemu_guest.vhdx
@@ -135,6 +135,7 @@ Entry shape:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
+| `name` | yes | Unique slot name used by `base: { ref: <name> }`. |
 | `path` | yes | The slot file: build input **and** `download` output. Workspace-root-relative (like signing key/cert paths, `crates/tailor-core` preflight), absolutised to the workspace root. |
 | `arch` | no | The base image's architecture (`amd64` \| `arm64`) — the **same vocabulary** as the `arch` axis / `architectures`, not a `linux/...` platform string. Drives the pull platform (`linux/<arch>`) and **reconciles** with the referencing cell's arch ([`arch-and-platform.md`](./arch-and-platform.md) §3). Absent ⇒ the cell's arch decides. |
 | `source` | no | A remote source `download` can pull from — `oci: { uri }` or `azureLinux: { version, variant }` — pulled for `linux/<arch>`. Absent ⇒ the slot must be pre-placed; `download` skips it. |
@@ -263,7 +264,7 @@ keeps the build reproducible (it pins the file's hash) while making the file's o
 ```mermaid
 flowchart TD
   B{"base kind"}
-  B -->|image: name| C["look up baseImages[name]"]
+  B -->|ref: name| C["look up baseImages by name"]
   C -->|unknown name| E1["error: no such base image"]
   C -->|found| Pth["slot path (abs, workspace-root)"]
   Pth -->|missing file| E2["error: not found;<br/>run tailor bases download or place &lt;path&gt;"]
@@ -280,7 +281,7 @@ flowchart TD
   remain image-dir-relative, per the absolute-path rules in `crates/tailor-config/src/path.rs`).
 - A **missing slot file** is a hard error with an actionable hint (run `tailor bases download`, or — in
   CI — ensure the feed step placed it). Unknown slot **name** is a config error surfaced by `validate`.
-- `validate` resolves catalogue **names** (cheap, no I/O) so a typo'd `image:` fails fast; it does
+- `validate` resolves catalogue **names** (cheap, no I/O) so a typo'd `ref:` fails fast; it does
   **not** require the files to exist (so `validate` still runs on a fresh checkout).
 
 ### 6.1 The brittle-path win
@@ -303,7 +304,7 @@ previously broke when the workspace layout changed.
 ### 6.2 The base image in the matrix
 
 When a cell's base resolves to a catalogue slot, that cell's `tailor matrix` record gains the resolved
-**base-image name** (the `baseImages` key):
+**base-image name** (the slot's `name`):
 
 ```json
 {

@@ -33,7 +33,7 @@ Exactly one base must resolve for every cell. Base sources are one of:
 - `path: ./local.img`
 - `oci: { uri: "registry/name:tag", platform: "linux/${arch}" }`
 - `azureLinux: { version: "3.0", variant: minimal-os }`
-- `image: <name>` — a named slot from the workspace [`baseImages:` catalogue](../reference/tailor-yaml.md)
+- `ref: <name>` — a named slot from the workspace [`baseImages:` catalogue](../reference/tailor-yaml.md)
 
 Use `$set` for a deliberate scalar or whole-value override; otherwise conflicting base assignments are errors.
 

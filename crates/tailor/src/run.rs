@@ -178,8 +178,13 @@ fn list(workspace: &Workspace) {
     }
     if let Some(tool) = &workspace.tool {
         println!("\nToolchains (default: {}):", tool.toolchains.default);
-        for (id, entry) in &tool.toolchains.entries {
-            println!("  {id:<10} {}:{}", entry.container, entry.effective_tag());
+        for entry in &tool.toolchains.entries {
+            println!(
+                "  {:<10} {}:{}",
+                entry.name,
+                entry.container,
+                entry.effective_tag()
+            );
         }
     }
 }
@@ -522,10 +527,10 @@ async fn build_lock(
     resolver: &OciResolver,
 ) -> Result<Lockfile, AppError> {
     let mut lock = Lockfile::default();
-    for (id, entry) in &tool.toolchains.entries {
+    for entry in &tool.toolchains.entries {
         let digest = resolver.resolve_toolchain(entry).await?;
         lock.toolchains.insert(
-            id.clone(),
+            entry.name.clone(),
             LockedContainer {
                 container: entry.container.clone(),
                 version: entry.version.as_ref().map(ToString::to_string),
@@ -788,7 +793,7 @@ fn status_line(verb: &str, message: &str, color: bool) -> String {
 /// The IC container in use (the workspace default toolchain; per-image overrides show in `list`).
 fn describe_toolchains(tool: &ToolConfig) -> String {
     let id = &tool.toolchains.default;
-    tool.toolchains.entries.get(id).map_or_else(
+    tool.toolchains.get(id).map_or_else(
         || id.clone(),
         |entry| format!("{}:{}", entry.container, entry.effective_tag()),
     )
@@ -1269,7 +1274,7 @@ schemaVersion: 1
 toolchains:
   default: ic
   entries:
-    ic:
+    - name: ic
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       # version: \"1.3.0\"   # pin a specific Image Customizer; omit to track the :latest tag
 

@@ -1,11 +1,11 @@
 # Synthetic test workspace (NOT a real config) — exercises the base-image catalogue: a `baseImages:`
-# map of named slots and a member image that references one with `base: { ref: <name> }`.
+# list of named slots and a member image that references one with `base: { ref: <name> }`.
 schemaVersion: 1
 
 toolchains:
   default: ic
   entries:
-    ic:
+    - name: ic
       container: registry.example/imagecustomizer
       version: "1.0.0"
 
@@ -14,14 +14,14 @@ defaults:
     - format: cosi
 
 baseImages:
-  baremetal:
+  - name: baremetal
     path: bases/baremetal.vhdx
     arch: amd64
     source:
       azureLinux:
         version: "3.0"
         variant: baremetal
-  edge:
+  - name: edge
     path: bases/edge.vhdx
     arch: amd64
     source:

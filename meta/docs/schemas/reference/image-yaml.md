@@ -15,7 +15,7 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 | `architectures` | [[Arch](./types.md#arch)] | no | `defaults.architectures` | Target arches (the arch axis). |
 | `matrix` | [Matrix](./types.md#matrix) | no | one cell | Axes + values whose product is the set of cells built. |
 | `outputs` | [[OutputSpec](./types.md#outputspec)] | no | `defaults.outputs` | Output formats; each cell × format is one IC run → one artifact, named by its [cell slug](./types.md#output-naming-cell-slug). |
-| `base` | [BaseSource](./types.md#basesource) | cond | — | The base image source; the resolved cell has exactly one base (may instead be supplied by a fragment). Includes the `image: <name>` kind for `tailor.yaml` `baseImages` entries. |
+| `base` | [BaseSource](./types.md#basesource) | cond | — | The base image source; the resolved cell has exactly one base (may instead be supplied by a fragment). Includes the `ref: <name>` kind for `tailor.yaml` `baseImages` entries. |
 | `features` | [string] | no | — | Image-level **feature flags** (e.g. `pcrlock-static-files`); enable `by-feature/<name>.yaml` fragments. |
 | `params` | [Params](./types.md#params) | no | — | Named scalar constants for `${...}` interpolation. |
 | `rpmSources` | [string] | no | — | Extra IC `--rpm-source` entries (a dir of RPMs or a `.repo` file). |
@@ -37,6 +37,7 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 ```yaml
 name: appliance
 toolchain:                          # inline (no tailor.yaml to reference an id); omit → built-in default
+  name: ic-inline
   container: mcr.microsoft.com/azurelinux/imagecustomizer
   version: "1.3.0"
 outputs:

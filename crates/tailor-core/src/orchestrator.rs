@@ -221,14 +221,13 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
     }
 }
 
-/// Resolve a target's toolchain to its `(id, entry)`, applying the workspace default if unset.
+/// Resolve a target's toolchain to its `(name, entry)`, applying the workspace default if unset.
 fn toolchain_for(
     target: &Target,
     tool: &ToolConfig,
 ) -> Result<(String, ToolchainEntry), CoreError> {
     let lookup = |id: &str| -> Result<ToolchainEntry, CoreError> {
         tool.toolchains
-            .entries
             .get(id)
             .cloned()
             .ok_or_else(|| CoreError::UnknownToolchain {
@@ -314,8 +313,8 @@ fn resolve_base(
                         name: reference.clone(),
                         known: target
                             .base_images
-                            .keys()
-                            .cloned()
+                            .iter()
+                            .map(|slot| slot.name.clone())
                             .collect::<Vec<_>>()
                             .join(", "),
                     })?;
@@ -591,7 +590,7 @@ mod tests {
             toolchains:
               default: ic
               entries:
-                ic:
+                - name: ic
                   container: registry.example/imagecustomizer
                   version: 1.0.0
         "})
@@ -885,8 +884,9 @@ mod tests {
             hostname: solo
     "};
 
-    fn slot(arch: Option<Arch>) -> BaseImageSlot {
+    fn slot(name: &str, arch: Option<Arch>) -> BaseImageSlot {
         BaseImageSlot {
+            name: name.to_owned(),
             path: "bases/baremetal.vhdx".into(),
             arch,
             source: None,
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn base_image_resolves_to_root_relative_path_and_exposes_name() {
-        let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(Some(Arch::Amd64)))]);
+        let cat = BaseImageCatalogue::from(vec![slot("baremetal", Some(Arch::Amd64))]);
         let (tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         let cells = cells(&target).unwrap();
         assert_eq!(cells[0].base_image.as_deref(), Some("baremetal"));
@@ -907,14 +907,14 @@ mod tests {
 
     #[test]
     fn slot_arch_supplies_cell_arch_when_image_declares_none() {
-        let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(Some(Arch::Arm64)))]);
+        let cat = BaseImageCatalogue::from(vec![slot("baremetal", Some(Arch::Arm64))]);
         let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         assert_eq!(cells(&target).unwrap()[0].arch, Arch::Arm64);
     }
 
     #[test]
     fn slot_arch_conflict_with_axis_is_an_error() {
-        let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(Some(Arch::Arm64)))]);
+        let cat = BaseImageCatalogue::from(vec![slot("baremetal", Some(Arch::Arm64))]);
         let (_tmp, target) = target_with_catalogue(
             indoc! {"
                 name: solo
@@ -939,7 +939,7 @@ mod tests {
 
     #[test]
     fn unknown_base_image_name_is_a_config_error() {
-        let cat = BaseImageCatalogue::from([("other".to_owned(), slot(None))]);
+        let cat = BaseImageCatalogue::from(vec![slot("other", None)]);
         let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         assert!(
             matches!(
@@ -952,7 +952,7 @@ mod tests {
 
     #[test]
     fn sourceless_slot_arch_unset_defaults_to_amd64() {
-        let cat = BaseImageCatalogue::from([("baremetal".to_owned(), slot(None))]);
+        let cat = BaseImageCatalogue::from(vec![slot("baremetal", None)]);
         let (_tmp, target) = target_with_catalogue(SLOT_IMAGE, cat);
         assert_eq!(cells(&target).unwrap()[0].arch, Arch::Amd64);
     }

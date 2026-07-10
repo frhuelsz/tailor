@@ -38,6 +38,7 @@ mod tests {
 
     fn toolchain(tag: Option<String>) -> ToolchainEntry {
         ToolchainEntry {
+            name: "ic".to_owned(),
             container: "mcr.microsoft.com/azurelinux/imagecustomizer".to_owned(),
             version: Some(Version::parse("1.3.0").unwrap()),
             tag,
@@ -55,6 +56,7 @@ mod tests {
     #[test]
     fn defaults_to_latest_when_no_tag_or_version() {
         let entry = ToolchainEntry {
+            name: "ic".to_owned(),
             container: "mcr.microsoft.com/azurelinux/imagecustomizer".to_owned(),
             version: None,
             tag: None,

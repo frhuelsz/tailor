@@ -8,7 +8,7 @@ schemaVersion: 1
 toolchains:
   default: ic
   entries:
-    ic:
+    - name: ic
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       # version: "1.3.0"
       # tag: "1.3.0"
@@ -21,8 +21,8 @@ defaults:
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `schemaVersion` | integer | yes | Current value: `1`. |
-| `toolchains.default` | string | yes | Default toolchain id for images that omit `toolchain:`. |
-| `toolchains.entries` | map | yes | Toolchain definitions. `tag` defaults to `version`, else `latest`. |
+| `toolchains.default` | string | yes | Default toolchain name for images that omit `toolchain:`. |
+| `toolchains.entries` | list of `{name, container, version?, tag?}` | yes | Named toolchain definitions. Each `name` must be unique. `tag` defaults to `version`, else `latest`. |
 | `runtime.engine` | enum | no | Container engine: `docker` (default), `podman`, or `auto`. See [Select a container engine](../how-to/select-a-container-engine.md). |
 | `runtime.host` | string | no | Explicit engine endpoint (`unix://…`, a bare socket path, or `tcp://…`), overriding the engine default and `DOCKER_HOST` / `CONTAINER_HOST`. |
 | `runtime.privileged` | bool | no | Default `true`; IC requires privileged container execution. |
@@ -35,36 +35,37 @@ defaults:
 | `signing.default` | string | no | Signing profile used when an image says `signing: true`. See [Sign an image](../how-to/sign-an-image.md). |
 | `signing.profiles` | map of `{backend, …}` | no | Named signing profiles. `backend` is `local-test-ca`, `keypair` (needs `key`+`cert`), or `azure-key-vault` (needs `vault`+`certificate`). |
 | `defaults.outputs` | output list | no | Inherited by images without `outputs`. |
-| `baseImages` | map of `{path, arch?, source?}` | no | Base-image catalogue: named slots an image references with `base: { ref: <name> }`. See [base-image catalogue](#base-image-catalogue). |
+| `baseImages` | list of `{name, path, arch?, source?}` | no | Base-image catalogue: named slots an image references with `base: { ref: <name> }`. Each `name` must be unique. See [base-image catalogue](#base-image-catalogue). |
 | `images` | object | no | Omit to auto-discover every immediate `*/image.yaml`. |
 
 ## Base-image catalogue
 
-`baseImages:` is a map of named **slots**, each a local base-image file plus an optional remote source
+`baseImages:` is a list of named **slots**, each a local base-image file plus an optional remote source
 `tailor bases download` pulls it from. An image references a slot by name with `base: { ref: <name> }`,
 so the path lives once here instead of being repeated (with brittle `../` counts) in every image.
 
 ```yaml
 baseImages:
-  baremetal:
+  - name: baremetal
     path: bases/baremetal.vhdx      # build input + download output (workspace-root-relative)
     arch: amd64                     # amd64 | arm64; reconciles with the cell arch
     source:                         # optional: how `tailor bases download` fills the slot
       azureLinux:
         version: "3.0"
         variant: baremetal
-  core_arm64:
+  - name: core_arm64
     path: bases/core_arm64.vhdx
     arch: arm64
     source:
       oci:
         uri: registry.example/core:3.0
-  qemu:
+  - name: qemu
     path: bases/qemu.vhdx           # no source: filled out-of-band (e.g. a CI feed)
 ```
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `name` | string | yes | Unique slot name used by `base: { ref: <name> }`. |
 | `path` | path | yes | The slot file: build input **and** `download` output. Workspace-root-relative. |
 | `arch` | `amd64`\|`arm64` | no | The base's architecture; reconciles with the referencing cell's arch. Absent ⇒ the cell decides. |
 | `source` | `{oci}` or `{azureLinux}` | no | A remote source `download` pulls for `linux/<arch>`. Absent ⇒ pre-placed; `download` skips it. |

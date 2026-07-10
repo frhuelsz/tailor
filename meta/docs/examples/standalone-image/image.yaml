@@ -8,6 +8,7 @@
 name: appliance
 
 toolchain:                           # inline definition (no tailor.yaml to reference an id from)
+  name: ic-inline
   container: mcr.microsoft.com/azurelinux/imagecustomizer
   version: "1.3.0"                   # optional, informational; omit to track `latest`
 

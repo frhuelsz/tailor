@@ -6,26 +6,26 @@ share base files, when you build per-arch local bases, or when CI places base im
 
 ## 1. Declare the slots
 
-Add a `baseImages:` map to `tailor.yaml`. Each slot is a local `path` plus an optional remote `source`
+Add a `baseImages:` list to `tailor.yaml`. Each slot has a unique `name`, a local `path`, and an optional remote `source`
 that `tailor bases download` pulls from:
 
 ```yaml
 # tailor.yaml
 baseImages:
-  baremetal:
+  - name: baremetal
     path: bases/baremetal.vhdx      # build input + download target (workspace-root-relative)
     arch: amd64
     source:
       azureLinux:
         version: "3.0"
         variant: baremetal
-  core_arm64:
+  - name: core_arm64
     path: bases/core_arm64.vhdx
     arch: arm64
     source:
       oci:
         uri: registry.example/core:3.0
-  qemu:
+  - name: qemu
     path: bases/qemu.vhdx           # no source: filled by a CI feed, download skips it
 ```
 

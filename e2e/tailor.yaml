@@ -6,7 +6,7 @@ schemaVersion: 1
 toolchains:
   default: ic
   entries:
-    ic:
+    - name: ic
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       tag: "latest"
 

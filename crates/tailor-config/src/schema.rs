@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use indexmap::IndexMap;
 use semver::Version;
@@ -30,12 +33,36 @@ pub struct ToolConfig {
     pub base_images: Option<BaseImageCatalogue>,
 }
 
+impl ToolConfig {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        self.toolchains.validate()?;
+        if let Some(base_images) = &self.base_images {
+            base_images.validate()?;
+        }
+        Ok(())
+    }
+}
+
 /// Repo-wide Image Customizer toolchain(s). This is where the IC version lives.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Toolchains {
     pub default: String,
-    pub entries: BTreeMap<String, ToolchainEntry>,
+    pub entries: Vec<ToolchainEntry>,
+}
+
+impl Toolchains {
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&ToolchainEntry> {
+        self.entries.iter().find(|entry| entry.name == name)
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        ensure_unique_names(
+            "toolchains.entries",
+            self.entries.iter().map(|entry| entry.name.as_str()),
+        )
+    }
 }
 
 /// A pinned Image Customizer container.
@@ -46,6 +73,7 @@ pub struct Toolchains {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolchainEntry {
+    pub name: String,
     pub container: String,
     #[serde(default)]
     pub version: Option<Version>,
@@ -376,7 +404,46 @@ pub struct ImageDefinition {
 /// The base-image catalogue: named slots in `tailor.yaml`, each a local file plus an optional remote
 /// source `tailor bases download` fills it from (`meta/docs/base-image-catalogue.md` §3). Images
 /// reference a slot by name with `base: { ref: <name> }`; the path lives once, here.
-pub type BaseImageCatalogue = BTreeMap<String, BaseImageSlot>;
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(transparent)]
+pub struct BaseImageCatalogue(Vec<BaseImageSlot>);
+
+impl BaseImageCatalogue {
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&BaseImageSlot> {
+        self.0.iter().find(|slot| slot.name == name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BaseImageSlot> {
+        self.0.iter()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        ensure_unique_names("baseImages", self.0.iter().map(|slot| slot.name.as_str()))
+    }
+}
+
+impl From<Vec<BaseImageSlot>> for BaseImageCatalogue {
+    fn from(slots: Vec<BaseImageSlot>) -> Self {
+        Self(slots)
+    }
+}
+
+impl FromIterator<BaseImageSlot> for BaseImageCatalogue {
+    fn from_iter<T: IntoIterator<Item = BaseImageSlot>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
 
 /// One catalogue slot: the local `path` (build input **and** `download` output, workspace-root-relative),
 /// an optional `arch` that reconciles with the referencing cell (`meta/docs/arch-and-platform.md` §3),
@@ -384,11 +451,28 @@ pub type BaseImageCatalogue = BTreeMap<String, BaseImageSlot>;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BaseImageSlot {
+    pub name: String,
     pub path: PathBuf,
     #[serde(default)]
     pub arch: Option<Arch>,
     #[serde(default)]
     pub source: Option<BaseImageSource>,
+}
+
+fn ensure_unique_names<'a>(
+    catalogue: &str,
+    names: impl IntoIterator<Item = &'a str>,
+) -> Result<(), ConfigError> {
+    let mut seen = BTreeSet::new();
+    for name in names {
+        if !seen.insert(name) {
+            return Err(ConfigError::DuplicateCatalogueName {
+                catalogue: catalogue.to_owned(),
+                name: name.to_owned(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// A slot's remote source — `oci: { uri }` or `azureLinux: { version, variant }`, pulled for
@@ -519,7 +603,7 @@ pub type AxisValues = IndexMap<String, Vec<String>>;
 
 #[cfg(test)]
 mod tests {
-    use super::{Engine, Runtime};
+    use super::{BaseImageCatalogue, Engine, Runtime, Toolchains};
     use super::{SigningBackend, SigningConfig, SigningRef, resolve_signing};
 
     #[test]
@@ -680,39 +764,88 @@ mod tests {
             toolchains:
               default: ic
               entries:
-                ic:
+                - name: ic
                   container: registry.example/ic
                   version: 1.0.0
             baseImages:
-              baremetal:
+              - name: baremetal
                 path: bases/baremetal.vhdx
                 arch: amd64
                 source:
                   azureLinux:
                     version: '3.0'
                     variant: baremetal
-              edge:
+              - name: edge
                 path: bases/edge.vhdx
                 arch: arm64
                 source:
                   oci:
                     uri: mcr.example/base:edge
-              feed:
+              - name: feed
                 path: bases/feed.vhdx
         "})
         .unwrap();
         let cat = tool.base_images.unwrap();
         assert_eq!(cat.len(), 3);
-        assert_eq!(cat["baremetal"].arch, Some(super::Arch::Amd64));
+        assert_eq!(cat.get("baremetal").unwrap().arch, Some(super::Arch::Amd64));
         assert!(matches!(
-            cat["baremetal"].source,
+            &cat.get("baremetal").unwrap().source,
             Some(super::BaseImageSource::AzureLinux { .. })
         ));
         assert!(matches!(
-            cat["edge"].source,
+            &cat.get("edge").unwrap().source,
             Some(super::BaseImageSource::Oci { .. })
         ));
-        assert!(cat["feed"].source.is_none(), "sourceless feed slot");
+        assert!(
+            cat.get("feed").unwrap().source.is_none(),
+            "sourceless feed slot"
+        );
+    }
+
+    #[test]
+    fn toolchains_get_returns_matching_entry() {
+        let toolchains: Toolchains = serde_yaml_ng::from_str(indoc::indoc! {"
+            default: ic
+            entries:
+              - name: ic
+                container: registry.example/ic
+              - name: old
+                container: registry.example/old
+        "})
+        .unwrap();
+        assert_eq!(
+            toolchains.get("ic").unwrap().container,
+            "registry.example/ic"
+        );
+        assert!(toolchains.get("missing").is_none());
+    }
+
+    #[test]
+    fn base_image_catalogue_get_returns_matching_slot() {
+        let cat: BaseImageCatalogue = serde_yaml_ng::from_str(indoc::indoc! {"
+            - name: baremetal
+              path: bases/baremetal.vhdx
+            - name: edge
+              path: bases/edge.vhdx
+        "})
+        .unwrap();
+        assert_eq!(
+            cat.get("baremetal").unwrap().path,
+            std::path::Path::new("bases/baremetal.vhdx")
+        );
+        assert!(cat.get("missing").is_none());
+    }
+
+    #[test]
+    fn base_image_catalogue_deserializes_from_bare_list() {
+        let cat: BaseImageCatalogue = serde_yaml_ng::from_str(indoc::indoc! {"
+            - name: baremetal
+              path: bases/baremetal.vhdx
+              arch: amd64
+        "})
+        .unwrap();
+        assert_eq!(cat.len(), 1);
+        assert_eq!(cat.iter().next().unwrap().name, "baremetal");
     }
 
     #[test]

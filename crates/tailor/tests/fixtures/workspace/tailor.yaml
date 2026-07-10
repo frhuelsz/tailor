@@ -5,10 +5,10 @@ schemaVersion: 1
 toolchains:
   default: ic-main
   entries:
-    ic-main:
+    - name: ic-main
       container: registry.example/imagecustomizer
       version: "2.0.0"
-    ic-old:
+    - name: ic-old
       container: registry.example/imagecustomizer
       version: "1.0.0"            # kept so `db` can pin an older toolchain
 

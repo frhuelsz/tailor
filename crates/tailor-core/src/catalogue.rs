@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tailor_config::{Arch, BaseImageCatalogue, BaseImageSource};
+use tailor_config::{Arch, BaseImageCatalogue, BaseImageSlot, BaseImageSource};
 
 use crate::{error::CoreError, ports::BaseImageFetcher};
 
@@ -79,8 +79,7 @@ pub async fn download(
     let root = root.as_ref();
     let selected = select_slots(catalogue, names)?;
     let mut reports = Vec::new();
-    for name in selected {
-        let slot = &catalogue[&name];
+    for slot in selected {
         let path = tailor_config::absolutize(&slot.path, root);
         let outcome = match &slot.source {
             None => SlotOutcome::NoSource,
@@ -95,7 +94,7 @@ pub async fn download(
             }
         };
         reports.push(SlotReport {
-            name,
+            name: slot.name.clone(),
             path,
             outcome,
         });
@@ -111,14 +110,14 @@ pub fn verify(
     names: &BTreeSet<String>,
 ) -> Result<(), CoreError> {
     let root = root.as_ref();
-    for (name, slot) in catalogue {
-        if !names.is_empty() && !names.contains(name) {
+    for slot in catalogue.iter() {
+        if !names.is_empty() && !names.contains(&slot.name) {
             continue;
         }
         let path = tailor_config::absolutize(&slot.path, root);
         if !path.exists() {
             return Err(CoreError::BaseImageMissing {
-                name: name.clone(),
+                name: slot.name.clone(),
                 path,
             });
         }
@@ -126,13 +125,13 @@ pub fn verify(
     Ok(())
 }
 
-/// Summarize every catalogue slot (in name order) for `tailor bases list`: the resolved pull arch
+/// Summarize every catalogue slot (in catalogue order) for `tailor bases list`: the resolved pull arch
 /// (default amd64), the source kind, and whether the slot file exists on disk.
 pub fn summarize(catalogue: &BaseImageCatalogue, root: impl AsRef<Path>) -> Vec<SlotSummary> {
     let root = root.as_ref();
     catalogue
         .iter()
-        .map(|(name, slot)| {
+        .map(|slot| {
             let path = tailor_config::absolutize(&slot.path, root);
             let present = path.exists();
             let source = match &slot.source {
@@ -144,7 +143,7 @@ pub fn summarize(catalogue: &BaseImageCatalogue, root: impl AsRef<Path>) -> Vec<
                 },
             };
             SlotSummary {
-                name: name.clone(),
+                name: slot.name.clone(),
                 path,
                 arch: slot.arch.unwrap_or(DEFAULT_SLOT_ARCH),
                 source,
@@ -156,15 +155,14 @@ pub fn summarize(catalogue: &BaseImageCatalogue, root: impl AsRef<Path>) -> Vec<
 
 /// The slots `download` should touch: every sourced slot when `names` is empty, else exactly the
 /// named ones — an unknown name or a sourceless named slot is an error (§5).
-fn select_slots(
-    catalogue: &BaseImageCatalogue,
+fn select_slots<'a>(
+    catalogue: &'a BaseImageCatalogue,
     names: &[String],
-) -> Result<Vec<String>, CoreError> {
+) -> Result<Vec<&'a BaseImageSlot>, CoreError> {
     if names.is_empty() {
         return Ok(catalogue
             .iter()
-            .filter(|(_, slot)| slot.source.is_some())
-            .map(|(name, _)| name.clone())
+            .filter(|slot| slot.source.is_some())
             .collect());
     }
     let mut selected = Vec::new();
@@ -174,7 +172,11 @@ fn select_slots(
             .ok_or_else(|| CoreError::UnknownBaseImage {
                 image: "image".to_owned(),
                 name: name.clone(),
-                known: catalogue.keys().cloned().collect::<Vec<_>>().join(", "),
+                known: catalogue
+                    .iter()
+                    .map(|slot| slot.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
             })?;
         if slot.source.is_none() {
             return Err(CoreError::BaseImageMissing {
@@ -182,7 +184,7 @@ fn select_slots(
                 path: slot.path.clone(),
             });
         }
-        selected.push(name.clone());
+        selected.push(slot);
     }
     Ok(selected)
 }
@@ -222,8 +224,9 @@ mod tests {
         }
     }
 
-    fn sourced_slot(path: &str) -> BaseImageSlot {
+    fn sourced_slot(name: &str, path: &str) -> BaseImageSlot {
         BaseImageSlot {
+            name: name.to_owned(),
             path: path.into(),
             arch: Some(Arch::Amd64),
             source: Some(BaseImageSource::Oci {
@@ -235,8 +238,9 @@ mod tests {
         }
     }
 
-    fn feed_slot(path: &str) -> BaseImageSlot {
+    fn feed_slot(name: &str, path: &str) -> BaseImageSlot {
         BaseImageSlot {
+            name: name.to_owned(),
             path: path.into(),
             arch: Some(Arch::Amd64),
             source: None,
@@ -244,9 +248,9 @@ mod tests {
     }
 
     fn catalogue() -> BaseImageCatalogue {
-        BaseImageCatalogue::from([
-            ("baremetal".to_owned(), sourced_slot("baremetal.vhdx")),
-            ("qemu".to_owned(), feed_slot("qemu.vhdx")),
+        BaseImageCatalogue::from(vec![
+            sourced_slot("baremetal", "baremetal.vhdx"),
+            feed_slot("qemu", "qemu.vhdx"),
         ])
     }
 
@@ -331,7 +335,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("baremetal.vhdx"), b"x").unwrap();
         let summary = summarize(&catalogue(), dir.path());
-        // Name (BTreeMap) order: baremetal, qemu.
         assert_eq!(summary.len(), 2);
         let baremetal = &summary[0];
         assert_eq!(baremetal.name, "baremetal");

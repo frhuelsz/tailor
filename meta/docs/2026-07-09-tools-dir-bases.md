@@ -78,9 +78,8 @@ that object plus a `name`. The same source object is what an image may define in
 
 > **Catalogue convention.** tailor catalogues are **lists whose items each carry a unique `name:`
 > field** (uniqueness validated at load) — not maps keyed by name. `toolsDirSources` follows this
-> form. The existing `toolchains` and `baseImages` catalogues (currently maps keyed by name) are to
-> be converted to the same list-with-`name` shape for consistency; that conversion is tracked
-> separately as it touches their schema, docs, and fixtures.
+> form. `toolsDirSources`, `toolchains.entries`, and `baseImages` all follow this
+> list-with-`name` shape for consistency.
 
 ### 2.2 `image.yaml` — select a tools dir
 

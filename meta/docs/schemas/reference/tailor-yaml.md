@@ -24,17 +24,17 @@ The Image Customizer container(s), repo-wide. Each entry resolves to a registry 
 
 | Field | Type | Req | Notes |
 | ----- | ---- | --- | ----- |
-| `default` | string (id) | **yes** | Toolchain id used by any image that omits `toolchain:`. |
-| `entries` | map<id → [ToolchainEntry](./types.md#toolchainentry)> | **yes** | One or more pinned IC containers (≥ 1). |
+| `default` | string (name) | **yes** | Toolchain name used by any image that omits `toolchain:`. |
+| `entries` | list of [ToolchainEntry](./types.md#toolchainentry) | **yes** | One or more pinned IC containers (≥ 1); each `name` must be unique. |
 
 ```yaml
 toolchains:
   default: ic-1.3
   entries:
-    ic-1.3:
+    - name: ic-1.3
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"          # optional, informational; omit to track `latest`
-    ic-1.1:
+    - name: ic-1.1
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
 ```
@@ -102,10 +102,10 @@ schemaVersion: 1
 toolchains:
   default: ic-1.3
   entries:
-    ic-1.3:
+    - name: ic-1.3
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"
-    ic-1.1:
+    - name: ic-1.1
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
 

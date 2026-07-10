@@ -5,11 +5,11 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `name` | string | yes | Image id used by CLI and slugs. Use `[A-Za-z0-9.-]+`; `_` is reserved as the slug separator. |
-| `toolchain` | string or `{container, version?, tag?}` | no | Workspace toolchain id or inline standalone toolchain. Defaults to workspace default or built-in `latest`. |
+| `toolchain` | string or `{name, container, version?, tag?}` | no | Workspace toolchain name or inline standalone toolchain. Defaults to workspace default or built-in `latest`. |
 | `matrix` | ordered map `axis: [values]` | no | User-defined axes; their cartesian product is the candidate cells. Omit for one cell. Declaration order controls slug order and fragment precedence — order axes widest → most-specific (so `arch` is first). |
 | `selectors` | `{ include?, exclude? }` | no | Which cells of the `matrix:` product to build. Lists of **selectors** (sub-cubes); `include` is an allowlist, `exclude` a denylist. Requires `matrix:`; omitted ⇒ the full product. |
 | `outputs` | list of output specs | no | Defaults from workspace or built-in `cosi`. One artifact per cell × output. |
-| `base` | one of `path`, `oci`, `azureLinux`, `image` | conditional | Exactly one base resolves per cell. `image: <name>` references a `baseImages:` slot. |
+| `base` | one of `path`, `oci`, `azureLinux`, `ref` | conditional | Exactly one base resolves per cell. `ref: <name>` references a `baseImages:` slot. |
 | `features` | string list | no | Enables matching `by-feature/<name>.yaml` fragments. Does not multiply cells. |
 | `params` | scalar map | no | Values interpolated into `config:` strings with `${name}`. Params may reference other params. |
 | `rpmSources` | path list | no | Each path is a directory of RPMs or a `.repo` file; passed as IC `--rpm-source`. |
@@ -129,7 +129,7 @@ Registry bases also need an image cache directory; tailor defaults `runtime.imag
 The `arch` component of an `oci.platform` must match the cell's arch, so `linux/${arch}` is the safe
 spelling. Pinning a fixed `platform: linux/arm64` on an amd64 cell is a validate-time error.
 
-An `image:` base references a named slot from the workspace `baseImages:` catalogue and resolves to
+A `ref:` base references a named slot from the workspace `baseImages:` catalogue and resolves to
 that slot's local file (the path lives once, in `tailor.yaml`). Use it for the file-based, registry-pull-free
 flow Trident needs — see [`baseImages` in tailor.yaml](tailor-yaml.md), [Use a base-image catalogue](../how-to/use-a-base-image-catalogue.md),
 and [Base images](../explanation/base-images.md).

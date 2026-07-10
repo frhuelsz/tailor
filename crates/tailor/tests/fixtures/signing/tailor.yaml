@@ -3,7 +3,7 @@ schemaVersion: 1
 toolchains:
   default: ic
   entries:
-    ic:
+    - name: ic
       container: registry.example/imagecustomizer
       tag: "1.0.0"
 
