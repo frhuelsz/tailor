@@ -8,10 +8,10 @@ use std::{
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use tailor_config::{Access, OutputArtifactsPolicy, OutputFormat};
+use tailor_config::{OutputArtifactsPolicy, OutputFormat};
 use tailor_core::{
     Cell, ContainerConfig, ContainerResult, ContainerRuntime, ExecError, ExecutionContext,
-    ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, artifact_name,
+    ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, ToolsDirPlan, artifact_name,
 };
 
 use crate::{arg_builder, guard, janitor, output_artifacts, rpm_farm, working_copy};
@@ -431,37 +431,10 @@ async fn prepare_tools_dir<R: ContainerRuntime>(
     let Some(plan) = &context.tools_dir else {
         return Ok(PreparedToolsDir::default());
     };
-    if plan.cache_dir == Path::new("/") || plan.mount_dir == Path::new("/") {
-        return Err(ExecError::UnsafeDir {
-            path: plan.mount_dir.clone(),
-            reason: "tools-dir must not be filesystem root".to_owned(),
-        });
-    }
-    if !dir_has_entries(&plan.cache_dir)? {
-        fs::create_dir_all(&plan.cache_dir).map_err(|source| ExecError::Io {
-            context: format!(
-                "failed to create tools-dir cache `{}`",
-                plan.cache_dir.display()
-            ),
-            source,
-        })?;
-        if let Err(err) = runtime
-            .export_container(
-                &plan.image_ref,
-                &context.platform,
-                plan.pull,
-                &plan.cache_dir,
-                cancel.clone(),
-            )
-            .await
-        {
-            let _ = fs::remove_dir_all(&plan.cache_dir);
-            return Err(err);
-        }
-    }
-    if plan.access == Access::Ro {
-        return Ok(PreparedToolsDir::default());
-    }
+    ensure_tools_dir_cache(runtime, context, plan, cancel.clone()).await?;
+    // The tools-dir is always bound writable (IC rewrites resolv.conf in the tools chroot), so it is
+    // a per-cell disposable copy on the isolated build filesystem. Guard the copy target before the
+    // janitor `rm`s it, then refresh the copy from the shared cache.
     guard::ensure_safe_build_dir(&plan.mount_dir)?;
     if plan.mount_dir.exists() {
         janitor::remove_paths(
@@ -483,6 +456,46 @@ async fn prepare_tools_dir<R: ContainerRuntime>(
     Ok(PreparedToolsDir {
         rw_copy: Some(plan.mount_dir.clone()),
     })
+}
+
+/// Populate the shared, digest-keyed tools-dir cache once (export the source container's flattened
+/// filesystem), if it is not already present. Idempotent across cells/runs.
+async fn ensure_tools_dir_cache<R: ContainerRuntime>(
+    runtime: &R,
+    context: &ExecutionContext,
+    plan: &ToolsDirPlan,
+    cancel: CancellationToken,
+) -> Result<(), ExecError> {
+    if plan.cache_dir == Path::new("/") || plan.mount_dir == Path::new("/") {
+        return Err(ExecError::UnsafeDir {
+            path: plan.mount_dir.clone(),
+            reason: "tools-dir must not be filesystem root".to_owned(),
+        });
+    }
+    if dir_has_entries(&plan.cache_dir)? {
+        return Ok(());
+    }
+    fs::create_dir_all(&plan.cache_dir).map_err(|source| ExecError::Io {
+        context: format!(
+            "failed to create tools-dir cache `{}`",
+            plan.cache_dir.display()
+        ),
+        source,
+    })?;
+    if let Err(err) = runtime
+        .export_container(
+            &plan.image_ref,
+            &context.platform,
+            plan.pull,
+            &plan.cache_dir,
+            cancel,
+        )
+        .await
+    {
+        let _ = fs::remove_dir_all(&plan.cache_dir);
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn dir_has_entries(path: &Path) -> Result<bool, ExecError> {
@@ -733,7 +746,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_tools_dir_exports_missing_cache_once() {
+    async fn ensure_tools_dir_cache_exports_missing_cache_once() {
         let root = tempfile::Builder::new()
             .prefix("tailor-tools-dir-")
             .tempdir_in(std::env::current_dir().unwrap())
@@ -741,19 +754,19 @@ mod tests {
         let runtime = ExportRuntime::default();
         let mut context = dry_run_context();
         context.dry_run = false;
-        context.tools_dir = Some(tailor_core::ToolsDirPlan {
+        let plan = tailor_core::ToolsDirPlan {
             image_ref: "registry.example/tools@sha256:abc".to_owned(),
             digest: "sha256:abc".to_owned(),
             pull: true,
             cache_dir: root.path().join("cache/tools-dirs/sha256_abc"),
-            mount_dir: root.path().join("cache/tools-dirs/sha256_abc"),
-            access: Access::Ro,
-        });
+            mount_dir: root.path().join("build/gizmo/tools-dir"),
+        };
+        context.tools_dir = Some(plan.clone());
 
-        prepare_tools_dir(&runtime, &context, CancellationToken::new())
+        ensure_tools_dir_cache(&runtime, &context, &plan, CancellationToken::new())
             .await
             .unwrap();
-        prepare_tools_dir(&runtime, &context, CancellationToken::new())
+        ensure_tools_dir_cache(&runtime, &context, &plan, CancellationToken::new())
             .await
             .unwrap();
 

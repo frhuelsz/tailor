@@ -1396,12 +1396,10 @@ fn report_signing(signers: &[ProfileSigner<'_>]) {
 // ───────────────────────────── helpers ─────────────────────────────
 
 fn validate_tools_dir_runtime(cells: &[Cell], tool: &ToolConfig) -> Result<(), AppError> {
-    let has_rw_tools_dir = cells.iter().any(|cell| {
-        cell.tools_dir
-            .as_ref()
-            .is_some_and(|tools_dir| tools_dir.access == tailor_config::Access::Rw)
-    });
-    if has_rw_tools_dir
+    // The tools-dir is always bound writable as a per-cell copy on `runtime.buildDirBase`, so any
+    // image using a tools-dir requires `buildDirBase` to be set.
+    let has_tools_dir = cells.iter().any(|cell| cell.tools_dir.is_some());
+    if has_tools_dir
         && tool
             .runtime
             .as_ref()

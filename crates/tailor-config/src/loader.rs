@@ -193,7 +193,6 @@ mod tests {
         );
         let image = load_image(&named).unwrap();
         let tools_dir = image.tools_dir.unwrap();
-        assert_eq!(tools_dir.access, crate::schema::Access::Ro);
         assert!(
             matches!(tools_dir.source, crate::schema::ToolsDirSourceRef::Id(name) if name == "acl")
         );
@@ -209,7 +208,6 @@ mod tests {
                   source:
                     container: quay.io/fedora/fedora
                     tag: '42'
-                  access: rw
                 config:
                   previewFeatures:
                     - tools-dir
@@ -217,7 +215,6 @@ mod tests {
         );
         let image = load_image(&inline).unwrap();
         let tools_dir = image.tools_dir.unwrap();
-        assert_eq!(tools_dir.access, crate::schema::Access::Rw);
         assert!(
             matches!(tools_dir.source, crate::schema::ToolsDirSourceRef::Inline(source) if source.container == "quay.io/fedora/fedora" && source.effective_tag() == "42")
         );

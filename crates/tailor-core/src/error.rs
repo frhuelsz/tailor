@@ -137,7 +137,7 @@ pub enum CoreError {
     ToolsDirPreviewMissing { image: String },
 
     #[error(
-        "image `{image}` sets `toolsDir.access: rw`, which requires runtime.buildDirBase on an isolated filesystem"
+        "image `{image}` uses `toolsDir`, which is bound writable and requires runtime.buildDirBase on an isolated filesystem"
     )]
     WritableToolsDirNeedsBuildDir { image: String },
 

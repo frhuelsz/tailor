@@ -12,7 +12,7 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 | ----- | ---- | --- | ------- | ----- |
 | `name` | string | **yes** | — | Unique image id (`^[A-Za-z0-9][A-Za-z0-9.-]*$`, no `_`); the first segment of every output [cell slug](./types.md#output-naming-cell-slug), and the CLI handle. |
 | `toolchain` | [ToolchainRef](./types.md#toolchainref) | no | workspace `default` (or built-in) | Select/override the IC version. Id ref in a workspace, or inline when standalone. |
-| `toolsDir` | `{source, access?}` | no | — | Tailor-managed IC `--tools-dir`. `access` defaults to `ro`; `rw` requires `runtime.buildDirBase`. |
+| `toolsDir` | `{source}` | no | — | Tailor-managed IC `--tools-dir`. Always bound writable as a per-cell copy under `runtime.buildDirBase`, which it therefore requires. |
 | `architectures` | [[Arch](./types.md#arch)] | no | `defaults.architectures` | Target arches (the arch axis). |
 | `matrix` | [Matrix](./types.md#matrix) | no | one cell | Axes + values whose product is the set of cells built. |
 | `outputs` | [[OutputSpec](./types.md#outputspec)] | no | `defaults.outputs` | Output formats; each cell × format is one IC run → one artifact, named by its [cell slug](./types.md#output-naming-cell-slug). |
@@ -53,16 +53,17 @@ toolsDir:
   source:
     container: quay.io/fedora/fedora
     tag: "42"
-  access: rw
 
 config:
   previewFeatures:
     - tools-dir
 ```
 
-Read-only access binds the shared digest cache. Writable access copies the cache to
-`<buildDirBase>/<slug>/tools-dir` and binds that disposable copy writable. Convert and inject-files
-passes do not receive `--tools-dir`, and tailor never emits `--tools-dir /`.
+The tools-dir is always bound writable: tailor copies the shared digest cache to a per-cell
+disposable `<buildDirBase>/<slug>/tools-dir` and binds that copy writable (IC rewrites `resolv.conf`
+in the tools chroot, so a read-only bind cannot work). Any image using `toolsDir:` therefore requires
+`runtime.buildDirBase`. Convert and inject-files passes do not receive `--tools-dir`, and tailor never
+emits `--tools-dir /`.
 
 ## Minimal example (standalone)
 

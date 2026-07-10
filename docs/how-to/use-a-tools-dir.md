@@ -21,16 +21,19 @@ config:
     - tools-dir
 ```
 
-tailor resolves the source digest, exports it to `runtime.imageCacheDir/tools-dirs/<digest>`, binds it
-read-only, and passes the translated path to IC customize passes. It never emits `--tools-dir /`.
+tailor resolves the source digest and exports it once to a shared, digest-keyed cache under
+`runtime.imageCacheDir/tools-dirs/<digest>`. For each cell it copies that cache to a per-cell
+disposable directory `<buildDirBase>/<slug>/tools-dir`, binds **that copy writable**, and passes the
+translated path to IC customize passes. It never emits `--tools-dir /`.
 
-Use writable access only when IC must mutate the tools dir:
+The tools dir is always writable because IC rewrites `resolv.conf` inside the tools chroot during
+package operations — a read-only bind fails. So any image using `toolsDir:` **requires
+`runtime.buildDirBase`** (the isolated filesystem the per-cell copy lives on):
 
 ```yaml
-toolsDir:
-  source: acl
-  access: rw
+# tailor.yaml
+runtime:
+  buildDirBase: /mnt/tailor-build
 ```
 
-`access: rw` requires `runtime.buildDirBase`; tailor copies the shared cache to a per-cell disposable
-`<buildDirBase>/<slug>/tools-dir` and binds that copy writable.
+Without it, `tailor validate` / `build` fails fast with a clear error.

@@ -9,8 +9,8 @@ use std::{
 };
 
 use tailor_config::{
-    Access, Arch, BaseSource, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef,
-    ToolsDirSourceInline, ToolsDirSourceRef, cell_slug, render_image,
+    Arch, BaseSource, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef, ToolsDirSourceInline,
+    ToolsDirSourceRef, cell_slug, render_image,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -335,7 +335,6 @@ fn resolve_tools_dir(target: &Target) -> Result<Option<CellToolsDir>, CoreError>
     Ok(Some(CellToolsDir {
         source,
         source_name,
-        access: tools_dir.access,
     }))
 }
 
@@ -394,17 +393,15 @@ fn tools_dir_plan_for(
             reason: "tools-dir cache must not be filesystem root".to_owned(),
         }));
     }
-    let mount_dir = match tools_dir.access {
-        Access::Ro => cache_dir.clone(),
-        Access::Rw => {
-            let Some(build_base) = &runtime.build_dir_base else {
-                return Err(CoreError::WritableToolsDirNeedsBuildDir {
-                    image: cell.target.name().to_owned(),
-                });
-            };
-            build_base.join(cell.slug.as_ref()).join(TOOLS_DIR_SCRATCH)
-        }
+    // The tools-dir is always bound writable, so it is always a per-cell disposable copy on the
+    // isolated build filesystem — IC rewrites resolv.conf in the tools chroot, so a shared RO cache
+    // bind cannot work. This makes `runtime.buildDirBase` required for any image using a tools-dir.
+    let Some(build_base) = &runtime.build_dir_base else {
+        return Err(CoreError::WritableToolsDirNeedsBuildDir {
+            image: cell.target.name().to_owned(),
+        });
     };
+    let mount_dir = build_base.join(cell.slug.as_ref()).join(TOOLS_DIR_SCRATCH);
     Ok(Some(ToolsDirPlan {
         image_ref: resolved.map_or_else(
             || tools_dir_key(&tools_dir.source),
@@ -414,7 +411,6 @@ fn tools_dir_plan_for(
         pull: resolved.is_some_and(|source| source.pull),
         cache_dir,
         mount_dir,
-        access: tools_dir.access,
     }))
 }
 
@@ -1260,7 +1256,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rw_tools_dir_requires_build_dir_base() {
+    async fn tools_dir_requires_build_dir_base() {
         let orchestrator = Orchestrator::new(FakeExecutor::default(), FakeResolver);
         let (_tmp, target) = target_with(indoc! {"
             name: solo
@@ -1269,7 +1265,6 @@ mod tests {
             toolsDir:
               source:
                 container: registry.example/tools
-              access: rw
             config:
               previewFeatures:
                 - tools-dir

@@ -385,10 +385,8 @@ pub(crate) fn container_binds(
         push_bind(&mut binds, log_dir, Access::Rw, context)?;
     }
     if let Some(tools_dir) = &context.tools_dir {
-        if tools_dir.access == Access::Rw {
-            guard::ensure_safe_build_dir(&tools_dir.mount_dir)?;
-        }
-        push_bind_keep(&mut binds, &tools_dir.mount_dir, tools_dir.access, context)?;
+        guard::ensure_safe_build_dir(&tools_dir.mount_dir)?;
+        push_bind_keep(&mut binds, &tools_dir.mount_dir, Access::Rw, context)?;
     }
     for path in extra_rw {
         push_bind(&mut binds, path, Access::Rw, context)?;
@@ -951,7 +949,7 @@ mod tests {
     }
 
     #[test]
-    fn customize_emits_tools_dir_and_binds_cache_ro() {
+    fn customize_emits_tools_dir_flag_and_never_root() {
         let cell = sample_cell(
             Operation::Customize,
             BaseSource::Path {
@@ -965,21 +963,16 @@ mod tests {
             digest: "sha256:abc".to_owned(),
             pull: true,
             cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
-            mount_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
-            access: Access::Ro,
+            mount_dir: PathBuf::from("/build/gizmo/tools-dir"),
         });
 
         let args = build_ic_args(&cell, &context).unwrap();
-        let binds = container_binds(&cell, &context, &[]).unwrap();
 
         assert!(
             args.windows(2)
-                .any(|pair| pair == [FLAG_TOOLS_DIR, "/host/cache/tools-dirs/sha256_abc"]),
+                .any(|pair| pair == [FLAG_TOOLS_DIR, "/host/build/gizmo/tools-dir"]),
             "got {args:?}"
         );
-        assert!(binds.iter().any(
-            |bind| bind == "/cache/tools-dirs/sha256_abc:/host/cache/tools-dirs/sha256_abc:ro"
-        ));
         assert!(!args.windows(2).any(|pair| pair == [FLAG_TOOLS_DIR, "/"]));
     }
 
@@ -999,7 +992,6 @@ mod tests {
             pull: true,
             cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             mount_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
-            access: Access::Ro,
         });
 
         let convert_args = build_ic_args(&convert, &context).unwrap();
@@ -1037,7 +1029,6 @@ mod tests {
             pull: true,
             cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             mount_dir: copy.clone(),
-            access: Access::Rw,
         });
 
         let binds = container_binds(&cell, &context, &[]).unwrap();

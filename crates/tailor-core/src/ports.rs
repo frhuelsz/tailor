@@ -9,7 +9,7 @@ use std::{
 };
 
 use tailor_config::{
-    Access, Arch, BaseImageSource, BaseSource, ExtraMount, ToolchainEntry, ToolsDirSourceInline,
+    Arch, BaseImageSource, BaseSource, ExtraMount, ToolchainEntry, ToolsDirSourceInline,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -70,7 +70,7 @@ pub struct ExecutionContext {
 }
 
 /// Resolved/staged tools-dir metadata for one cell. The executor ensures `cache_dir` exists,
-/// materializes `mount_dir` for writable access, binds it, and passes it to IC.
+/// then materializes the writable per-cell `mount_dir` copy, binds it, and passes it to IC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolsDirPlan {
     pub image_ref: String,
@@ -78,7 +78,6 @@ pub struct ToolsDirPlan {
     pub pull: bool,
     pub cache_dir: PathBuf,
     pub mount_dir: PathBuf,
-    pub access: Access,
 }
 
 /// The host-side signing port: sign the boot artifacts IC emits from a `customize` pass, in place,

@@ -489,13 +489,13 @@ pub struct ImageDefinition {
 
 // ===== shared types (reference/types.md) =====
 
-/// IC `--tools-dir` selection for package-manager userspace.
+/// IC `--tools-dir` selection for package-manager userspace. The tools-dir is always bound writable
+/// (a per-cell disposable copy on `runtime.buildDirBase`): IC rewrites `resolv.conf` inside the tools
+/// chroot for package operations, so a read-only bind cannot work for the sealed bases this targets.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolsDir {
     pub source: ToolsDirSourceRef,
-    #[serde(default)]
-    pub access: Access,
 }
 
 /// How an image selects its tools-dir source: a named workspace source or inline container ref.

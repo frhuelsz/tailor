@@ -5,8 +5,8 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 
 use serde_yaml_ng::Value;
 use tailor_config::{
-    Access, Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy,
-    OutputSpec, ToolsDirSource, ToolsDirSourceInline,
+    Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputSpec,
+    ToolsDirSource, ToolsDirSourceInline,
 };
 
 /// A resolved image — the catalogue/authoring unit, after config load and defaults are applied.
@@ -69,7 +69,6 @@ pub struct Cell {
 pub struct CellToolsDir {
     pub source: ToolsDirSourceInline,
     pub source_name: Option<String>,
-    pub access: Access,
 }
 
 /// A cell's unique slug — also the output basename, working-copy, and build-stamp key.

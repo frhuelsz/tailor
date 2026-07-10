@@ -189,7 +189,7 @@
 
     "ToolsDir": {
       "type": "object",
-      "description": "Tailor-managed IC --tools-dir. Requires the inline IC config previewFeatures list to include tools-dir.",
+      "description": "Tailor-managed IC --tools-dir. Always bound writable as a per-cell copy under runtime.buildDirBase, which it therefore requires. Needs the inline IC config previewFeatures list to include tools-dir.",
       "additionalProperties": false,
       "required": ["source"],
       "properties": {
@@ -198,8 +198,7 @@
             { "type": "string", "description": "Name in tailor.yaml toolsDirSources." },
             { "$ref": "#/$defs/ToolsDirSourceInline" }
           ]
-        },
-        "access": { "$ref": "#/$defs/MountAccess" }
+        }
       }
     },
 

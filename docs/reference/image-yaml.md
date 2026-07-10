@@ -6,7 +6,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | --- | --- | --- | --- |
 | `name` | string | yes | Image id used by CLI and slugs. Use `[A-Za-z0-9.-]+`; `_` is reserved as the slug separator. |
 | `toolchain` | string or `{name, container, version?, tag?, pull?}` | no | Workspace toolchain name or inline standalone toolchain. Defaults to workspace default or built-in `latest`; `pull` defaults to `missing`. |
-| `toolsDir` | `{source, access?}` | no | Tailor-managed IC `--tools-dir`. `source` is a `toolsDirSources` name or inline `{container, tag?, pull?}`. `access` defaults to `ro`; `rw` requires `runtime.buildDirBase`. |
+| `toolsDir` | `{source}` | no | Tailor-managed IC `--tools-dir`. `source` is a `toolsDirSources` name or inline `{container, tag?, pull?}`. Always bound writable as a per-cell copy under `runtime.buildDirBase`, which it therefore requires. |
 | `matrix` | ordered map `axis: [values]` | no | User-defined axes; their cartesian product is the candidate cells. Omit for one cell. Declaration order controls slug order and fragment precedence — order axes widest → most-specific (so `arch` is first). |
 | `selectors` | `{ include?, exclude? }` | no | Which cells of the `matrix:` product to build. Lists of **selectors** (sub-cubes); `include` is an allowlist, `exclude` a denylist. Requires `matrix:`; omitted ⇒ the full product. |
 | `outputs` | list of output specs | no | Defaults from workspace or built-in `cosi`. One artifact per cell × output. |
@@ -23,11 +23,13 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 ## Tools dir
 
 Use `toolsDir:` when the image needs an external package-manager userspace for IC operations. The
-`source` is either a name from workspace `toolsDirSources:` or an inline container source. `access`
-defaults to `ro`; `rw` gets a per-cell disposable copy under `runtime.buildDirBase` and therefore
-requires that setting. Inline sources accept the same `pull: always | missing | never` policy as
-workspace `toolsDirSources`; local-only images without a `RepoDigest` run by image `Id` and are not
-lockable. The inline IC `config.previewFeatures` list must include `tools-dir`.
+`source` is either a name from workspace `toolsDirSources:` or an inline container source. The
+tools-dir is always bound **writable** as a per-cell disposable copy under `runtime.buildDirBase`
+(IC rewrites `resolv.conf` inside the tools chroot during package operations, so a read-only bind
+cannot work), so any image using `toolsDir:` **requires `runtime.buildDirBase`**. Inline sources
+accept the same `pull: always | missing | never` policy as workspace `toolsDirSources`; local-only
+images without a `RepoDigest` run by image `Id` and are not lockable. The inline IC
+`config.previewFeatures` list must include `tools-dir`.
 
 ```yaml
 toolsDir:
@@ -44,7 +46,6 @@ toolsDir:
     container: quay.io/fedora/fedora
     tag: "42"
     pull: missing
-  access: rw
 
 config:
   previewFeatures:
