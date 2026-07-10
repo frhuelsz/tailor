@@ -57,6 +57,18 @@ Local images that expose a `RepoDigest` are lockable and run as `container@sha25
 images without a `RepoDigest` run by their image `Id` and are intentionally omitted from
 `tailor.lock`.
 
+A local toolchain image serves the architecture it was built for. tailor reads that architecture
+during resolution and **fails fast, before any container run,** when it cannot provide a selected
+cell's arch (rather than letting Docker attempt a slow, doomed cross-arch pull):
+
+```
+error: toolchain `local-ic` local image is `amd64` but cell `gizmo_arm64_cosi` targets `arm64`;
+       no local image for that arch and pull policy won't fetch it
+```
+
+`pull: never` with no local image and no locked digest fails the same way — never silently reaching a
+registry. See [Use a locally-built Image Customizer image](../how-to/use-a-local-ic-image.md).
+
 ```yaml
 runtime:
   buildDirBase: /mnt/tailor-build
