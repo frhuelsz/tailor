@@ -245,6 +245,7 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
     let targets = build_targets(workspace, names)?;
     for target in &targets {
         let cells = cells_selected(target, selector)?;
+        validate_tools_dir_runtime(&cells, &tool)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
     // Surface signing prerequisites non-fatally (meta/docs/signing.md §5.1) so they are discoverable
@@ -535,6 +536,19 @@ async fn build_lock(
                 container: entry.container.clone(),
                 version: entry.version.as_ref().map(ToString::to_string),
                 tag: Some(entry.effective_tag()),
+                digest,
+            },
+        );
+    }
+    for source in &tool.tools_dir_sources {
+        let inline = source.inline();
+        let digest = resolver.resolve_tools_dir(&inline).await?;
+        lock.tools_dirs.insert(
+            source.name.clone(),
+            LockedContainer {
+                container: source.container.clone(),
+                version: None,
+                tag: Some(source.effective_tag()),
                 digest,
             },
         );
@@ -1007,6 +1021,28 @@ fn report_signing(signers: &[ProfileSigner<'_>]) {
 
 // ───────────────────────────── helpers ─────────────────────────────
 
+fn validate_tools_dir_runtime(cells: &[Cell], tool: &ToolConfig) -> Result<(), AppError> {
+    let has_rw_tools_dir = cells.iter().any(|cell| {
+        cell.tools_dir
+            .as_ref()
+            .is_some_and(|tools_dir| tools_dir.access == tailor_config::Access::Rw)
+    });
+    if has_rw_tools_dir
+        && tool
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.build_dir_base.as_ref())
+            .is_none()
+    {
+        let image = cells.first().map_or_else(
+            || "unknown".to_owned(),
+            |cell| cell.target.name().to_owned(),
+        );
+        return Err(CoreError::WritableToolsDirNeedsBuildDir { image }.into());
+    }
+    Ok(())
+}
+
 fn tool_config(workspace: &Workspace) -> ToolConfig {
     match &workspace.tool {
         Some(tool) => tool.clone(),
@@ -1043,6 +1079,10 @@ fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Targ
                 .unwrap_or(default_output_artifacts),
             root: workspace.root.clone(),
             base_images: base_images.clone(),
+            tools_dir_sources: workspace
+                .tool
+                .as_ref()
+                .map_or_else(Vec::new, |tool| tool.tools_dir_sources.clone()),
         }));
     }
     if !names.is_empty() && targets.is_empty() {

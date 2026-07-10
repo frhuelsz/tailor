@@ -20,6 +20,8 @@ pub struct ToolConfig {
     pub schema_version: u32,
     pub toolchains: Toolchains,
     #[serde(default)]
+    pub tools_dir_sources: Vec<ToolsDirSource>,
+    #[serde(default)]
     pub runtime: Option<Runtime>,
     #[serde(default)]
     pub defaults: Option<Defaults>,
@@ -36,6 +38,12 @@ pub struct ToolConfig {
 impl ToolConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.toolchains.validate()?;
+        ensure_unique_names(
+            "toolsDirSources",
+            self.tools_dir_sources
+                .iter()
+                .map(|source| source.name.as_str()),
+        )?;
         if let Some(base_images) = &self.base_images {
             base_images.validate()?;
         }
@@ -92,6 +100,50 @@ impl ToolchainEntry {
             || crate::defaults::DEFAULT_IC_TAG.to_owned(),
             Version::to_string,
         )
+    }
+}
+
+/// A named container userspace exported and passed to IC as `--tools-dir`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolsDirSource {
+    pub name: String,
+    pub container: String,
+    #[serde(default)]
+    pub tag: Option<String>,
+}
+
+impl ToolsDirSource {
+    /// The registry tag to pull: an explicit `tag`, else `latest`.
+    pub fn effective_tag(&self) -> String {
+        self.tag
+            .clone()
+            .unwrap_or_else(|| crate::defaults::DEFAULT_IC_TAG.to_owned())
+    }
+
+    pub fn inline(&self) -> ToolsDirSourceInline {
+        ToolsDirSourceInline {
+            container: self.container.clone(),
+            tag: self.tag.clone(),
+        }
+    }
+}
+
+/// Inline tools-dir source fields (`toolsDir.source: { container, tag? }`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolsDirSourceInline {
+    pub container: String,
+    #[serde(default)]
+    pub tag: Option<String>,
+}
+
+impl ToolsDirSourceInline {
+    /// The registry tag to pull: an explicit `tag`, else `latest`.
+    pub fn effective_tag(&self) -> String {
+        self.tag
+            .clone()
+            .unwrap_or_else(|| crate::defaults::DEFAULT_IC_TAG.to_owned())
     }
 }
 
@@ -384,6 +436,8 @@ pub struct ImageDefinition {
     #[serde(default)]
     pub toolchain: Option<ToolchainRef>,
     #[serde(default)]
+    pub tools_dir: Option<ToolsDir>,
+    #[serde(default)]
     pub matrix: Option<AxisValues>,
     /// Which cells of the `matrix:` product to build (`include`/`exclude` sub-cubes). Requires
     /// `matrix:`; omitted ⇒ the full product.
@@ -418,6 +472,23 @@ pub struct ImageDefinition {
 }
 
 // ===== shared types (reference/types.md) =====
+
+/// IC `--tools-dir` selection for package-manager userspace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolsDir {
+    pub source: ToolsDirSourceRef,
+    #[serde(default)]
+    pub access: Access,
+}
+
+/// How an image selects its tools-dir source: a named workspace source or inline container ref.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ToolsDirSourceRef {
+    Id(String),
+    Inline(ToolsDirSourceInline),
+}
 
 /// The base-image catalogue: named slots in `tailor.yaml`, each a local file plus an optional remote
 /// source `tailor bases download` fills it from (`meta/docs/base-image-catalogue.md` §3). Images

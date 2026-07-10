@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use bollard::{
     API_DEFAULT_VERSION, Docker,
     container::{
@@ -10,7 +12,10 @@ use bollard::{
 };
 use futures_util::{StreamExt, TryStreamExt};
 use tokio::{select, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
+use tokio_util::{
+    io::{StreamReader, SyncIoBridge},
+    sync::CancellationToken,
+};
 use tracing::{debug, warn};
 
 use tailor_config::Engine;
@@ -27,6 +32,7 @@ const ATTACH_LOGS: bool = true;
 const WAIT_CONDITION_NOT_RUNNING: &str = "not-running";
 /// Connection timeout (seconds) for explicit unix/http endpoints.
 const CONNECT_TIMEOUT_SECS: u64 = 120;
+const EXPORT_NAME_PREFIX: &str = "tailor-tools-dir";
 
 #[derive(Debug, Clone)]
 pub struct BollardRuntime {
@@ -217,6 +223,58 @@ impl ContainerRuntime for BollardRuntime {
         })
     }
 
+    async fn export_container(
+        &self,
+        image_ref: &str,
+        platform: &str,
+        dest_dir: &Path,
+        cancel: CancellationToken,
+    ) -> Result<(), ExecError> {
+        let name = format!("{EXPORT_NAME_PREFIX}-{}", std::process::id());
+        self.pull_image(image_ref).await?;
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: name.clone(),
+                    platform: Some(platform.to_owned()),
+                }),
+                DockerConfig {
+                    image: Some(image_ref.to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|err| map_runtime_error(&err))?;
+
+        let stream = self
+            .docker
+            .export_container(&name)
+            .map_err(|err| std::io::Error::other(err.to_string()));
+        let reader = StreamReader::new(stream);
+        let dest = dest_dir.to_path_buf();
+        let unpack = tokio::task::spawn_blocking(move || {
+            let mut bridge = SyncIoBridge::new(reader);
+            let mut archive = tar::Archive::new(&mut bridge);
+            archive.set_preserve_ownerships(false);
+            archive.unpack(dest)
+        });
+        let result = select! {
+            result = unpack => result.map_err(|err| ExecError::Runtime(err.to_string())),
+            () = cancel.cancelled() => {
+                remove_container(&self.docker, &name).await?;
+                return Err(ExecError::Cancelled);
+            }
+        };
+        remove_container(&self.docker, &name).await?;
+        result?.map_err(|source| ExecError::Io {
+            context: format!(
+                "failed to export tools-dir container `{image_ref}` to `{}`",
+                dest_dir.display()
+            ),
+            source,
+        })
+    }
+
     async fn daemon_info(&self) -> Result<DaemonInfo, ExecError> {
         let info = self
             .docker
@@ -250,6 +308,16 @@ impl ContainerRuntime for NoopRuntime {
     }
 
     async fn daemon_info(&self) -> Result<DaemonInfo, ExecError> {
+        Err(no_engine())
+    }
+
+    async fn export_container(
+        &self,
+        _image_ref: &str,
+        _platform: &str,
+        _dest_dir: &Path,
+        _cancel: CancellationToken,
+    ) -> Result<(), ExecError> {
         Err(no_engine())
     }
 }

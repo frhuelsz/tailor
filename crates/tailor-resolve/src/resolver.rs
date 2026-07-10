@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use tailor_config::{Arch, BaseSource, ToolchainEntry};
+use tailor_config::{Arch, BaseSource, ToolchainEntry, ToolsDirSourceInline};
 use tailor_core::{BaseResolver, ResolveError, ResolvedBase};
 
 use crate::{azure_linux, local, oci, toolchain};
@@ -39,6 +39,13 @@ impl BaseResolver for OciResolver {
 
     async fn resolve_toolchain(&self, toolchain: &ToolchainEntry) -> Result<String, ResolveError> {
         toolchain::resolve(toolchain).await
+    }
+
+    async fn resolve_tools_dir(
+        &self,
+        source: &ToolsDirSourceInline,
+    ) -> Result<String, ResolveError> {
+        toolchain::resolve_tools_dir(source).await
     }
 }
 

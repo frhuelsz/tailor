@@ -13,6 +13,7 @@ Schema: [`#/$defs/ToolConfig`](../tailor.schema.json).
 | ----- | ---- | --- | ------- | ----- |
 | `schemaVersion` | int (`1`) | **yes** | — | Manifest schema version. Only `tailor.yaml`/`tailor.lock` carry it. |
 | `toolchains` | [Toolchains](#toolchains) | **yes** | — | The IC version(s). This is where the IC version lives. |
+| `toolsDirSources` | list of tools-dir sources | no | `[]` | Named container root filesystems exported and passed as IC `--tools-dir`. |
 | `runtime` | [Runtime](#runtime) | no | (built-in) | bollard/Docker knobs reproducing IC's invocation contract. |
 | `defaults` | [Defaults](#defaults) | no | — | Field defaults inherited by every image. |
 | `images` | [ImageCatalogue](#images) | no | auto-discover | Which images are members. Omit ⇒ auto-discover `*/image.yaml` at depth 1. |
@@ -41,6 +42,27 @@ toolchains:
 
 An image selects one with the top-level [`toolchain:`](./image-yaml.md#top-level-fields) field
 (`toolchain: ic-1.1`), or omits it to use `default`. See [ToolchainRef](./types.md#toolchainref).
+
+## toolsDirSources
+
+Named container root filesystems that tailor can export to a digest-keyed cache and pass to IC as
+`--tools-dir`. Images opt in with [`toolsDir`](./image-yaml.md#tools-dir). Each `name` must be unique.
+
+| Field | Type | Req | Notes |
+| ----- | ---- | --- | ----- |
+| `name` | string | **yes** | Source name used by `toolsDir.source`. |
+| `container` | string | **yes** | Container image whose flattened root filesystem becomes the tools dir. |
+| `tag` | string | no | Defaults to `latest` when `container` has no tag or digest. |
+
+```yaml
+toolsDirSources:
+  - name: acl
+    container: mcr.microsoft.com/azurelinux/base/core
+    tag: "3.0"
+```
+
+`tailor lock` pins named tools-dir source digests in `tailor.lock`. Local-only images without a
+registry digest may fail digest resolution for now. tailor never passes `--tools-dir /`.
 
 ## runtime
 
@@ -120,6 +142,11 @@ toolchains:
     - name: ic-1.1
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
+
+toolsDirSources:
+  - name: acl
+    container: mcr.microsoft.com/azurelinux/base/core
+    tag: "3.0"
 
 runtime:
   imageCacheDir: ./.tailor/cache

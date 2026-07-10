@@ -5,7 +5,8 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 
 use serde_yaml_ng::Value;
 use tailor_config::{
-    Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputSpec,
+    Access, Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy,
+    OutputSpec, ToolsDirSource, ToolsDirSourceInline,
 };
 
 /// A resolved image — the catalogue/authoring unit, after config load and defaults are applied.
@@ -25,6 +26,8 @@ pub struct Target {
     pub root: PathBuf,
     /// The `tailor.yaml` base-image catalogue, against which `base: { ref: … }` is resolved.
     pub base_images: BaseImageCatalogue,
+    /// The workspace `toolsDirSources` catalogue for `toolsDir.source: <name>` references.
+    pub tools_dir_sources: Vec<ToolsDirSource>,
 }
 
 impl Target {
@@ -57,6 +60,16 @@ pub struct Cell {
     pub base_image: Option<String>,
     /// Local RPM sources passed to IC as `--rpm-source`.
     pub rpm_sources: Vec<PathBuf>,
+    /// Resolved IC tools-dir source, when this image requests tailor-managed `--tools-dir`.
+    pub tools_dir: Option<CellToolsDir>,
+}
+
+/// A cell's tools-dir source after resolving an image-level named reference or inline source.
+#[derive(Debug, Clone)]
+pub struct CellToolsDir {
+    pub source: ToolsDirSourceInline,
+    pub source_name: Option<String>,
+    pub access: Access,
 }
 
 /// A cell's unique slug — also the output basename, working-copy, and build-stamp key.
@@ -103,6 +116,8 @@ pub struct PlannedCell {
     /// The digest-pinned IC `--image` reference for a registry base (`oci:<repo>@sha256:…`), or
     /// `None` for a local-file base. Resolved during planning so the build stays reproducible.
     pub base_ref: Option<String>,
+    /// Resolved/staged tools-dir plan, used by the executor and fingerprint.
+    pub tools_dir: Option<crate::ports::ToolsDirPlan>,
 }
 
 /// An ordered list of cells to (re)build.

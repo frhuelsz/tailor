@@ -1,4 +1,4 @@
-use tailor_config::ToolchainEntry;
+use tailor_config::{ToolchainEntry, ToolsDirSourceInline};
 use tailor_core::ResolveError;
 
 use crate::oci;
@@ -13,6 +13,14 @@ pub(crate) async fn resolve(toolchain: &ToolchainEntry) -> Result<String, Resolv
     oci::resolve_reference_digest(reference).await
 }
 
+pub(crate) async fn resolve_tools_dir(
+    source: &ToolsDirSourceInline,
+) -> Result<String, ResolveError> {
+    let reference = tools_dir_reference(source);
+
+    oci::resolve_reference_digest(reference).await
+}
+
 fn toolchain_reference(toolchain: &ToolchainEntry) -> String {
     if has_tag_or_digest(&toolchain.container) {
         return toolchain.container.clone();
@@ -20,6 +28,15 @@ fn toolchain_reference(toolchain: &ToolchainEntry) -> String {
 
     let container = &toolchain.container;
     format!("{container}:{}", toolchain.effective_tag())
+}
+
+fn tools_dir_reference(source: &ToolsDirSourceInline) -> String {
+    if has_tag_or_digest(&source.container) {
+        return source.container.clone();
+    }
+
+    let container = &source.container;
+    format!("{container}:{}", source.effective_tag())
 }
 
 fn has_tag_or_digest(reference: &str) -> bool {

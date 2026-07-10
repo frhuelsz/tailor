@@ -111,6 +111,7 @@ mod tests {
             features: vec![],
             params: IndexMap::new(),
             rpm_sources: vec![],
+            tools_dir: None,
             operation: None,
             output_artifacts: None,
             signing: None,
@@ -125,6 +126,7 @@ mod tests {
             output_artifacts: OutputArtifactsPolicy::default(),
             root: ".".into(),
             base_images: BaseImageCatalogue::default(),
+            tools_dir_sources: Vec::new(),
         });
         Cell {
             target,
@@ -146,6 +148,7 @@ mod tests {
             },
             base_image: None,
             rpm_sources: vec![],
+            tools_dir: None,
         }
     }
 

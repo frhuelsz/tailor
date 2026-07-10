@@ -19,6 +19,8 @@ pub struct Lockfile {
     pub schema_version: u32,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub toolchains: BTreeMap<String, LockedContainer>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tools_dirs: BTreeMap<String, LockedContainer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<LockedRuntime>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -30,6 +32,7 @@ impl Default for Lockfile {
         Self {
             schema_version: SCHEMA_VERSION,
             toolchains: BTreeMap::new(),
+            tools_dirs: BTreeMap::new(),
             runtime: None,
             bases: Vec::new(),
         }
@@ -67,6 +70,11 @@ impl Lockfile {
     /// The pinned digest of toolchain `id`, if locked.
     pub fn toolchain_digest(&self, id: &str) -> Option<&str> {
         self.toolchains.get(id).map(|c| c.digest.as_str())
+    }
+
+    /// The pinned digest of tools-dir source `id`, if locked.
+    pub fn tools_dir_digest(&self, id: &str) -> Option<&str> {
+        self.tools_dirs.get(id).map(|c| c.digest.as_str())
     }
 
     /// The pinned digest of a registry base for `reference` + `platform`, if locked.
@@ -137,6 +145,15 @@ mod tests {
                 digest: "sha256:abcd".to_owned(),
             },
         );
+        lock.tools_dirs.insert(
+            "acl".to_owned(),
+            LockedContainer {
+                container: "mcr.microsoft.com/azurelinux/base/core".to_owned(),
+                version: None,
+                tag: Some("3.0".to_owned()),
+                digest: "sha256:tools".to_owned(),
+            },
+        );
         lock.upsert_base(LockedBase {
             reference: "mcr.microsoft.com/azurelinux/3.0/image/minimal-os".to_owned(),
             platform: "linux/amd64".to_owned(),
@@ -149,6 +166,7 @@ mod tests {
         let reloaded = Lockfile::read(&path).unwrap();
 
         assert_eq!(reloaded.toolchain_digest("ic-1.3"), Some("sha256:abcd"));
+        assert_eq!(reloaded.tools_dir_digest("acl"), Some("sha256:tools"));
         assert_eq!(
             reloaded.base_digest(
                 "mcr.microsoft.com/azurelinux/3.0/image/minimal-os",
@@ -162,7 +180,7 @@ mod tests {
     fn missing_file_reads_as_empty() {
         let dir = TempDir::new().unwrap();
         let lock = Lockfile::read(&dir.path().join("absent.lock")).unwrap();
-        assert!(lock.toolchains.is_empty() && lock.bases.is_empty());
+        assert!(lock.toolchains.is_empty() && lock.tools_dirs.is_empty() && lock.bases.is_empty());
     }
 
     #[test]

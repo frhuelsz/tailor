@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tailor_config::{Arch, BaseSource, ToolchainEntry};
+use tailor_config::{Arch, BaseSource, ToolchainEntry, ToolsDirSourceInline};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -54,6 +54,13 @@ impl BaseResolver for FakeResolver {
 
     async fn resolve_toolchain(&self, _toolchain: &ToolchainEntry) -> Result<String, ResolveError> {
         Ok("sha256:faketoolchain".to_owned())
+    }
+
+    async fn resolve_tools_dir(
+        &self,
+        _source: &ToolsDirSourceInline,
+    ) -> Result<String, ResolveError> {
+        Ok("sha256:faketoolsdir".to_owned())
     }
 }
 

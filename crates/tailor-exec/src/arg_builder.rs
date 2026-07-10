@@ -34,6 +34,7 @@ const DEFAULT_IC_LOG_LEVEL: &str = "debug";
 const FLAG_OUTPUT_IMAGE_FILE: &str = "--output-image-file";
 const FLAG_OUTPUT_IMAGE_FORMAT: &str = "--output-image-format";
 const FLAG_RPM_SOURCE: &str = "--rpm-source";
+const FLAG_TOOLS_DIR: &str = "--tools-dir";
 const OCI_PREFIX: &str = "oci:";
 const ACCESS_READ_ONLY: &str = "ro";
 const ACCESS_READ_WRITE: &str = "rw";
@@ -111,6 +112,7 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Result<Vec<Stri
     }
 
     if operation == Operation::Customize {
+        push_tools_dir_arg(&mut args, context);
         for source in &cell.rpm_sources {
             args.extend(flag_value(
                 FLAG_RPM_SOURCE,
@@ -169,6 +171,7 @@ pub(crate) fn build_signed_customize_args(
         FLAG_OUTPUT_IMAGE_FILE,
         path_translate::to_container_path(intermediate, &context.runtime.host_root),
     ));
+    push_tools_dir_arg(&mut args, context);
     for source in &cell.rpm_sources {
         args.extend(flag_value(
             FLAG_RPM_SOURCE,
@@ -185,6 +188,16 @@ pub(crate) fn build_signed_customize_args(
         ));
     }
     Ok(args)
+}
+
+fn push_tools_dir_arg(args: &mut Vec<String>, context: &ExecutionContext) {
+    let Some(tools_dir) = &context.tools_dir else {
+        return;
+    };
+    let value = path_translate::to_container_path(&tools_dir.mount_dir, &context.runtime.host_root);
+    if value != "/" {
+        args.extend(flag_value(FLAG_TOOLS_DIR, value));
+    }
 }
 
 /// The `inject-files` pass of a signed build: re-inject the now-signed artifacts from
@@ -371,6 +384,12 @@ pub(crate) fn container_binds(
     if let Some(log_dir) = &context.runtime.log_dir {
         push_bind(&mut binds, log_dir, Access::Rw, context)?;
     }
+    if let Some(tools_dir) = &context.tools_dir {
+        if tools_dir.access == Access::Rw {
+            guard::ensure_safe_build_dir(&tools_dir.mount_dir)?;
+        }
+        push_bind_keep(&mut binds, &tools_dir.mount_dir, tools_dir.access, context)?;
+    }
     for path in extra_rw {
         push_bind(&mut binds, path, Access::Rw, context)?;
     }
@@ -394,6 +413,7 @@ pub(crate) fn container_binds(
 struct BindSpec {
     source: PathBuf,
     access: Access,
+    keep_nested: bool,
 }
 
 fn push_out_of_workspace_inputs(
@@ -434,6 +454,25 @@ fn push_bind(
     access: Access,
     context: &ExecutionContext,
 ) -> Result<(), ExecError> {
+    push_bind_inner(binds, source, access, context, false)
+}
+
+fn push_bind_keep(
+    binds: &mut Vec<BindSpec>,
+    source: &Path,
+    access: Access,
+    context: &ExecutionContext,
+) -> Result<(), ExecError> {
+    push_bind_inner(binds, source, access, context, true)
+}
+
+fn push_bind_inner(
+    binds: &mut Vec<BindSpec>,
+    source: &Path,
+    access: Access,
+    context: &ExecutionContext,
+    keep_nested: bool,
+) -> Result<(), ExecError> {
     let source = absolute_source(source, &context.runtime.workspace_root);
     if source == Path::new("/") {
         return Err(ExecError::UnsafeDir {
@@ -444,25 +483,34 @@ fn push_bind(
     if access == Access::Rw {
         guard::ensure_safe_rw_target(&source)?;
     }
-    binds.push(BindSpec { source, access });
+    binds.push(BindSpec {
+        source,
+        access,
+        keep_nested,
+    });
     Ok(())
 }
 
 fn normalize_binds(mut binds: Vec<BindSpec>, host_root: &Path) -> Vec<String> {
-    let mut by_source = BTreeMap::<PathBuf, Access>::new();
+    let mut by_source = BTreeMap::<PathBuf, (Access, bool)>::new();
     for bind in binds.drain(..) {
         by_source
             .entry(bind.source)
-            .and_modify(|access| {
+            .and_modify(|(access, keep_nested)| {
                 if bind.access == Access::Rw {
                     *access = Access::Rw;
                 }
+                *keep_nested |= bind.keep_nested;
             })
-            .or_insert(bind.access);
+            .or_insert((bind.access, bind.keep_nested));
     }
     let mut specs = by_source
         .into_iter()
-        .map(|(source, access)| BindSpec { source, access })
+        .map(|(source, (access, keep_nested))| BindSpec {
+            source,
+            access,
+            keep_nested,
+        })
         .collect::<Vec<_>>();
     specs.sort_by(|left, right| {
         source_depth(&left.source)
@@ -474,7 +522,10 @@ fn normalize_binds(mut binds: Vec<BindSpec>, host_root: &Path) -> Vec<String> {
     let mut kept: Vec<BindSpec> = Vec::new();
     'specs: for spec in specs {
         for existing in &kept {
-            if spec.source.starts_with(&existing.source) && spec.access == existing.access {
+            if !spec.keep_nested
+                && spec.source.starts_with(&existing.source)
+                && spec.access == existing.access
+            {
                 continue 'specs;
             }
         }
@@ -622,7 +673,7 @@ mod tests {
         Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OciBase, Operation,
         OutputArtifactsPolicy, OutputFormat, OutputSpec,
     };
-    use tailor_core::{Cell, CellSlug, ExecutionContext, RuntimeConfig, Target};
+    use tailor_core::{Cell, CellSlug, ExecutionContext, RuntimeConfig, Target, ToolsDirPlan};
 
     #[test]
     fn builds_customize_args_with_translated_paths() {
@@ -900,6 +951,103 @@ mod tests {
     }
 
     #[test]
+    fn customize_emits_tools_dir_and_binds_cache_ro() {
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        let mut context = sample_context();
+        context.tools_dir = Some(ToolsDirPlan {
+            image_ref: "registry.example/tools@sha256:abc".to_owned(),
+            digest: "sha256:abc".to_owned(),
+            cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
+            mount_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
+            access: Access::Ro,
+        });
+
+        let args = build_ic_args(&cell, &context).unwrap();
+        let binds = container_binds(&cell, &context, &[]).unwrap();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == [FLAG_TOOLS_DIR, "/host/cache/tools-dirs/sha256_abc"]),
+            "got {args:?}"
+        );
+        assert!(binds.iter().any(
+            |bind| bind == "/cache/tools-dirs/sha256_abc:/host/cache/tools-dirs/sha256_abc:ro"
+        ));
+        assert!(!args.windows(2).any(|pair| pair == [FLAG_TOOLS_DIR, "/"]));
+    }
+
+    #[test]
+    fn convert_and_inject_files_do_not_emit_tools_dir() {
+        let convert = sample_cell(
+            Operation::Convert,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        let mut context = sample_context();
+        context.tools_dir = Some(ToolsDirPlan {
+            image_ref: "registry.example/tools@sha256:abc".to_owned(),
+            digest: "sha256:abc".to_owned(),
+            cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
+            mount_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
+            access: Access::Ro,
+        });
+
+        let convert_args = build_ic_args(&convert, &context).unwrap();
+        assert!(!convert_args.iter().any(|arg| arg == FLAG_TOOLS_DIR));
+
+        let inject_args = build_inject_files_args(
+            &convert,
+            &context,
+            Path::new("/out/intermediate.raw"),
+            Path::new("/out/inject-files.yaml"),
+            Path::new("/out/final.cosi"),
+        )
+        .unwrap();
+        assert!(!inject_args.iter().any(|arg| arg == FLAG_TOOLS_DIR));
+    }
+
+    #[test]
+    fn rw_tools_dir_binds_per_cell_copy_rw() {
+        let Some(base) = separate_build_dir_base() else {
+            return;
+        };
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        let mut context = sample_context();
+        let copy = base.join(cell.slug.as_ref()).join("tools-dir");
+        context.runtime.build_dir_base = Some(base);
+        context.tools_dir = Some(ToolsDirPlan {
+            image_ref: "registry.example/tools@sha256:abc".to_owned(),
+            digest: "sha256:abc".to_owned(),
+            cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
+            mount_dir: copy.clone(),
+            access: Access::Rw,
+        });
+
+        let binds = container_binds(&cell, &context, &[]).unwrap();
+        let expected = format!(
+            "{}:{}:rw",
+            copy.display(),
+            path_translate::to_container_path(&copy, &context.runtime.host_root)
+        );
+
+        assert!(binds.iter().any(|bind| bind == &expected), "got {binds:?}");
+    }
+
+    #[test]
     fn always_runs_ic_structured_at_debug_by_default() {
         let cell = sample_cell(
             Operation::Customize,
@@ -946,6 +1094,7 @@ mod tests {
             output_dir: PathBuf::from("/out"),
             ic_image_ref: "ic@sha256:abc".to_owned(),
             base_ref: None,
+            tools_dir: None,
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: false,
@@ -989,6 +1138,7 @@ mod tests {
                 output_artifacts: OutputArtifactsPolicy::default(),
                 root: PathBuf::from("/images"),
                 base_images: BaseImageCatalogue::default(),
+                tools_dir_sources: Vec::new(),
             }),
             axes: BTreeMap::new(),
             arch: Arch::Amd64,
@@ -1002,6 +1152,7 @@ mod tests {
             base,
             base_image: None,
             rpm_sources: vec![PathBuf::from("/rpms/one")],
+            tools_dir: None,
         }
     }
 

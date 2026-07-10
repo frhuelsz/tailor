@@ -8,7 +8,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use tailor_config::{OutputArtifactsPolicy, OutputFormat};
+use tailor_config::{Access, OutputArtifactsPolicy, OutputFormat};
 use tailor_core::{
     Cell, ContainerConfig, ContainerResult, ContainerRuntime, ExecError, ExecutionContext,
     ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, artifact_name,
@@ -96,6 +96,8 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             })?;
         }
 
+        let prepared_tools_dir = prepare_tools_dir(&self.runtime, context, cancel.clone()).await?;
+
         let farms = prepare_rpm_farms(cell, context)?;
         let mut run_cell = cell.clone();
         run_cell.rpm_sources = farms
@@ -155,7 +157,7 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                 log_file.as_ref(),
                 cancel.clone(),
             )
-            .await?
+            .await
         } else {
             let args = arg_builder::build_ic_args(&run_cell, context)?;
             let extra_rw = staging
@@ -172,31 +174,43 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                     log_file.as_ref(),
                     cancel.clone(),
                 )
-                .await?;
+                .await;
             let _ = fs::remove_file(&working_copy_path);
 
-            // Reclaim IC's root-owned staging tree before propagating any IC failure, so a failed
-            // build never strands root-owned scratch (§3.4): chown always; scratch also removes.
-            if let Some(plan) = &staging {
-                janitor::chown_paths(
-                    &self.runtime,
-                    slice::from_ref(&plan.dir),
-                    &context.runtime,
-                    cancel.clone(),
-                )
-                .await?;
-                if plan.reclaim {
-                    janitor::remove_paths(
+            if result.is_ok() {
+                // Reclaim IC's root-owned staging tree before propagating any IC failure, so a failed
+                // build never strands root-owned scratch (§3.4): chown always; scratch also removes.
+                if let Some(plan) = &staging {
+                    janitor::chown_paths(
                         &self.runtime,
                         slice::from_ref(&plan.dir),
                         &context.runtime,
                         cancel.clone(),
                     )
                     .await?;
+                    if plan.reclaim {
+                        janitor::remove_paths(
+                            &self.runtime,
+                            slice::from_ref(&plan.dir),
+                            &context.runtime,
+                            cancel.clone(),
+                        )
+                        .await?;
+                    }
                 }
             }
             result
         };
+        if let Some(copy) = &prepared_tools_dir.rw_copy {
+            janitor::remove_paths(
+                &self.runtime,
+                slice::from_ref(copy),
+                &context.runtime,
+                cancel.clone(),
+            )
+            .await?;
+        }
+        let result = result?;
 
         if result.exit_code != 0 {
             return Err(ExecError::IcFailed {
@@ -400,6 +414,109 @@ impl<R: ContainerRuntime> IcExecutor<R> {
     }
 }
 
+#[derive(Debug, Default)]
+struct PreparedToolsDir {
+    rw_copy: Option<PathBuf>,
+}
+
+async fn prepare_tools_dir<R: ContainerRuntime>(
+    runtime: &R,
+    context: &ExecutionContext,
+    cancel: CancellationToken,
+) -> Result<PreparedToolsDir, ExecError> {
+    let Some(plan) = &context.tools_dir else {
+        return Ok(PreparedToolsDir::default());
+    };
+    if plan.cache_dir == Path::new("/") || plan.mount_dir == Path::new("/") {
+        return Err(ExecError::UnsafeDir {
+            path: plan.mount_dir.clone(),
+            reason: "tools-dir must not be filesystem root".to_owned(),
+        });
+    }
+    if !dir_has_entries(&plan.cache_dir)? {
+        fs::create_dir_all(&plan.cache_dir).map_err(|source| ExecError::Io {
+            context: format!(
+                "failed to create tools-dir cache `{}`",
+                plan.cache_dir.display()
+            ),
+            source,
+        })?;
+        if let Err(err) = runtime
+            .export_container(
+                &plan.image_ref,
+                &context.platform,
+                &plan.cache_dir,
+                cancel.clone(),
+            )
+            .await
+        {
+            let _ = fs::remove_dir_all(&plan.cache_dir);
+            return Err(err);
+        }
+    }
+    if plan.access == Access::Ro {
+        return Ok(PreparedToolsDir::default());
+    }
+    guard::ensure_safe_build_dir(&plan.mount_dir)?;
+    if plan.mount_dir.exists() {
+        janitor::remove_paths(
+            runtime,
+            slice::from_ref(&plan.mount_dir),
+            &context.runtime,
+            cancel.clone(),
+        )
+        .await?;
+    }
+    copy_dir_all(&plan.cache_dir, &plan.mount_dir).map_err(|source| ExecError::Io {
+        context: format!(
+            "failed to copy tools-dir cache `{}` to `{}`",
+            plan.cache_dir.display(),
+            plan.mount_dir.display()
+        ),
+        source,
+    })?;
+    Ok(PreparedToolsDir {
+        rw_copy: Some(plan.mount_dir.clone()),
+    })
+}
+
+fn dir_has_entries(path: &Path) -> Result<bool, ExecError> {
+    match fs::read_dir(path) {
+        Ok(mut entries) => entries
+            .next()
+            .transpose()
+            .map(|entry| entry.is_some())
+            .map_err(|source| ExecError::Io {
+                context: format!("failed to read tools-dir cache `{}`", path.display()),
+                source,
+            }),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(ExecError::Io {
+            context: format!("failed to read tools-dir cache `{}`", path.display()),
+            source,
+        }),
+    }
+}
+
+fn copy_dir_all(source: &Path, dest: &Path) -> Result<(), std::io::Error> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&source_path)?;
+        if metadata.file_type().is_symlink() {
+            let target = fs::read_link(&source_path)?;
+            std::os::unix::fs::symlink(target, dest_path)?;
+        } else if metadata.is_dir() {
+            copy_dir_all(&source_path, &dest_path)?;
+        } else {
+            fs::copy(&source_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 struct RpmFarm {
     arg_path: PathBuf,
@@ -494,7 +611,11 @@ fn verify_artifact(path: &PathBuf, format: OutputFormat) -> Result<(), ExecError
 mod tests {
     use super::*;
 
-    use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
 
     use serde_yaml_ng::{Mapping, Value};
     use tailor_config::{
@@ -516,6 +637,7 @@ mod tests {
                 output_artifacts: OutputArtifactsPolicy::default(),
                 root: PathBuf::from("/images"),
                 base_images: BaseImageCatalogue::default(),
+                tools_dir_sources: Vec::new(),
             }),
             axes: BTreeMap::new(),
             arch: Arch::Amd64,
@@ -532,6 +654,7 @@ mod tests {
             },
             base_image: None,
             rpm_sources: Vec::new(),
+            tools_dir: None,
         }
     }
 
@@ -540,12 +663,83 @@ mod tests {
             output_dir: PathBuf::from("/out"),
             ic_image_ref: "ic@sha256:abc".to_owned(),
             base_ref: None,
+            tools_dir: None,
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: true,
             signer: None,
             runtime: RuntimeConfig::default(),
         }
+    }
+
+    #[derive(Debug, Default, Clone)]
+    struct ExportRuntime {
+        exports: Arc<Mutex<Vec<PathBuf>>>,
+    }
+
+    impl ContainerRuntime for ExportRuntime {
+        async fn pull_image(&self, _reference: &str) -> Result<(), ExecError> {
+            Ok(())
+        }
+
+        async fn create_and_run(
+            &self,
+            _config: ContainerConfig,
+            _cancel: CancellationToken,
+        ) -> Result<ContainerResult, ExecError> {
+            Err(ExecError::Other("not used".to_owned()))
+        }
+
+        async fn daemon_info(&self) -> Result<tailor_core::DaemonInfo, ExecError> {
+            Ok(tailor_core::DaemonInfo::default())
+        }
+
+        async fn export_container(
+            &self,
+            _image_ref: &str,
+            _platform: &str,
+            dest_dir: &Path,
+            _cancel: CancellationToken,
+        ) -> Result<(), ExecError> {
+            std::fs::write(dest_dir.join("tdnf"), "mock").map_err(|source| ExecError::Io {
+                context: "failed to write mock tools-dir export".to_owned(),
+                source,
+            })?;
+            self.exports.lock().unwrap().push(dest_dir.to_path_buf());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn prepare_tools_dir_exports_missing_cache_once() {
+        let root = tempfile::Builder::new()
+            .prefix("tailor-tools-dir-")
+            .tempdir_in(std::env::current_dir().unwrap())
+            .unwrap();
+        let runtime = ExportRuntime::default();
+        let mut context = dry_run_context();
+        context.dry_run = false;
+        context.tools_dir = Some(tailor_core::ToolsDirPlan {
+            image_ref: "registry.example/tools@sha256:abc".to_owned(),
+            digest: "sha256:abc".to_owned(),
+            cache_dir: root.path().join("cache/tools-dirs/sha256_abc"),
+            mount_dir: root.path().join("cache/tools-dirs/sha256_abc"),
+            access: Access::Ro,
+        });
+
+        prepare_tools_dir(&runtime, &context, CancellationToken::new())
+            .await
+            .unwrap();
+        prepare_tools_dir(&runtime, &context, CancellationToken::new())
+            .await
+            .unwrap();
+
+        assert_eq!(runtime.exports.lock().unwrap().len(), 1);
+        assert!(
+            root.path()
+                .join("cache/tools-dirs/sha256_abc/tdnf")
+                .exists()
+        );
     }
 
     // A dry-run renders the invocation without ever calling the runtime; `NoopRuntime` (whose

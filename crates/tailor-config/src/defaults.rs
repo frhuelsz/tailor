@@ -47,6 +47,7 @@ pub fn default_tool_config() -> ToolConfig {
             default: DEFAULT_TOOLCHAIN_ID.to_owned(),
             entries,
         },
+        tools_dir_sources: Vec::new(),
         runtime: None,
         defaults: None,
         signing: None,

@@ -16,6 +16,7 @@ pub struct FingerprintInputs<'a> {
     pub ic_config: &'a Value,
     pub operation: Operation,
     pub inject_files: bool,
+    pub tools_dir_digest: Option<&'a str>,
     /// Sorted SHA-256 hashes of `extraDependencies` files.
     pub extra_dependency_hashes: &'a [[u8; 32]],
     /// Sorted SHA-256 hashes of `rpmSources` contents (excluding `repodata/`).
@@ -51,6 +52,9 @@ pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
     field(&mut hasher, b"config", &canonical_config(inputs.ic_config));
     field(&mut hasher, b"operation", operation_tag(inputs.operation));
     field(&mut hasher, b"inject", &[u8::from(inputs.inject_files)]);
+    if let Some(digest) = inputs.tools_dir_digest {
+        field(&mut hasher, b"tools-dir.digest", digest.as_bytes());
+    }
     for hash in inputs.extra_dependency_hashes {
         field(&mut hasher, b"dep", hash);
     }
@@ -105,6 +109,7 @@ mod tests {
             ic_config: config,
             operation: Operation::Customize,
             inject_files: false,
+            tools_dir_digest: None,
             extra_dependency_hashes: &[],
             rpm_source_hashes: &[],
         }
@@ -128,6 +133,17 @@ mod tests {
             fingerprint(&inputs("cell", &cfg_a, &base)),
             fingerprint(&inputs("cell", &cfg_b, &base))
         );
+    }
+
+    #[test]
+    fn tools_dir_digest_changes_fingerprint() {
+        let base = base();
+        let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
+        let mut a = inputs("cell", &cfg, &base);
+        a.tools_dir_digest = Some("sha256:one");
+        let mut b = inputs("cell", &cfg, &base);
+        b.tools_dir_digest = Some("sha256:two");
+        assert_ne!(fingerprint(&a), fingerprint(&b));
     }
 
     #[test]

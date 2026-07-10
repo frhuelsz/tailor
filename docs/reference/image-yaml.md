@@ -6,6 +6,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | --- | --- | --- | --- |
 | `name` | string | yes | Image id used by CLI and slugs. Use `[A-Za-z0-9.-]+`; `_` is reserved as the slug separator. |
 | `toolchain` | string or `{name, container, version?, tag?}` | no | Workspace toolchain name or inline standalone toolchain. Defaults to workspace default or built-in `latest`. |
+| `toolsDir` | `{source, access?}` | no | Tailor-managed IC `--tools-dir`. `source` is a `toolsDirSources` name or inline `{container, tag?}`. `access` defaults to `ro`; `rw` requires `runtime.buildDirBase`. |
 | `matrix` | ordered map `axis: [values]` | no | User-defined axes; their cartesian product is the candidate cells. Omit for one cell. Declaration order controls slug order and fragment precedence — order axes widest → most-specific (so `arch` is first). |
 | `selectors` | `{ include?, exclude? }` | no | Which cells of the `matrix:` product to build. Lists of **selectors** (sub-cubes); `include` is an allowlist, `exclude` a denylist. Requires `matrix:`; omitted ⇒ the full product. |
 | `outputs` | list of output specs | no | Defaults from workspace or built-in `cosi`. One artifact per cell × output. |
@@ -18,6 +19,38 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `injectFiles` | boolean | no | Inert placeholder, superseded by `signing:`. Currently a no-op; do not rely on it. |
 | `extraDependencies` | path list | no | Extra files/directories to hash for incremental checks; use for IC-config-referenced assets. |
 | `config` | mapping or path string | conditional | Required for `customize`, forbidden for `convert`. Opaque IC config. |
+
+## Tools dir
+
+Use `toolsDir:` when the image needs an external package-manager userspace for IC operations. The
+`source` is either a name from workspace `toolsDirSources:` or an inline container source. `access`
+defaults to `ro`; `rw` gets a per-cell disposable copy under `runtime.buildDirBase` and therefore
+requires that setting. The inline IC `config.previewFeatures` list must include `tools-dir`.
+
+```yaml
+toolsDir:
+  source: acl
+
+config:
+  previewFeatures:
+    - tools-dir
+```
+
+```yaml
+toolsDir:
+  source:
+    container: quay.io/fedora/fedora
+    tag: "42"
+  access: rw
+
+config:
+  previewFeatures:
+    - tools-dir
+```
+
+tailor exports the source container to `runtime.imageCacheDir/tools-dirs/<digest>` and passes the
+translated `/host/...` path to customize passes only. It never emits `--tools-dir /`, and convert or
+inject-files passes do not receive the flag.
 
 ## Matrix
 

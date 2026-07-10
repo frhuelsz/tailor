@@ -29,7 +29,7 @@ pub use orchestrator::{
 pub use ports::{
     BaseImageFetcher, BaseResolver, ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo,
     ExecutionContext, ExecutionResult, Executor, FetchedBase, FilesystemOps, ResolvedBase,
-    RuntimeConfig, Signer, SigningPlan, SigningResult,
+    RuntimeConfig, Signer, SigningPlan, SigningResult, ToolsDirPlan,
 };
 pub use selector::Selector;
 pub use signing::{

@@ -9,6 +9,7 @@ How-to guides are task-oriented recipes.
 - [Select and build one cell](select-and-build-one-cell.md)
 - [Override a base per axis](override-a-base-per-axis.md)
 - [Use a base-image catalogue](use-a-base-image-catalogue.md)
+- [Use a tools dir for sealed images](use-a-tools-dir.md)
 - [Change an output format](change-an-output-format.md)
 - [Share config with `$include`](share-config-with-include.md)
 - [Pin the Image Customizer version](pin-the-ic-version.md)

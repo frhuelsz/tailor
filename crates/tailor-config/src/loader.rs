@@ -123,6 +123,107 @@ mod tests {
     }
 
     #[test]
+    fn loads_tools_dir_sources_from_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+                toolsDirSources:
+                  - name: acl
+                    container: mcr.microsoft.com/azurelinux/base/core
+                    tag: '3.0'
+            "},
+        );
+        let tc = load_tool_config(&path).unwrap();
+        assert_eq!(tc.tools_dir_sources.len(), 1);
+        assert_eq!(tc.tools_dir_sources[0].name, "acl");
+        assert_eq!(tc.tools_dir_sources[0].effective_tag(), "3.0");
+    }
+
+    #[test]
+    fn duplicate_tools_dir_source_names_are_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+                toolsDirSources:
+                  - name: acl
+                    container: registry.example/acl
+                  - name: acl
+                    container: registry.example/acl-other
+            "},
+        );
+        let err = load_tool_config(&path).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::DuplicateCatalogueName { catalogue, name } if catalogue == "toolsDirSources" && name == "acl"),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn image_tools_dir_refs_and_inline_sources_parse() {
+        let tmp = TempDir::new().unwrap();
+        let named = write(
+            &tmp,
+            "named.yaml",
+            indoc! {"
+                name: gizmo
+                base:
+                  path: ./b.img
+                toolsDir:
+                  source: acl
+                config:
+                  previewFeatures:
+                    - tools-dir
+            "},
+        );
+        let image = load_image(&named).unwrap();
+        let tools_dir = image.tools_dir.unwrap();
+        assert_eq!(tools_dir.access, crate::schema::Access::Ro);
+        assert!(
+            matches!(tools_dir.source, crate::schema::ToolsDirSourceRef::Id(name) if name == "acl")
+        );
+
+        let inline = write(
+            &tmp,
+            "inline.yaml",
+            indoc! {"
+                name: gizmo
+                base:
+                  path: ./b.img
+                toolsDir:
+                  source:
+                    container: quay.io/fedora/fedora
+                    tag: '42'
+                  access: rw
+                config:
+                  previewFeatures:
+                    - tools-dir
+            "},
+        );
+        let image = load_image(&inline).unwrap();
+        let tools_dir = image.tools_dir.unwrap();
+        assert_eq!(tools_dir.access, crate::schema::Access::Rw);
+        assert!(
+            matches!(tools_dir.source, crate::schema::ToolsDirSourceRef::Inline(source) if source.container == "quay.io/fedora/fedora" && source.effective_tag() == "42")
+        );
+    }
+
+    #[test]
     fn loads_an_image_definition_and_expands_its_matrix() {
         let tmp = TempDir::new().unwrap();
         let path = write(

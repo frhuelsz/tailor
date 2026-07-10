@@ -9,25 +9,30 @@ use std::{
 };
 
 use tailor_config::{
-    Arch, BaseSource, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef, cell_slug,
-    render_image,
+    Access, Arch, BaseSource, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef,
+    ToolsDirSourceInline, ToolsDirSourceRef, cell_slug, render_image,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    domain::{BuildPlan, Cell, CellSlug, PlannedCell, Target},
+    domain::{BuildPlan, Cell, CellSlug, CellToolsDir, PlannedCell, Target},
     error::CoreError,
     fingerprint::{FingerprintInputs, fingerprint},
     lockfile::Lockfile,
     ports::{
         BaseResolver, ExecutionContext, ExecutionResult, Executor, ResolvedBase, RuntimeConfig,
-        Signer,
+        Signer, ToolsDirPlan,
     },
     selector::Selector,
     stamp,
 };
 
 const DEFAULT_HOST_ROOT: &str = "/host";
+const TOOLS_DIRS_CACHE: &str = "tools-dirs";
+const TOOLS_DIR_SCRATCH: &str = "tools-dir";
+const LATEST_TAG: &str = "latest";
+const PREVIEW_FEATURES_KEY: &str = "previewFeatures";
+const TOOLS_DIR_PREVIEW: &str = "tools-dir";
 
 /// Options controlling a build run.
 #[derive(Debug, Clone, Default)]
@@ -86,6 +91,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     .resolver
                     .resolve(&cell.base, cell.arch, &cell.target.dir)
                     .await?;
+                let tools_dir_digest = self.tools_dir_digest(&cell, lock).await?;
                 let print = fingerprint(&FingerprintInputs {
                     slug: cell.slug.as_ref(),
                     toolchain_digest: &toolchain_digest,
@@ -93,6 +99,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     ic_config: &cell.ic_config,
                     operation: target.definition.operation.unwrap_or_default(),
                     inject_files: target.definition.inject_files.unwrap_or(false),
+                    tools_dir_digest: tools_dir_digest.as_deref(),
                     extra_dependency_hashes: &[],
                     rpm_source_hashes: &[],
                 });
@@ -100,11 +107,15 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     output_dir.join(artifact_name(cell.slug.as_ref(), cell.output.format));
                 let up_to_date =
                     stamp::is_up_to_date(output_dir, cell.slug.as_ref(), print, &artifact);
+                let runtime = runtime_config(tool, lock, &target.root);
+                let tools_dir_plan =
+                    tools_dir_plan_for(&cell, tools_dir_digest.as_deref(), &runtime)?;
                 planned.push(PlannedCell {
                     cell,
                     fingerprint: print,
                     up_to_date,
                     base_ref: base_image_ref(&resolved),
+                    tools_dir: tools_dir_plan,
                 });
             }
         }
@@ -143,6 +154,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                 output_dir: output_dir.to_path_buf(),
                 ic_image_ref: format!("{}@{toolchain_digest}", toolchain.container),
                 base_ref: planned.base_ref.clone(),
+                tools_dir: planned.tools_dir.clone(),
                 platform: format!("linux/{}", planned.cell.arch),
                 clone_index: options.clone_index,
                 dry_run: options.dry_run,
@@ -194,6 +206,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     // `--dry-run` resolves no digests, so the executor falls back to the un-pinned
                     // base reference for the preview.
                     base_ref: None,
+                    tools_dir: tools_dir_plan_for(&cell, None, &runtime)?,
                     platform: format!("linux/{}", cell.arch),
                     clone_index: None,
                     dry_run: true,
@@ -221,6 +234,24 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
             None => Ok(self.resolver.resolve_toolchain(toolchain).await?),
         }
     }
+
+    async fn tools_dir_digest(
+        &self,
+        cell: &Cell,
+        lock: &Lockfile,
+    ) -> Result<Option<String>, CoreError> {
+        let Some(tools_dir) = &cell.tools_dir else {
+            return Ok(None);
+        };
+        if let Some(name) = &tools_dir.source_name
+            && let Some(digest) = lock.tools_dir_digest(name)
+        {
+            return Ok(Some(digest.to_owned()));
+        }
+        Ok(Some(
+            self.resolver.resolve_tools_dir(&tools_dir.source).await?,
+        ))
+    }
 }
 
 /// Resolve a target's toolchain to its `(name, entry)`, applying the workspace default if unset.
@@ -247,8 +278,145 @@ fn toolchain_for(
     }
 }
 
+fn resolve_tools_dir(target: &Target) -> Result<Option<CellToolsDir>, CoreError> {
+    let Some(tools_dir) = &target.definition.tools_dir else {
+        return Ok(None);
+    };
+    let (source, source_name) = match &tools_dir.source {
+        ToolsDirSourceRef::Inline(source) => (source.clone(), None),
+        ToolsDirSourceRef::Id(name) => {
+            let source = target
+                .tools_dir_sources
+                .iter()
+                .find(|source| &source.name == name)
+                .ok_or_else(|| CoreError::UnknownToolsDirSource {
+                    image: target.name().to_owned(),
+                    name: name.clone(),
+                    known: target
+                        .tools_dir_sources
+                        .iter()
+                        .map(|source| source.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                })?;
+            (source.inline(), Some(name.clone()))
+        }
+    };
+    Ok(Some(CellToolsDir {
+        source,
+        source_name,
+        access: tools_dir.access,
+    }))
+}
+
+fn validate_tools_dir_preview(target: &Target) -> Result<(), CoreError> {
+    if target.definition.tools_dir.is_none() {
+        return Ok(());
+    }
+    let Some(config) = &target.definition.config else {
+        return Ok(());
+    };
+    if !matches!(config, serde_yaml_ng::Value::Mapping(_)) {
+        return Ok(());
+    }
+    if tools_dir_preview_enabled(config) {
+        Ok(())
+    } else {
+        Err(CoreError::ToolsDirPreviewMissing {
+            image: target.name().to_owned(),
+        })
+    }
+}
+
+fn tools_dir_preview_enabled(config: &serde_yaml_ng::Value) -> bool {
+    config
+        .get(PREVIEW_FEATURES_KEY)
+        .and_then(serde_yaml_ng::Value::as_sequence)
+        .is_some_and(|features| {
+            features
+                .iter()
+                .any(|feature| feature.as_str() == Some(TOOLS_DIR_PREVIEW))
+        })
+}
+
+fn tools_dir_plan_for(
+    cell: &Cell,
+    digest: Option<&str>,
+    runtime: &RuntimeConfig,
+) -> Result<Option<ToolsDirPlan>, CoreError> {
+    let Some(tools_dir) = &cell.tools_dir else {
+        return Ok(None);
+    };
+    let resolved_digest = digest.map(str::to_owned);
+    let cache_key = resolved_digest.as_deref().map_or_else(
+        || unpinned_tools_dir_key(&tools_dir.source),
+        sanitize_digest,
+    );
+    let cache_root = runtime.image_cache_dir.clone().unwrap_or_else(|| {
+        runtime
+            .workspace_root
+            .join(tailor_config::defaults::DEFAULT_IMAGE_CACHE_DIR)
+    });
+    let cache_dir = cache_root.join(TOOLS_DIRS_CACHE).join(&cache_key);
+    if cache_dir == Path::new("/") {
+        return Err(CoreError::Exec(crate::error::ExecError::UnsafeDir {
+            path: cache_dir,
+            reason: "tools-dir cache must not be filesystem root".to_owned(),
+        }));
+    }
+    let mount_dir = match tools_dir.access {
+        Access::Ro => cache_dir.clone(),
+        Access::Rw => {
+            let Some(build_base) = &runtime.build_dir_base else {
+                return Err(CoreError::WritableToolsDirNeedsBuildDir {
+                    image: cell.target.name().to_owned(),
+                });
+            };
+            build_base.join(cell.slug.as_ref()).join(TOOLS_DIR_SCRATCH)
+        }
+    };
+    Ok(Some(ToolsDirPlan {
+        image_ref: tools_dir_image_ref(&tools_dir.source, resolved_digest.as_deref()),
+        digest: resolved_digest.unwrap_or(cache_key),
+        cache_dir,
+        mount_dir,
+        access: tools_dir.access,
+    }))
+}
+
+fn tools_dir_image_ref(source: &ToolsDirSourceInline, digest: Option<&str>) -> String {
+    match digest {
+        Some(digest) if digest.starts_with("sha256:") => {
+            format!("{}@{digest}", oci_repository(&source.container))
+        }
+        _ if has_tag_or_digest(&source.container) => source.container.clone(),
+        _ => format!("{}:{}", source.container, source.effective_tag()),
+    }
+}
+
+fn sanitize_digest(digest: &str) -> String {
+    digest.replace([':', '/'], "_")
+}
+
+fn unpinned_tools_dir_key(source: &ToolsDirSourceInline) -> String {
+    sanitize_digest(&format!(
+        "{}:{}",
+        source.container,
+        source.tag.as_deref().unwrap_or(LATEST_TAG)
+    ))
+}
+
+fn has_tag_or_digest(reference: &str) -> bool {
+    reference.contains('@')
+        || reference
+            .rsplit('/')
+            .next()
+            .is_some_and(|segment| segment.contains(':'))
+}
+
 /// Expand a target into its cells: one per (rendered matrix point × architecture × output format).
 pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
+    validate_tools_dir_preview(target)?;
     let rendered = render_image(&target.definition, &target.dir)?;
     let mut cells = Vec::new();
     for rc in rendered {
@@ -278,6 +446,7 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
             };
             for output in outputs {
                 let slug = slug_for(target.name(), &rc, arch, arch_is_axis, output.format);
+                let tools_dir = resolve_tools_dir(target)?;
                 cells.push(Cell {
                     target: Arc::clone(target),
                     axes: axes.clone(),
@@ -288,6 +457,7 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
                     base: base.clone(),
                     base_image: base_image.clone(),
                     rpm_sources: rc.rpm_sources.clone(),
+                    tools_dir,
                 });
             }
         }
@@ -597,6 +767,7 @@ mod tests {
             output_artifacts: OutputArtifactsPolicy::default(),
             root: tmp.path().to_path_buf(),
             base_images: BaseImageCatalogue::default(),
+            tools_dir_sources: Vec::new(),
         });
         (tmp, target)
     }
@@ -749,6 +920,7 @@ mod tests {
             output_artifacts: OutputArtifactsPolicy::default(),
             root: tmp.path().to_path_buf(),
             base_images: BaseImageCatalogue::default(),
+            tools_dir_sources: Vec::new(),
         });
         (tmp, target)
     }
@@ -890,6 +1062,7 @@ mod tests {
             output_artifacts: OutputArtifactsPolicy::default(),
             root: tmp.path().to_path_buf(),
             base_images: catalogue,
+            tools_dir_sources: Vec::new(),
         });
         (tmp, target)
     }
@@ -966,6 +1139,81 @@ mod tests {
                 CoreError::UnknownBaseImage { .. }
             ),
             "expected unknown base image"
+        );
+    }
+
+    #[test]
+    fn unknown_tools_dir_source_name_is_a_config_error() {
+        let (_tmp, target) = target_with(indoc! {"
+            name: solo
+            base:
+              path: ./b.img
+            toolsDir:
+              source: missing
+            config:
+              previewFeatures:
+                - tools-dir
+        "});
+        assert!(
+            matches!(
+                cells(&target).unwrap_err(),
+                CoreError::UnknownToolsDirSource { .. }
+            ),
+            "expected unknown tools-dir source"
+        );
+    }
+
+    #[test]
+    fn tools_dir_requires_preview_feature_when_config_is_inline() {
+        let (_tmp, target) = target_with(indoc! {"
+            name: solo
+            base:
+              path: ./b.img
+            toolsDir:
+              source:
+                container: registry.example/tools
+            config:
+              os:
+                hostname: solo
+        "});
+        assert!(
+            matches!(
+                cells(&target).unwrap_err(),
+                CoreError::ToolsDirPreviewMissing { .. }
+            ),
+            "expected missing preview feature"
+        );
+    }
+
+    #[tokio::test]
+    async fn rw_tools_dir_requires_build_dir_base() {
+        let orchestrator = Orchestrator::new(FakeExecutor::default(), FakeResolver);
+        let (_tmp, target) = target_with(indoc! {"
+            name: solo
+            base:
+              path: ./b.img
+            toolsDir:
+              source:
+                container: registry.example/tools
+              access: rw
+            config:
+              previewFeatures:
+                - tools-dir
+        "});
+        let out = TempDir::new().unwrap();
+        let err = orchestrator
+            .plan(
+                &[target],
+                &tool_config(),
+                &Lockfile::default(),
+                &Selector::default(),
+                out.path(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::WritableToolsDirNeedsBuildDir { .. }),
+            "got {err:?}"
         );
     }
 

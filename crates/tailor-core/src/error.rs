@@ -116,6 +116,25 @@ pub enum CoreError {
     #[error("unknown toolchain id `{id}` (image `{image}`)")]
     UnknownToolchain { id: String, image: String },
 
+    #[error(
+        "image `{image}` references tools-dir source `{name}`, undefined in tailor.yaml `toolsDirSources` (known: {known})"
+    )]
+    UnknownToolsDirSource {
+        image: String,
+        name: String,
+        known: String,
+    },
+
+    #[error(
+        "image `{image}` sets `toolsDir`, but its inline IC config must include previewFeatures: [tools-dir]"
+    )]
+    ToolsDirPreviewMissing { image: String },
+
+    #[error(
+        "image `{image}` sets `toolsDir.access: rw`, which requires runtime.buildDirBase on an isolated filesystem"
+    )]
+    WritableToolsDirNeedsBuildDir { image: String },
+
     #[error("invalid `--select` entry `{entry}` (expected `axis=value`)")]
     SelectorSyntax { entry: String },
 

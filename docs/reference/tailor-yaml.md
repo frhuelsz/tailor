@@ -23,6 +23,7 @@ defaults:
 | `schemaVersion` | integer | yes | Current value: `1`. |
 | `toolchains.default` | string | yes | Default toolchain name for images that omit `toolchain:`. |
 | `toolchains.entries` | list of `{name, container, version?, tag?}` | yes | Named toolchain definitions. Each `name` must be unique. `tag` defaults to `version`, else `latest`. |
+| `toolsDirSources` | list of `{name, container, tag?}` | no | Named tools-dir sources. Each `name` must be unique. `tag` defaults to `latest`. Images opt in with `toolsDir.source`. |
 | `runtime.engine` | enum | no | Container engine: `docker` (default), `podman`, or `auto`. See [Select a container engine](../how-to/select-a-container-engine.md). |
 | `runtime.host` | string | no | Explicit engine endpoint (`unix://…`, a bare socket path, or `tcp://…`), overriding the engine default and `DOCKER_HOST` / `CONTAINER_HOST`. |
 | `runtime.privileged` | bool | no | Default `true`; IC requires privileged container execution. |
@@ -53,6 +54,32 @@ runtime:
       - path: /data/scratch
         access: rw
 ```
+
+## Tools-dir sources
+
+`toolsDirSources:` is a list of named container root filesystems that tailor can export, cache, bind,
+and pass to IC as `--tools-dir`. This is useful for sealed/minimal images whose target root does not
+contain a package manager. The cache is tailor-owned under `runtime.imageCacheDir/tools-dirs/<digest>`
+and is bound read-only by default. tailor never passes `--tools-dir /`.
+
+```yaml
+toolsDirSources:
+  - name: acl
+    container: mcr.microsoft.com/azurelinux/base/core
+    tag: "3.0"
+  - name: fedora
+    container: quay.io/fedora/fedora
+    tag: "42"
+```
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `name` | string | yes | Unique source name used by image `toolsDir.source`. |
+| `container` | string | yes | Container image whose flattened root filesystem becomes the tools dir. |
+| `tag` | string | no | Registry tag. Defaults to `latest` when `container` has no tag or digest. |
+
+Run `tailor lock` to pin named tools-dir source digests in `tailor.lock`. Local-only images without a
+registry digest may fail digest resolution for now.
 
 ## Base-image catalogue
 

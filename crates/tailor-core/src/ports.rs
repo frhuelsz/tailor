@@ -8,7 +8,9 @@ use std::{
     sync::Arc,
 };
 
-use tailor_config::{Arch, BaseImageSource, BaseSource, ExtraMount, ToolchainEntry};
+use tailor_config::{
+    Access, Arch, BaseImageSource, BaseSource, ExtraMount, ToolchainEntry, ToolsDirSourceInline,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -48,6 +50,8 @@ pub struct ExecutionContext {
     /// resolved). Threaded from the resolved base so registry builds are reproducible
     /// (`meta/docs/design.md` §5.2/§6).
     pub base_ref: Option<String>,
+    /// Tailor-managed IC `--tools-dir` source and host staging paths.
+    pub tools_dir: Option<ToolsDirPlan>,
     /// The container platform, `linux/<arch>`.
     pub platform: String,
     /// `Some(i)` under `build --clones N`; suffixes all per-clone paths so clones never race.
@@ -60,6 +64,17 @@ pub struct ExecutionContext {
     pub signer: Option<Arc<dyn Signer>>,
     /// Runtime knobs (path translation root, privilege, janitor image, …).
     pub runtime: RuntimeConfig,
+}
+
+/// Resolved/staged tools-dir metadata for one cell. The executor ensures `cache_dir` exists,
+/// materializes `mount_dir` for writable access, binds it, and passes it to IC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolsDirPlan {
+    pub image_ref: String,
+    pub digest: String,
+    pub cache_dir: PathBuf,
+    pub mount_dir: PathBuf,
+    pub access: Access,
 }
 
 /// The host-side signing port: sign the boot artifacts IC emits from a `customize` pass, in place,
@@ -165,6 +180,14 @@ pub trait ContainerRuntime: Send + Sync {
     ) -> impl Future<Output = Result<ContainerResult, ExecError>> + Send;
 
     fn daemon_info(&self) -> impl Future<Output = Result<DaemonInfo, ExecError>> + Send;
+
+    fn export_container(
+        &self,
+        image_ref: &str,
+        platform: &str,
+        dest_dir: &Path,
+        cancel: CancellationToken,
+    ) -> impl Future<Output = Result<(), ExecError>> + Send;
 }
 
 /// A request to create and run one container.
@@ -217,6 +240,11 @@ pub trait BaseResolver: Send + Sync {
     fn resolve_toolchain(
         &self,
         toolchain: &ToolchainEntry,
+    ) -> impl Future<Output = Result<String, ResolveError>> + Send;
+
+    fn resolve_tools_dir(
+        &self,
+        source: &ToolsDirSourceInline,
     ) -> impl Future<Output = Result<String, ResolveError>> + Send;
 }
 

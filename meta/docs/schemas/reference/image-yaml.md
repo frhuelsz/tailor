@@ -12,6 +12,7 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 | ----- | ---- | --- | ------- | ----- |
 | `name` | string | **yes** | — | Unique image id (`^[A-Za-z0-9][A-Za-z0-9.-]*$`, no `_`); the first segment of every output [cell slug](./types.md#output-naming-cell-slug), and the CLI handle. |
 | `toolchain` | [ToolchainRef](./types.md#toolchainref) | no | workspace `default` (or built-in) | Select/override the IC version. Id ref in a workspace, or inline when standalone. |
+| `toolsDir` | `{source, access?}` | no | — | Tailor-managed IC `--tools-dir`. `access` defaults to `ro`; `rw` requires `runtime.buildDirBase`. |
 | `architectures` | [[Arch](./types.md#arch)] | no | `defaults.architectures` | Target arches (the arch axis). |
 | `matrix` | [Matrix](./types.md#matrix) | no | one cell | Axes + values whose product is the set of cells built. |
 | `outputs` | [[OutputSpec](./types.md#outputspec)] | no | `defaults.outputs` | Output formats; each cell × format is one IC run → one artifact, named by its [cell slug](./types.md#output-naming-cell-slug). |
@@ -31,6 +32,37 @@ Schema: [`#/$defs/ImageDefinition`](../tailor.schema.json).
 > **`base` may come from a fragment.** An image with a `matrix` whose base differs per
 > axis often sets no `base` at the top level — `by-arch/`/`by-release/` fragments supply it. The
 > *resolved* cell must still end up with exactly one base.
+
+## Tools dir
+
+`toolsDir:` opts an image into a tailor-managed IC `--tools-dir`. The source is either a name from
+workspace `toolsDirSources:` or an inline container source. The inline IC config must include the
+`tools-dir` preview feature.
+
+```yaml
+toolsDir:
+  source: acl
+
+config:
+  previewFeatures:
+    - tools-dir
+```
+
+```yaml
+toolsDir:
+  source:
+    container: quay.io/fedora/fedora
+    tag: "42"
+  access: rw
+
+config:
+  previewFeatures:
+    - tools-dir
+```
+
+Read-only access binds the shared digest cache. Writable access copies the cache to
+`<buildDirBase>/<slug>/tools-dir` and binds that disposable copy writable. Convert and inject-files
+passes do not receive `--tools-dir`, and tailor never emits `--tools-dir /`.
 
 ## Minimal example (standalone)
 
