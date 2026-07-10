@@ -204,6 +204,8 @@ pub trait ContainerRuntime: Send + Sync {
 pub struct LocalImage {
     pub id: String,
     pub repo_digests: Vec<String>,
+    pub architecture: String,
+    pub os: String,
 }
 
 /// A request to create and run one container.

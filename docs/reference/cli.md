@@ -7,9 +7,12 @@ Global options:
 | `--manifest <PATH>` | Path to `tailor.yaml`, or a directory to search from. Default: walk up from the current directory. |
 | `--engine <docker\|podman\|auto>` | Container engine for this invocation. Overrides `runtime.engine`. See [Select a container engine](../how-to/select-a-container-engine.md). |
 | `--host <ENDPOINT>` | Engine endpoint for this invocation (`unix://…` or `tcp://…`). Overrides `runtime.host` and `DOCKER_HOST` / `CONTAINER_HOST`. |
+| `--log-dir <PATH>` | Persist each cell's full IC debug log to `<PATH>/<slug>.log`. |
+| `--ic-log-level <panic\|fatal\|error\|warn\|info\|debug\|trace>` | Set IC's own log level, independent of `-v`/`-q`. |
 | `--strict` | Promote authority/confinement warnings to errors. |
 | `-v`, `--verbose` | Increase verbosity; repeatable. |
 | `-q`, `--quiet` | Decrease verbosity; repeatable. |
+| `--timestamps <elapsed\|time\|off>` | Leading timestamp on status/log lines (default elapsed). |
 | `--version` | Print version, including commit/build metadata. |
 
 ## `tailor init <name> [base|simple|advanced]`

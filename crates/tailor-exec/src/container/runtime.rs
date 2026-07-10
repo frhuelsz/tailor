@@ -157,6 +157,8 @@ impl ContainerRuntime for BollardRuntime {
             Ok(image) => Ok(Some(LocalImage {
                 id: image.id.unwrap_or_default(),
                 repo_digests: image.repo_digests.unwrap_or_default(),
+                architecture: image.architecture.unwrap_or_default(),
+                os: image.os.unwrap_or_default(),
             })),
             Err(BollardError::DockerResponseServerError {
                 status_code: 404, ..

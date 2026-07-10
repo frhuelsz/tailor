@@ -6,7 +6,6 @@ mod run;
 mod scaffold;
 
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use tracing_subscriber::{
@@ -19,6 +18,7 @@ use crate::cli::Cli;
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    run::init_timestamps(cli.timestamps);
     init_tracing(cli.verbose, cli.quiet);
 
     match run::dispatch(cli).await {
@@ -42,26 +42,13 @@ async fn main() -> ExitCode {
     }
 }
 
-/// A compact wall-clock `HH:MM:SS` timer for the live `tracing` view (`meta/docs/logging.md` §5.6).
-/// A full RFC3339 stamp dominates a scrolling build and the precise instant only matters post-hoc, so
-/// the live formatter shows just the time-of-day (UTC, dependency-free); preserved on-disk IC logs keep
-/// IC's own full-precision `time` field.
+/// A compact timer for the live `tracing` view (`meta/docs/logging.md` §5.6). It reads the same
+/// process-global mode and zero point as cargo-style status lines so both streams agree.
 struct CompactTime;
 
 impl FormatTime for CompactTime {
     fn format_time(&self, writer: &mut Writer<'_>) -> std::fmt::Result {
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_secs())
-            .unwrap_or_default()
-            % 86_400;
-        write!(
-            writer,
-            "{:02}:{:02}:{:02}",
-            secs / 3600,
-            (secs % 3600) / 60,
-            secs % 60
-        )
+        write!(writer, "{}", run::timestamp_prefix())
     }
 }
 

@@ -213,10 +213,9 @@ preserve in JSON mode; tailor's own coloring is more consistent).
 (`2026-06-24T23:18:01.003691Z`, ~27 cols) dominates the line and adds little watching a build scroll by;
 the precise instant only matters for post-hoc forensics. So:
 
-- **Live (stderr):** the `tracing` formatter uses a **compact wall-clock `HH:MM:SS`** timer (8 cols) —
-  enough to spot a slow step, a fraction of the width. (Alternatives if preferred: **elapsed since build
-  start**, mirroring IC's own `INFO[0022]` convention, or **no timestamp at all** — the cargo-style
-  status lines already mark phase boundaries. A `--timestamps=(time|elapsed|off)` knob could expose this.)
+- **Live (stderr):** status lines and `tracing` share one process-global zero point and
+  `--timestamps=(elapsed|time|off)` mode. The default `elapsed` prints compact seconds since startup
+  (for example `10.29s`), `time` prints `HH:MM:SS`, and `off` suppresses live timestamps.
 - **Preserved on-disk log (§5.5):** keeps **full-precision** timestamps. The simplest implementation
   writes IC's **raw JSON** (which already carries a full `time` field) verbatim, so the durable record
   loses nothing — the compacting is purely a live-display choice.
@@ -260,9 +259,9 @@ context (plus a pointer to the on-disk IC log when persisting is enabled).
 
 ### 6.1 Sample output (illustrative)
 
-Concrete transcripts of the intended behavior (illustrative — pre-implementation). tailor's cargo-style
+Concrete transcripts of the intended behavior. tailor's cargo-style
 status lines (right-aligned verbs) always show; IC events are `tracing` lines at target `ic`, gated by
-verbosity, with the **compact `HH:MM:SS`** live timestamp (§5.6); the `cell=` field disambiguates
+verbosity, with the configured compact live timestamp (§5.6); the `cell=` field disambiguates
 matrix/parallel builds.
 
 **A — success, default verbosity.** Clean: IC emits only `info`/`debug`, all below the default `warn`
@@ -359,9 +358,8 @@ to the durable per-cell log the runner can upload as an artifact:
    `<log-dir>/<slug>.log`. **Recommend: yes, opt-in.** Open: retention/rotation within the dir; whether to
    default the dir to `artifacts/.tailor/logs` *once enabled*.
 3a. **Compact live timestamps; full only in preserved logs.** *(User: full RFC3339 stamps are too wide
-   for the live view; that precision belongs in preserved logs.)* **Recommend** a compact wall-clock
-   `HH:MM:SS` live timer (§5.6), full-precision retained on disk. Open: default to `HH:MM:SS` vs elapsed
-   vs none, and whether to add a `--timestamps=(time|elapsed|off)` knob.
+   for the live view; that precision belongs in preserved logs.)* **Resolved:** `--timestamps` selects
+   `elapsed` (default), `time`, or `off` for both status and tracing, with full precision retained on disk.
 4. **A dedicated `--ic-log-level` flag** (independent of `-v`, overrides `runtime.logLevel`).
    **Recommend: yes**, low cost, makes the independence explicit.
 5. **Default live behavior at verbosity 0.** With the level mapping, IC **warn/error** would appear

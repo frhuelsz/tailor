@@ -63,6 +63,7 @@ pub enum BuildProgress<'a> {
 pub struct ResolvedToolchain {
     pub ic_image_ref: String,
     pub pull: bool,
+    pub architecture: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -815,6 +816,7 @@ mod tests {
             ResolvedToolchain {
                 ic_image_ref: "registry.example/imagecustomizer@sha256:faketoolchain".to_owned(),
                 pull: true,
+                architecture: None,
             },
         )])
     }

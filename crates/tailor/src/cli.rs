@@ -1,6 +1,6 @@
 //! The clap command-line surface (`meta/docs/design.md` §11).
 
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -28,6 +28,10 @@ pub(crate) struct Cli {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub(crate) quiet: u8,
 
+    /// Leading timestamp mode for status and tracing lines.
+    #[arg(long, global = true, value_enum, default_value_t = TimestampMode::Elapsed)]
+    pub(crate) timestamps: TimestampMode,
+
     /// Container engine for this invocation: `docker` (default), `podman`, or `auto`. Overrides
     /// `runtime.engine` in `tailor.yaml`.
     #[arg(long, global = true, value_enum)]
@@ -50,6 +54,28 @@ pub(crate) struct Cli {
 
     #[command(subcommand)]
     pub(crate) command: Command,
+}
+
+/// Leading timestamp mode for status and tracing lines.
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub(crate) enum TimestampMode {
+    /// Seconds elapsed since tailor started.
+    #[default]
+    Elapsed,
+    /// Compact wall-clock time (`HH:MM:SS`).
+    Time,
+    /// Suppress live timestamps.
+    Off,
+}
+
+impl fmt::Display for TimestampMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Elapsed => "elapsed",
+            Self::Time => "time",
+            Self::Off => "off",
+        })
+    }
 }
 
 /// IC log levels for `--ic-log-level` (mirrors [`tailor_config::LogLevel`]).

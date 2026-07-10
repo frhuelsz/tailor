@@ -6,7 +6,8 @@ use std::{
     fs,
     future::Future,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -16,11 +17,11 @@ use tailor_config::{
     render_image, write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, Cell, ContainerRuntime, CoreError, Executor, LockedBase,
-    LockedContainer, Lockfile, MissingPrerequisite, Orchestrator, ResolvedBase, ResolvedToolchain,
-    ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement, SlotSource,
-    SlotSummary, Target, ado_matrix, cells_selected, download, is_valid_var_name, runtime_config,
-    summarize, toolchain_for, toolchain_key, tools_dir_key, verify,
+    BaseResolver, BuildOptions, Cell, ContainerRuntime, CoreError, Executor, LocalImage,
+    LockedBase, LockedContainer, Lockfile, MissingPrerequisite, Orchestrator, ResolvedBase,
+    ResolvedToolchain, ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement,
+    SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download, is_valid_var_name,
+    runtime_config, summarize, toolchain_for, toolchain_key, tools_dir_key, verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
@@ -29,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     cli::{
         AddCommand, BasesCommand, BuildArgs, Cli, Command, InitArgs, InitTemplate, MatrixFormat,
+        TimestampMode,
     },
     error::AppError,
     scaffold,
@@ -38,6 +40,14 @@ const LOCK_FILE: &str = "tailor.lock";
 const ARTIFACTS_DIR: &str = "artifacts";
 const TAILOR_STATE_DIR: &str = ".tailor";
 const BASE_HASH_CACHE_DIR: &str = "base-hashes";
+const STATUS_VERB_WIDTH: usize = 12;
+const ELAPSED_TIMESTAMP_PRECISION: usize = 2;
+const SECS_PER_MINUTE: u64 = 60;
+const SECS_PER_HOUR: u64 = 60 * SECS_PER_MINUTE;
+const SECS_PER_DAY: u64 = 24 * SECS_PER_HOUR;
+
+static STARTED: OnceLock<Instant> = OnceLock::new();
+static TIMESTAMP_MODE: OnceLock<TimestampMode> = OnceLock::new();
 
 /// A per-invocation engine/endpoint override from the global `--engine` / `--host` flags
 /// (`meta/docs/container-runtimes.md` §3). Both sit above the manifest in the precedence ladder.
@@ -78,6 +88,7 @@ fn log_dir_from_env() -> Option<PathBuf> {
 
 /// Load the workspace, then dispatch the requested verb.
 pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
+    init_timestamps(cli.timestamps);
     // `version` and `init` need no workspace — handle them before discovery so they work anywhere
     // (`init` is what creates a workspace in the first place).
     match &cli.command {
@@ -540,6 +551,7 @@ struct ResolvedContainerImage {
     digest: String,
     pull: bool,
     lock_digest: Option<String>,
+    architecture: Option<String>,
 }
 
 async fn resolve_container_image<R, F, Fut>(
@@ -561,6 +573,7 @@ where
             digest: digest.to_owned(),
             pull: true,
             lock_digest: Some(digest.to_owned()),
+            architecture: None,
         });
     }
 
@@ -572,6 +585,7 @@ where
                 digest: digest.clone(),
                 pull: true,
                 lock_digest: Some(digest),
+                architecture: None,
             })
         }
         PullPolicy::Missing | PullPolicy::Never => {
@@ -584,6 +598,7 @@ where
                         digest: digest.clone(),
                         pull: true,
                         lock_digest: Some(digest),
+                        architecture: None,
                     })
                 }
                 None => {
@@ -614,14 +629,21 @@ async fn local_container_image<R: ContainerRuntime>(
             digest: digest.to_owned(),
             pull: false,
             lock_digest: Some(digest.to_owned()),
+            architecture: known_local_architecture(&image),
         }));
     }
+    let architecture = known_local_architecture(&image);
     Ok(Some(ResolvedContainerImage {
         image_ref: image.id.clone(),
         digest: image.id,
         pull: false,
         lock_digest: None,
+        architecture,
     }))
+}
+
+fn known_local_architecture(image: &LocalImage) -> Option<String> {
+    (!image.architecture.is_empty()).then(|| image.architecture.clone())
 }
 
 fn digest_ref(reference: &str, digest: &str) -> String {
@@ -696,10 +718,62 @@ async fn resolve_toolchains<R: ContainerRuntime, S: BaseResolver>(
             slot.insert(ResolvedToolchain {
                 ic_image_ref: image.image_ref,
                 pull: image.pull,
+                architecture: image.architecture,
             });
         }
     }
     Ok(images)
+}
+
+fn preflight_toolchain_arches(
+    targets: &[Arc<Target>],
+    tool: &ToolConfig,
+    toolchains: &BTreeMap<String, ResolvedToolchain>,
+    selector: &Selector,
+) -> Result<(), AppError> {
+    for target in targets {
+        let (toolchain_id, entry) = toolchain_for(target, tool)?;
+        let key = toolchain_key(&entry);
+        let resolved = toolchains
+            .get(&key)
+            .ok_or_else(|| CoreError::MissingResolvedToolchain {
+                id: toolchain_id.clone(),
+                reference: key.clone(),
+            })?;
+        let Some(architecture) = resolved.architecture.as_deref() else {
+            continue;
+        };
+        for cell in cells_selected(target, selector)? {
+            preflight_toolchain_cell_arch(
+                &toolchain_id,
+                Some(architecture),
+                cell.arch,
+                cell.slug.as_ref(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn preflight_toolchain_cell_arch(
+    toolchain_id: &str,
+    architecture: Option<&str>,
+    cell_arch: Arch,
+    cell_slug: &str,
+) -> Result<(), AppError> {
+    let Some(architecture) = architecture else {
+        return Ok(());
+    };
+    let Some(image_arch) = parse_arch(architecture) else {
+        return Ok(());
+    };
+    if image_arch == cell_arch {
+        return Ok(());
+    }
+    Err(CoreError::Resolve(tailor_core::ResolveError::Other(format!(
+        "toolchain `{toolchain_id}` local image is `{architecture}` but cell `{cell_slug}` targets `{cell_arch}`; no local image for that arch and pull policy won't fetch it"
+    )))
+    .into())
 }
 
 async fn resolve_tools_dir_sources<R: ContainerRuntime, S: BaseResolver>(
@@ -876,6 +950,7 @@ async fn build(
     let resolver = OciResolver::with_cache_dir(base_hash_cache_dir);
     let lock = Lockfile::read(&workspace.root.join(LOCK_FILE))?;
     let toolchains = resolve_toolchains(&targets, &tool, &runtime, &resolver, &lock).await?;
+    preflight_toolchain_arches(&targets, &tool, &toolchains, &selection)?;
     let tools_dir_sources = resolve_tools_dir_sources(&targets, &runtime, &resolver, &lock).await?;
     let orchestrator = Orchestrator::new(IcExecutor::new(runtime), resolver);
     let plan = orchestrator
@@ -909,7 +984,7 @@ async fn build(
         &format!("{} cell(s) selected, {stale} to build", plan.cells.len()),
     );
 
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let clones = args.clones.max(1);
     let mut built = 0usize;
     for clone in 0..clones {
@@ -1034,18 +1109,65 @@ fn non_empty_env(key: &str) -> Option<String> {
 /// pass-through of Image Customizer's colored logs all agree.
 pub(crate) use tailor_exec::color_enabled as use_color;
 
-/// Print a cargo-style status line to stderr: a right-aligned (bold green) verb plus a message.
+/// The live timestamp prefix shared by status lines and tracing.
+pub(crate) fn timestamp_prefix() -> String {
+    match *TIMESTAMP_MODE.get_or_init(TimestampMode::default) {
+        TimestampMode::Elapsed => fmt_elapsed(STARTED.get_or_init(Instant::now).elapsed()),
+        TimestampMode::Time => fmt_wall_clock(SystemTime::now()),
+        TimestampMode::Off => String::new(),
+    }
+}
+
+fn fmt_elapsed(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs_f64();
+    format!("{seconds:.ELAPSED_TIMESTAMP_PRECISION$}s")
+}
+
+fn fmt_wall_clock(now: SystemTime) -> String {
+    let secs = now
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default()
+        % SECS_PER_DAY;
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / SECS_PER_HOUR,
+        (secs % SECS_PER_HOUR) / SECS_PER_MINUTE,
+        secs % SECS_PER_MINUTE
+    )
+}
+
+#[cfg(test)]
+fn timestamp_prefix_for(mode: TimestampMode, elapsed: Duration, now: SystemTime) -> String {
+    match mode {
+        TimestampMode::Elapsed => fmt_elapsed(elapsed),
+        TimestampMode::Time => fmt_wall_clock(now),
+        TimestampMode::Off => String::new(),
+    }
+}
+
+/// Print a cargo-style status line to stderr: an optional leading timestamp, then a right-aligned
+/// (bold green) verb plus a message.
 fn status(verb: &str, message: &str) {
     eprintln!("{}", status_line(verb, message, use_color()));
 }
 
 /// Render a status line (factored out of [`status`] so the formatting is testable).
 fn status_line(verb: &str, message: &str, color: bool) -> String {
-    let padding = " ".repeat(12usize.saturating_sub(verb.chars().count()));
-    if color {
-        format!("{padding}\u{1b}[1;32m{verb}\u{1b}[0m {message}")
+    render_status_line(&timestamp_prefix(), verb, message, color)
+}
+
+fn render_status_line(prefix: &str, verb: &str, message: &str, color: bool) -> String {
+    let padding = " ".repeat(STATUS_VERB_WIDTH.saturating_sub(verb.chars().count()));
+    let leading = if prefix.is_empty() {
+        String::new()
     } else {
-        format!("{padding}{verb} {message}")
+        format!("{prefix}  ")
+    };
+    if color {
+        format!("{leading}{padding}\u{1b}[1;32m{verb}\u{1b}[0m {message}")
+    } else {
+        format!("{leading}{padding}{verb} {message}")
     }
 }
 
@@ -1101,7 +1223,7 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn format_duration(elapsed: std::time::Duration) -> String {
+fn format_duration(elapsed: Duration) -> String {
     let secs = elapsed.as_secs();
     if secs >= 60 {
         format!("{}m{:02}s", secs / 60, secs % 60)
@@ -1329,6 +1451,13 @@ fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Targ
         )));
     }
     Ok(targets)
+}
+
+/// Capture the process-global zero point and timestamp mode. Later calls are no-ops so tests and
+/// alternate entry points cannot move the clock once live output has started.
+pub(crate) fn init_timestamps(mode: TimestampMode) {
+    let _ = STARTED.set(Instant::now());
+    let _ = TIMESTAMP_MODE.set(mode);
 }
 
 /// The built-in default output (`cosi`) when neither the image nor the workspace declares one.
@@ -1772,7 +1901,7 @@ mod tests {
     use std::{
         collections::BTreeMap,
         path::{Path, PathBuf},
-        time::Duration,
+        time::{Duration, UNIX_EPOCH},
     };
 
     use tailor_config::{AzureLinuxBase, BaseSource, OciBase, defaults::default_tool_config};
@@ -1831,6 +1960,15 @@ mod tests {
         LocalImage {
             id: "sha256:localid".to_owned(),
             repo_digests,
+            architecture: "amd64".to_owned(),
+            os: "linux".to_owned(),
+        }
+    }
+
+    fn local_image_with_arch(architecture: &str) -> LocalImage {
+        LocalImage {
+            architecture: architecture.to_owned(),
+            ..local_image(Vec::new())
         }
     }
 
@@ -1875,6 +2013,7 @@ mod tests {
 
         assert_eq!(resolved.image_ref, "sha256:localid");
         assert_eq!(resolved.lock_digest, None);
+        assert_eq!(resolved.architecture.as_deref(), Some("amd64"));
         assert!(!resolved.pull);
     }
 
@@ -2015,16 +2154,96 @@ toolsDirSources:
     }
 
     #[test]
+    fn timestamp_mode_defaults_to_elapsed() {
+        assert!(matches!(TimestampMode::default(), TimestampMode::Elapsed));
+    }
+
+    #[test]
+    fn timestamp_prefix_renders_elapsed_time_and_off() {
+        const ELAPSED_SAMPLE_MS: u64 = 10_290;
+        const ONE_HOUR_TWO_MINUTES_THREE_SECONDS: u64 = 3_723;
+
+        assert_eq!(
+            timestamp_prefix_for(
+                TimestampMode::Elapsed,
+                Duration::from_millis(ELAPSED_SAMPLE_MS),
+                UNIX_EPOCH
+            ),
+            "10.29s"
+        );
+        assert_eq!(
+            timestamp_prefix_for(
+                TimestampMode::Time,
+                Duration::default(),
+                UNIX_EPOCH + Duration::from_secs(ONE_HOUR_TWO_MINUTES_THREE_SECONDS)
+            ),
+            "01:02:03"
+        );
+        assert_eq!(
+            timestamp_prefix_for(TimestampMode::Off, Duration::default(), UNIX_EPOCH),
+            ""
+        );
+    }
+
+    #[tokio::test]
+    async fn local_toolchain_arch_preflight_rejects_mismatch() {
+        let workspace = discover(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("fixtures")
+                .join("matrix"),
+        )
+        .unwrap();
+        let tool = tool_config(&workspace);
+        let targets = build_targets(&workspace, &[]).unwrap();
+        let runtime = MockRuntime {
+            image: Some(local_image_with_arch("amd64")),
+        };
+        let toolchains = resolve_toolchains(
+            &targets,
+            &tool,
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap();
+        let selection = Selector::parse(&[], &[], &["arm64".to_owned()]).unwrap();
+
+        let err = preflight_toolchain_arches(&targets, &tool, &toolchains, &selection).unwrap_err();
+
+        assert!(
+            err.to_string().contains(
+                "toolchain `ic` local image is `amd64` but cell `gizmo_lite_arm64_stable_cosi` targets `arm64`"
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn local_toolchain_arch_preflight_allows_matching_arch() {
+        preflight_toolchain_cell_arch("ic", Some("arm64"), Arch::Arm64, "app_arm64_cosi").unwrap();
+    }
+
+    #[test]
+    fn local_toolchain_arch_preflight_ignores_registry_toolchains() {
+        preflight_toolchain_cell_arch("ic", None, Arch::Arm64, "app_arm64_cosi").unwrap();
+    }
+
+    #[test]
     fn status_line_right_aligns_and_colors_the_verb() {
         // Plain: 12-wide right-aligned verb, then the message.
         assert_eq!(
-            status_line("Built", "img.cosi (1.0 MiB)", false),
+            render_status_line("", "Built", "img.cosi (1.0 MiB)", false),
             "       Built img.cosi (1.0 MiB)"
         );
-        assert_eq!(status_line("Customizing", "x", false), " Customizing x");
+        assert_eq!(
+            render_status_line("10.29s", "Customizing", "x", false),
+            "10.29s   Customizing x"
+        );
         // Colored: a bold-green verb wrapped in ANSI, padding still outside the codes.
         assert_eq!(
-            status_line("Built", "x", true),
+            render_status_line("", "Built", "x", true),
             "       \u{1b}[1;32mBuilt\u{1b}[0m x"
         );
     }
