@@ -26,9 +26,10 @@ defaults:
 | `runtime.engine` | enum | no | Container engine: `docker` (default), `podman`, or `auto`. See [Select a container engine](../how-to/select-a-container-engine.md). |
 | `runtime.host` | string | no | Explicit engine endpoint (`unix://…`, a bare socket path, or `tcp://…`), overriding the engine default and `DOCKER_HOST` / `CONTAINER_HOST`. |
 | `runtime.privileged` | bool | no | Default `true`; IC requires privileged container execution. |
-| `runtime.mounts.hostRoot` | path | no | Default `/host`; host `/` bind target and path-translation prefix. |
+| `runtime.mounts.hostRoot` | path | no | Default `/host`; namespace prefix for translated host paths. tailor no longer binds host `/` there. |
 | `runtime.mounts.dev` | bool | no | Default `true`; bind `/dev:/dev`. |
-| `runtime.buildDir` | string | no | Container-internal IC build dir. Default `/tmp`. |
+| `runtime.mounts.extraPaths` | list of extra mount objects | no | Additional paths exposed under `hostRoot`. `access` defaults to `ro`; use `rw` only for explicit writable carve-outs. Relative paths resolve against the workspace root. |
+| `runtime.buildDirBase` | path | no | Host filesystem base for per-cell IC build dirs (`<buildDirBase>/<slug>`). Must be on a separate filesystem from `/`. Omit to keep IC's container-local `/tmp`. |
 | `runtime.logLevel` | enum | no | IC log level: `panic`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`. |
 | `runtime.imageCacheDir` | path | no | Cache for registry base images. Default: `<workspace>/.tailor/cache`. Required by IC for `oci`/`azureLinux` bases — tailor supplies the default so they build out of the box. |
 | `runtime.janitorImage` | `{container, tag?}` | no | Minimal image used for sudo-free ownership cleanup. Default: `mcr.microsoft.com/azurelinux/base/core:3.0`. |
@@ -37,6 +38,21 @@ defaults:
 | `defaults.outputs` | output list | no | Inherited by images without `outputs`. |
 | `baseImages` | list of `{name, path, arch?, source?}` | no | Base-image catalogue: named slots an image references with `base: { ref: <name> }`. Each `name` must be unique. See [base-image catalogue](#base-image-catalogue). |
 | `images` | object | no | Omit to auto-discover every immediate `*/image.yaml`. |
+
+Runtime mounts expose only the workspace (read-only), tailor-owned writable carve-outs, and declared
+out-of-workspace inputs. The old whole-host `-v /:/host` bind is never emitted.
+
+```yaml
+runtime:
+  buildDirBase: /mnt/tailor-build
+  mounts:
+    hostRoot: /host
+    dev: true
+    extraPaths:
+      - path: /opt/shared-scripts
+      - path: /data/scratch
+        access: rw
+```
 
 ## Base-image catalogue
 

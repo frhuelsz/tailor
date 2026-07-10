@@ -4,6 +4,7 @@ mod arg_builder;
 mod color;
 mod container;
 mod executor;
+mod guard;
 mod ic_log;
 mod janitor;
 mod output_artifacts;

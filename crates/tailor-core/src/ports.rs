@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use tailor_config::{Arch, BaseImageSource, BaseSource, ToolchainEntry};
+use tailor_config::{Arch, BaseImageSource, BaseSource, ExtraMount, ToolchainEntry};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -112,12 +112,16 @@ pub struct ExecutionResult {
 /// Resolved runtime settings for the bollard execution layer (`meta/docs/design.md` §5.1, §7).
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    /// The single source of truth for path translation and the `-v /:<hostRoot>` bind.
+    /// The container namespace prefix for host-path translation (default `/host`).
     pub host_root: PathBuf,
+    /// Absolute workspace root, mounted read-only for IC.
+    pub workspace_root: PathBuf,
     /// Whether to run the IC container privileged.
     pub privileged: bool,
-    /// Scratch directory for working copies and RPM farms.
-    pub build_dir: Option<PathBuf>,
+    /// Whether to bind `/dev:/dev` for IC loopback/device access.
+    pub mount_dev: bool,
+    /// Host filesystem base for IC per-cell scratch (`buildDirBase/<slug>`).
+    pub build_dir_base: Option<PathBuf>,
     /// IC `--log-level` (when unset, the executor defaults IC to `debug` — `meta/docs/logging.md` §5.1).
     pub log_level: Option<String>,
     /// Host directory forwarded as IC `--image-cache-dir`.
@@ -125,6 +129,8 @@ pub struct RuntimeConfig {
     /// Opt-in host directory for per-cell IC debug logs (`--log-dir`/`TAILOR_LOG_DIR`/`runtime.logDir`).
     /// `None` (the default) means nothing is written to disk (`meta/docs/logging.md` §5.5).
     pub log_dir: Option<PathBuf>,
+    /// Explicit additional paths exposed under the host-root namespace.
+    pub extra_paths: Vec<ExtraMount>,
     /// The sudo-free janitor image, `container@sha256:…`.
     pub janitor_image: String,
 }
@@ -133,11 +139,16 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             host_root: PathBuf::from("/host"),
+            // Avoid a fail-open `/` workspace in ad-hoc test/default contexts; the orchestrator
+            // always overwrites this with the discovered workspace root.
+            workspace_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             privileged: true,
-            build_dir: None,
+            mount_dev: true,
+            build_dir_base: None,
             log_level: None,
             image_cache_dir: None,
             log_dir: None,
+            extra_paths: Vec::new(),
             janitor_image: String::new(),
         }
     }

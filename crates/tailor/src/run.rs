@@ -605,7 +605,14 @@ async fn build(
     if args.dry_run {
         let orchestrator = Orchestrator::new(IcExecutor::new(NoopRuntime), OciResolver::new());
         let results = orchestrator
-            .dry_run(&targets, &tool, &selection, &output_dir, &signer_for)
+            .dry_run(
+                &targets,
+                &tool,
+                &selection,
+                &workspace.root,
+                &output_dir,
+                &signer_for,
+            )
             .await?;
         println!("{} cell(s) (dry-run)\n", results.len());
         for result in results {
@@ -676,6 +683,7 @@ async fn build(
                 &plan,
                 &tool,
                 &lock,
+                &workspace.root,
                 &output_dir,
                 &options,
                 CancellationToken::new(),
@@ -731,7 +739,7 @@ async fn clean(
     executor
         .clean(
             &paths,
-            &runtime_config(&tool, &lock),
+            &runtime_config(&tool, &lock, &workspace.root),
             CancellationToken::new(),
         )
         .await?;

@@ -1,11 +1,14 @@
-use std::path::PathBuf;
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
-use tailor_config::{BaseSource, Operation};
-use tailor_core::{Cell, ExecutionContext, RuntimeConfig, artifact_name};
+use tailor_config::{Access, BaseSource, Operation};
+use tailor_core::{Cell, ExecError, ExecutionContext, RuntimeConfig, artifact_name};
 
-use crate::{path_translate, working_copy};
+use crate::{guard, path_translate, working_copy};
 
-const BUILD_DIR: &str = "/tmp";
+const CONTAINER_TMP_BUILD_DIR: &str = "/tmp";
 const DOCKER: &str = "docker";
 const DOCKER_RUN: &str = "run";
 const FLAG_RM: &str = "--rm";
@@ -13,7 +16,6 @@ const FLAG_PRIVILEGED: &str = "--privileged";
 const FLAG_PLATFORM: &str = "--platform";
 const FLAG_VOLUME: &str = "-v";
 pub(crate) const DEV_BIND: &str = "/dev:/dev";
-const HOST_ROOT_SOURCE: &str = "/";
 const FLAG_BUILD_DIR: &str = "--build-dir";
 const FLAG_CONFIG_FILE: &str = "--config-file";
 const FLAG_COSI_COMPRESSION_LEVEL: &str = "--cosi-compression-level";
@@ -33,6 +35,8 @@ const FLAG_OUTPUT_IMAGE_FILE: &str = "--output-image-file";
 const FLAG_OUTPUT_IMAGE_FORMAT: &str = "--output-image-format";
 const FLAG_RPM_SOURCE: &str = "--rpm-source";
 const OCI_PREFIX: &str = "oci:";
+const ACCESS_READ_ONLY: &str = "ro";
+const ACCESS_READ_WRITE: &str = "rw";
 const SUBCOMMAND_CONVERT: &str = "convert";
 const SUBCOMMAND_CUSTOMIZE: &str = "customize";
 const SUBCOMMAND_INJECT_FILES: &str = "inject-files";
@@ -40,7 +44,7 @@ const SUBCOMMAND_INJECT_FILES: &str = "inject-files";
 /// `inject-files` pass (`meta/docs/signing.md` §5).
 const OUTPUT_FORMAT_RAW: &str = "raw";
 
-pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
+pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Result<Vec<String>, ExecError> {
     let operation = cell
         .target
         .definition
@@ -79,7 +83,10 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
         ));
     }
 
-    args.extend(flag_value(FLAG_BUILD_DIR, BUILD_DIR.to_owned()));
+    args.extend(flag_value(
+        FLAG_BUILD_DIR,
+        build_dir_arg_value(cell, context)?,
+    ));
     args.extend(base_args(
         &cell.base,
         context.base_ref.as_deref(),
@@ -122,7 +129,7 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
         ));
     }
 
-    args
+    Ok(args)
 }
 
 /// The `customize` pass of a signed build: identical to a normal customize except it writes a **raw
@@ -132,8 +139,8 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
 pub(crate) fn build_signed_customize_args(
     cell: &Cell,
     context: &ExecutionContext,
-    intermediate: &std::path::Path,
-) -> Vec<String> {
+    intermediate: &Path,
+) -> Result<Vec<String>, ExecError> {
     let mut args = vec![SUBCOMMAND_CUSTOMIZE.to_owned()];
     args.extend(flag_value(
         FLAG_CONFIG_FILE,
@@ -143,7 +150,10 @@ pub(crate) fn build_signed_customize_args(
         ),
     ));
     push_log_flags(&mut args, cell, context);
-    args.extend(flag_value(FLAG_BUILD_DIR, BUILD_DIR.to_owned()));
+    args.extend(flag_value(
+        FLAG_BUILD_DIR,
+        build_dir_arg_value(cell, context)?,
+    ));
     args.extend(base_args(
         &cell.base,
         context.base_ref.as_deref(),
@@ -174,7 +184,7 @@ pub(crate) fn build_signed_customize_args(
             path_translate::to_container_path(cache_dir, &context.runtime.host_root),
         ));
     }
-    args
+    Ok(args)
 }
 
 /// The `inject-files` pass of a signed build: re-inject the now-signed artifacts from
@@ -183,15 +193,17 @@ pub(crate) fn build_signed_customize_args(
 pub(crate) fn build_inject_files_args(
     cell: &Cell,
     context: &ExecutionContext,
-    intermediate: &std::path::Path,
-    inject_files_yaml: &std::path::Path,
-    final_image: &std::path::Path,
-) -> Vec<String> {
-    let translate = |path: &std::path::Path| {
-        path_translate::to_container_path(path, &context.runtime.host_root)
-    };
+    intermediate: &Path,
+    inject_files_yaml: &Path,
+    final_image: &Path,
+) -> Result<Vec<String>, ExecError> {
+    let translate =
+        |path: &Path| path_translate::to_container_path(path, &context.runtime.host_root);
     let mut args = vec![SUBCOMMAND_INJECT_FILES.to_owned()];
-    args.extend(flag_value(FLAG_BUILD_DIR, BUILD_DIR.to_owned()));
+    args.extend(flag_value(
+        FLAG_BUILD_DIR,
+        build_dir_arg_value(cell, context)?,
+    ));
     // `inject-files` reuses `--config-file` for the inject-files.yaml manifest.
     args.extend(flag_value(FLAG_CONFIG_FILE, translate(inject_files_yaml)));
     args.extend(flag_value(FLAG_IMAGE_FILE, translate(intermediate)));
@@ -204,7 +216,7 @@ pub(crate) fn build_inject_files_args(
     if let Some(level) = cell.output.cosi_compression_level {
         args.extend(flag_value(FLAG_COSI_COMPRESSION_LEVEL, level.to_string()));
     }
-    args
+    Ok(args)
 }
 
 /// IC's structured-logging flags (`meta/docs/logging.md` §5.1), shared by every pass.
@@ -316,9 +328,189 @@ fn flag_value(flag: &str, value: String) -> Vec<String> {
     vec![flag.to_owned(), value]
 }
 
-/// The host-root bind (`/:<host_root>`) that maps the host filesystem into the container (§7.3).
-pub(crate) fn host_root_bind(runtime: &RuntimeConfig) -> String {
-    format!("{HOST_ROOT_SOURCE}:{}", runtime.host_root.to_string_lossy())
+fn build_dir_arg_value(cell: &Cell, context: &ExecutionContext) -> Result<String, ExecError> {
+    let Some(build_dir) = build_dir_path(cell, context) else {
+        return Ok(CONTAINER_TMP_BUILD_DIR.to_owned());
+    };
+    guard::ensure_safe_build_dir(&build_dir)?;
+    Ok(path_translate::to_container_path(
+        &build_dir,
+        &context.runtime.host_root,
+    ))
+}
+
+pub(crate) fn build_dir_path(cell: &Cell, context: &ExecutionContext) -> Option<PathBuf> {
+    context.runtime.build_dir_base.as_ref().map(|base| {
+        absolute_source(
+            &base.join(cell.slug.as_ref()),
+            &context.runtime.workspace_root,
+        )
+    })
+}
+
+pub(crate) fn container_binds(
+    cell: &Cell,
+    context: &ExecutionContext,
+    extra_rw: &[PathBuf],
+) -> Result<Vec<String>, ExecError> {
+    let mut binds = Vec::new();
+    push_bind(
+        &mut binds,
+        &context.runtime.workspace_root,
+        Access::Ro,
+        context,
+    )?;
+    push_bind(&mut binds, &context.output_dir, Access::Rw, context)?;
+    if let Some(cache_dir) = &context.runtime.image_cache_dir {
+        push_bind(&mut binds, cache_dir, Access::Rw, context)?;
+    }
+    if let Some(build_dir) = build_dir_path(cell, context) {
+        guard::ensure_safe_build_dir(&build_dir)?;
+        push_bind(&mut binds, &build_dir, Access::Rw, context)?;
+    }
+    if let Some(log_dir) = &context.runtime.log_dir {
+        push_bind(&mut binds, log_dir, Access::Rw, context)?;
+    }
+    for path in extra_rw {
+        push_bind(&mut binds, path, Access::Rw, context)?;
+    }
+    push_out_of_workspace_inputs(&mut binds, cell, context)?;
+    for mount in &context.runtime.extra_paths {
+        let source = absolute_source(&mount.path, &context.runtime.workspace_root);
+        if mount.access == Access::Rw {
+            guard::ensure_safe_rw_target(&source)?;
+        }
+        push_bind(&mut binds, &source, mount.access, context)?;
+    }
+
+    let mut values = normalize_binds(binds, &context.runtime.host_root);
+    if context.runtime.mount_dev {
+        values.push(DEV_BIND.to_owned());
+    }
+    Ok(values)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BindSpec {
+    source: PathBuf,
+    access: Access,
+}
+
+fn push_out_of_workspace_inputs(
+    binds: &mut Vec<BindSpec>,
+    cell: &Cell,
+    context: &ExecutionContext,
+) -> Result<(), ExecError> {
+    let workspace = absolute_source(
+        &context.runtime.workspace_root,
+        &context.runtime.workspace_root,
+    );
+    if let BaseSource::Path { path, .. } = &cell.base {
+        let base = absolute_source(path, &cell.target.dir);
+        let parent = base.parent().ok_or_else(|| {
+            ExecError::Other(format!("base path `{}` has no parent", base.display()))
+        })?;
+        if !base.starts_with(&workspace) {
+            let source = if parent == Path::new("/") {
+                base.as_path()
+            } else {
+                parent
+            };
+            push_bind(binds, source, Access::Ro, context)?;
+        }
+    }
+    for source in &cell.rpm_sources {
+        let source = absolute_source(source, &cell.target.dir);
+        if !source.starts_with(&workspace) {
+            push_bind(binds, &source, Access::Ro, context)?;
+        }
+    }
+    Ok(())
+}
+
+fn push_bind(
+    binds: &mut Vec<BindSpec>,
+    source: &Path,
+    access: Access,
+    context: &ExecutionContext,
+) -> Result<(), ExecError> {
+    let source = absolute_source(source, &context.runtime.workspace_root);
+    if source == Path::new("/") {
+        return Err(ExecError::UnsafeDir {
+            path: source,
+            reason: "must not bind the filesystem root into the IC container".to_owned(),
+        });
+    }
+    if access == Access::Rw {
+        guard::ensure_safe_rw_target(&source)?;
+    }
+    binds.push(BindSpec { source, access });
+    Ok(())
+}
+
+fn normalize_binds(mut binds: Vec<BindSpec>, host_root: &Path) -> Vec<String> {
+    let mut by_source = BTreeMap::<PathBuf, Access>::new();
+    for bind in binds.drain(..) {
+        by_source
+            .entry(bind.source)
+            .and_modify(|access| {
+                if bind.access == Access::Rw {
+                    *access = Access::Rw;
+                }
+            })
+            .or_insert(bind.access);
+    }
+    let mut specs = by_source
+        .into_iter()
+        .map(|(source, access)| BindSpec { source, access })
+        .collect::<Vec<_>>();
+    specs.sort_by(|left, right| {
+        source_depth(&left.source)
+            .cmp(&source_depth(&right.source))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| access_mode(left.access).cmp(access_mode(right.access)))
+    });
+
+    let mut kept: Vec<BindSpec> = Vec::new();
+    'specs: for spec in specs {
+        for existing in &kept {
+            if spec.source.starts_with(&existing.source) && spec.access == existing.access {
+                continue 'specs;
+            }
+        }
+        kept.push(spec);
+    }
+
+    kept.into_iter()
+        .map(|bind| {
+            format!(
+                "{}:{}:{}",
+                bind.source.display(),
+                path_translate::to_container_path(&bind.source, host_root),
+                access_mode(bind.access)
+            )
+        })
+        .collect()
+}
+
+fn source_depth(path: &Path) -> usize {
+    path.components().count()
+}
+
+fn access_mode(access: Access) -> &'static str {
+    match access {
+        Access::Ro => ACCESS_READ_ONLY,
+        Access::Rw => ACCESS_READ_WRITE,
+    }
+}
+
+fn absolute_source(path: &Path, base: &Path) -> PathBuf {
+    let anchor = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        std::env::current_dir().map_or_else(|_| base.to_path_buf(), |cwd| cwd.join(base))
+    };
+    tailor_config::absolutize(path, anchor)
 }
 
 /// The full container invocation tailor runs for a cell: `docker run … <image> <ic-args…>`.
@@ -326,37 +518,48 @@ pub(crate) fn host_root_bind(runtime: &RuntimeConfig) -> String {
 /// This is what `--dry-run` prints. It mirrors what the bollard runtime executes (the same binds,
 /// privilege, platform, image, and Image Customizer argument vector) so the preview is faithful;
 /// the ephemeral `--name` is omitted for readability.
-pub(crate) fn build_run_command(cell: &Cell, context: &ExecutionContext) -> Vec<String> {
-    let mut argv = docker_prelude(context);
-    argv.extend(build_ic_args(cell, context));
-    argv
+pub(crate) fn build_run_command(
+    cell: &Cell,
+    context: &ExecutionContext,
+) -> Result<Vec<String>, ExecError> {
+    let mut argv = docker_prelude(cell, context, &[])?;
+    argv.extend(build_ic_args(cell, context)?);
+    Ok(argv)
 }
 
-/// The `docker run` prelude (`--rm [--privileged] --platform … -v /:host -v /dev … <ic-image>`) that
-/// precedes any IC arg vector.
-fn docker_prelude(context: &ExecutionContext) -> Vec<String> {
+/// The `docker run` prelude (`--rm [--privileged] --platform … -v … <ic-image>`) that precedes any
+/// IC arg vector.
+fn docker_prelude(
+    cell: &Cell,
+    context: &ExecutionContext,
+    extra_rw: &[PathBuf],
+) -> Result<Vec<String>, ExecError> {
     let mut argv = vec![DOCKER.to_owned(), DOCKER_RUN.to_owned(), FLAG_RM.to_owned()];
     if context.runtime.privileged {
         argv.push(FLAG_PRIVILEGED.to_owned());
     }
     argv.extend([FLAG_PLATFORM.to_owned(), context.platform.clone()]);
-    argv.extend([FLAG_VOLUME.to_owned(), host_root_bind(&context.runtime)]);
-    argv.extend([FLAG_VOLUME.to_owned(), DEV_BIND.to_owned()]);
+    for bind in container_binds(cell, context, extra_rw)? {
+        argv.extend([FLAG_VOLUME.to_owned(), bind]);
+    }
     argv.push(context.ic_image_ref.clone());
-    argv
+    Ok(argv)
 }
 
 /// Render a signed cell's three-pass for `--dry-run` (`meta/docs/signing.md` §5): the real
 /// `customize` → raw-intermediate `docker run`, then a note describing the host sign step and the
 /// `inject-files` → final-format pass. No daemon is contacted.
-pub(crate) fn render_signed_dry_run(cell: &Cell, context: &ExecutionContext) -> String {
+pub(crate) fn render_signed_dry_run(
+    cell: &Cell,
+    context: &ExecutionContext,
+) -> Result<String, ExecError> {
     let intermediate = intermediate_path(cell, context);
-    let mut customize = docker_prelude(context);
-    customize.extend(build_signed_customize_args(cell, context, &intermediate));
+    let mut customize = docker_prelude(cell, context, &[])?;
+    customize.extend(build_signed_customize_args(cell, context, &intermediate)?);
     let ca_cert = context
         .output_dir
         .join(crate::output_artifacts::ca_cert_name(cell.slug.as_ref()));
-    format!(
+    Ok(format!(
         "# {slug} — signed 3-pass (meta/docs/signing.md §5)\n\
          # pass 1/3: customize -> raw intermediate ({intermediate})\n{customize}\n\n\
          # pass 2/3: host-side sign the staged boot artifacts (openssl + sbsign); publish CA -> {ca}\n\
@@ -367,7 +570,7 @@ pub(crate) fn render_signed_dry_run(cell: &Cell, context: &ExecutionContext) -> 
         ca = ca_cert.display(),
         fmt = cell.output.format.as_str(),
         final = artifact_path(cell, context).display(),
-    )
+    ))
 }
 
 /// Render an argv as a copy-pasteable multiline shell command (bash backslash continuations), with
@@ -408,7 +611,11 @@ fn group_tokens(tokens: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
 
-    use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
 
     use serde_yaml_ng::{Mapping, Value};
     use tailor_config::{
@@ -428,7 +635,7 @@ mod tests {
         );
         let context = sample_context();
 
-        let args = build_ic_args(&cell, &context);
+        let args = build_ic_args(&cell, &context).unwrap();
 
         assert_eq!(
             args,
@@ -471,7 +678,7 @@ mod tests {
         );
         let context = sample_context();
 
-        let args = build_ic_args(&cell, &context);
+        let args = build_ic_args(&cell, &context).unwrap();
 
         assert!(!args.iter().any(|arg| arg == FLAG_CONFIG_FILE));
         assert!(!args.iter().any(|arg| arg == FLAG_RPM_SOURCE));
@@ -493,17 +700,138 @@ mod tests {
         );
         let context = sample_context();
 
-        let argv = build_run_command(&cell, &context);
+        let argv = build_run_command(&cell, &context).unwrap();
 
         assert_eq!(&argv[..3], ["docker", "run", "--rm"]);
         assert!(argv.iter().any(|t| t == "--privileged"));
         assert!(argv.windows(2).any(|p| p == ["--platform", "linux/amd64"]));
-        assert!(argv.windows(2).any(|p| p == ["-v", "/:/host"]));
+        assert!(!argv.windows(2).any(|p| p == ["-v", "/:/host"]));
+        assert!(
+            argv.windows(2)
+                .any(|p| p == ["-v", "/workspace:/host/workspace:ro"])
+        );
+        assert!(argv.windows(2).any(|p| p == ["-v", "/out:/host/out:rw"]));
         assert!(argv.windows(2).any(|p| p == ["-v", "/dev:/dev"]));
         // The IC image precedes its subcommand and arguments.
         let image = argv.iter().position(|t| t == "ic@sha256:abc").unwrap();
         let customize = argv.iter().position(|t| t == "customize").unwrap();
         assert!(image < customize);
+    }
+
+    #[test]
+    fn unset_build_dir_base_keeps_container_tmp_without_host_root_bind() {
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        let context = sample_context();
+
+        let args = build_ic_args(&cell, &context).unwrap();
+        let binds = container_binds(&cell, &context, &[]).unwrap();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == [FLAG_BUILD_DIR, CONTAINER_TMP_BUILD_DIR])
+        );
+        assert!(!binds.iter().any(|bind| bind == "/:/host"));
+        assert!(!binds.iter().any(|bind| bind.starts_with("/:")));
+    }
+
+    #[test]
+    fn build_dir_base_is_translated_and_bound_rw() {
+        let Some(base) = separate_build_dir_base() else {
+            return;
+        };
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        let mut context = sample_context();
+        context.runtime.build_dir_base = Some(base.clone());
+
+        let args = build_ic_args(&cell, &context).unwrap();
+        let binds = container_binds(&cell, &context, &[]).unwrap();
+        let build_dir = base.join(cell.slug.as_ref());
+        let build_dir_arg = format!("/host{}", build_dir.display());
+        let build_dir_bind = format!(
+            "{}:{}:rw",
+            build_dir.display(),
+            path_translate::to_container_path(&build_dir, &context.runtime.host_root)
+        );
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == [FLAG_BUILD_DIR, build_dir_arg.as_str()])
+        );
+        assert!(binds.iter().any(|bind| bind == &build_dir_bind));
+    }
+
+    #[test]
+    fn container_binds_include_workspace_carveouts_inputs_and_extra_paths() {
+        let cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/external/bases/base.raw".into(),
+                arch: None,
+            },
+        );
+        let mut context = sample_context();
+        context.runtime.log_dir = Some(PathBuf::from("/logs"));
+        context.runtime.extra_paths = vec![
+            tailor_config::ExtraMount {
+                path: PathBuf::from("/opt/shared"),
+                access: Access::Ro,
+            },
+            tailor_config::ExtraMount {
+                path: PathBuf::from("/extra-rw"),
+                access: Access::Rw,
+            },
+        ];
+        let staging = PathBuf::from("/stage/sample");
+
+        let binds = container_binds(&cell, &context, std::slice::from_ref(&staging)).unwrap();
+
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/workspace:/host/workspace:ro")
+        );
+        assert!(binds.iter().any(|bind| bind == "/out:/host/out:rw"));
+        assert!(binds.iter().any(|bind| bind == "/cache:/host/cache:rw"));
+        assert!(binds.iter().any(|bind| bind == "/logs:/host/logs:rw"));
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/stage/sample:/host/stage/sample:rw")
+        );
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/external/bases:/host/external/bases:ro")
+        );
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/rpms/one:/host/rpms/one:ro")
+        );
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/opt/shared:/host/opt/shared:ro")
+        );
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/extra-rw:/host/extra-rw:rw")
+        );
+        assert!(binds.iter().any(|bind| bind == DEV_BIND));
+        assert!(!binds.iter().any(|bind| bind.starts_with("/:")));
     }
 
     #[test]
@@ -538,7 +866,7 @@ mod tests {
         );
         let context = sample_context();
 
-        let args = build_ic_args(&cell, &context);
+        let args = build_ic_args(&cell, &context).unwrap();
 
         assert!(
             args.windows(2)
@@ -562,7 +890,7 @@ mod tests {
         context.base_ref =
             Some("oci:mcr.microsoft.com/azurelinux/3.0/image/minimal-os@sha256:dead".to_owned());
 
-        let args = build_ic_args(&cell, &context);
+        let args = build_ic_args(&cell, &context).unwrap();
 
         assert!(args.windows(2).any(|pair| pair
             == [
@@ -584,7 +912,7 @@ mod tests {
         // No explicit log level: IC must still run structured at the `debug` default (§5.1).
         context.runtime.log_level = None;
 
-        let args = build_ic_args(&cell, &context);
+        let args = build_ic_args(&cell, &context).unwrap();
 
         assert!(args.windows(2).any(|p| p == [FLAG_LOG_FORMAT, "json"]));
         assert!(args.windows(2).any(|p| p == [FLAG_LOG_COLOR, "never"]));
@@ -605,7 +933,7 @@ mod tests {
         let mut context = sample_context();
         context.runtime.log_dir = Some(PathBuf::from("/logs"));
 
-        let args = build_ic_args(&cell, &context);
+        let args = build_ic_args(&cell, &context).unwrap();
 
         assert!(
             args.windows(2)
@@ -624,13 +952,31 @@ mod tests {
             signer: None,
             runtime: RuntimeConfig {
                 host_root: PathBuf::from("/host"),
+                workspace_root: PathBuf::from("/workspace"),
                 privileged: true,
-                build_dir: None,
+                mount_dev: true,
+                build_dir_base: None,
                 log_level: Some("debug".to_owned()),
                 image_cache_dir: Some(PathBuf::from("/cache")),
                 log_dir: None,
+                extra_paths: Vec::new(),
                 janitor_image: "janitor@sha256:def".to_owned(),
             },
+        }
+    }
+
+    fn separate_build_dir_base() -> Option<PathBuf> {
+        use std::os::unix::fs::MetadataExt;
+
+        let candidate = PathBuf::from("/dev/shm/tailor-build");
+        let parent = candidate.parent()?;
+        if parent.exists()
+            && std::fs::metadata(parent).ok()?.dev()
+                != std::fs::metadata(Path::new("/")).ok()?.dev()
+        {
+            Some(candidate)
+        } else {
+            None
         }
     }
 

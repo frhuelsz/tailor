@@ -14,9 +14,7 @@ use tailor_core::{
     ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, artifact_name,
 };
 
-use crate::{
-    arg_builder, arg_builder::DEV_BIND, janitor, output_artifacts, rpm_farm, working_copy,
-};
+use crate::{arg_builder, guard, janitor, output_artifacts, rpm_farm, working_copy};
 
 const CONTAINER_NAME_PREFIX: &str = "tailor-ic";
 const RPM_FARM_PREFIX: &str = ".tailor-farm";
@@ -51,10 +49,10 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             .join(artifact_name(cell.slug.as_ref(), cell.output.format));
         if context.dry_run {
             let logs = if context.signer.is_some() {
-                arg_builder::render_signed_dry_run(cell, context)
+                arg_builder::render_signed_dry_run(cell, context)?
             } else {
                 let command =
-                    arg_builder::render_command(&arg_builder::build_run_command(cell, context));
+                    arg_builder::render_command(&arg_builder::build_run_command(cell, context)?);
                 format!("# {}\n{command}", cell.slug.as_ref())
             };
             info!(cell = %cell.slug, "dry-run container invocation");
@@ -87,6 +85,13 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
         if let Some(log_dir) = &context.runtime.log_dir {
             fs::create_dir_all(log_dir).map_err(|source| ExecError::Io {
                 context: format!("failed to create log directory `{}`", log_dir.display()),
+                source,
+            })?;
+        }
+        if let Some(build_dir) = arg_builder::build_dir_path(cell, context) {
+            guard::ensure_safe_build_dir(&build_dir)?;
+            fs::create_dir_all(&build_dir).map_err(|source| ExecError::Io {
+                context: format!("failed to create build directory `{}`", build_dir.display()),
                 source,
             })?;
         }
@@ -152,9 +157,21 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             )
             .await?
         } else {
-            let args = arg_builder::build_ic_args(&run_cell, context);
+            let args = arg_builder::build_ic_args(&run_cell, context)?;
+            let extra_rw = staging
+                .as_ref()
+                .map(|plan| plan.dir.clone())
+                .into_iter()
+                .collect::<Vec<_>>();
             let result = self
-                .run_ic(cell, context, args, log_file.as_ref(), cancel.clone())
+                .run_ic(
+                    cell,
+                    context,
+                    args,
+                    &extra_rw,
+                    log_file.as_ref(),
+                    cancel.clone(),
+                )
                 .await?;
             let _ = fs::remove_file(&working_copy_path);
 
@@ -220,13 +237,14 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
 }
 
 impl<R: ContainerRuntime> IcExecutor<R> {
-    /// Run one IC container pass (`customize`/`inject-files`) with the standard host-root + `/dev`
+    /// Run one IC container pass (`customize`/`inject-files`) with the computed workspace-scoped
     /// binds, returning the raw container result (the caller maps a non-zero exit to `IcFailed`).
     async fn run_ic(
         &self,
         cell: &Cell,
         context: &ExecutionContext,
         args: Vec<String>,
+        extra_rw: &[PathBuf],
         log_file: Option<&PathBuf>,
         cancel: CancellationToken,
     ) -> Result<ContainerResult, ExecError> {
@@ -238,10 +256,7 @@ impl<R: ContainerRuntime> IcExecutor<R> {
                     platform: context.platform.clone(),
                     name: container_name(cell, context),
                     args,
-                    binds: vec![
-                        arg_builder::host_root_bind(&context.runtime),
-                        DEV_BIND.to_owned(),
-                    ],
+                    binds: arg_builder::container_binds(cell, context, extra_rw)?,
                     privileged: context.runtime.privileged,
                     cell_slug: cell.slug.as_ref().to_owned(),
                     log_file: log_file.cloned(),
@@ -286,7 +301,8 @@ impl<R: ContainerRuntime> IcExecutor<R> {
             .run_ic(
                 cell,
                 context,
-                arg_builder::build_signed_customize_args(run_cell, context, &intermediate),
+                arg_builder::build_signed_customize_args(run_cell, context, &intermediate)?,
+                slice::from_ref(&plan.dir),
                 log_file,
                 cancel.clone(),
             )
@@ -355,7 +371,8 @@ impl<R: ContainerRuntime> IcExecutor<R> {
                     &intermediate,
                     &inject_files_yaml,
                     &final_image,
-                ),
+                )?,
+                slice::from_ref(&plan.dir),
                 log_file,
                 cancel.clone(),
             )

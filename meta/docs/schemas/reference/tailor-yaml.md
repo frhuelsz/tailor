@@ -49,9 +49,10 @@ Container-runtime settings. Sensible defaults; rarely overridden.
 | Field | Type | Req | Default | Notes |
 | ----- | ---- | --- | ------- | ----- |
 | `privileged` | bool | no | `true` | IC requires a privileged container. |
-| `mounts.hostRoot` | string | no | `/host` | Container-side mount of host `/`; the prefix for all host→container path translation. |
+| `mounts.hostRoot` | string | no | `/host` | Namespace prefix for host→container path translation. It is not a whole-host bind. |
 | `mounts.dev` | bool | no | `true` | Bind `/dev:/dev`. |
-| `buildDir` | string | no | `/tmp` | IC `--build-dir` (container-internal; not host-translated). |
+| `mounts.extraPaths` | list of extra mount objects | no | `[]` | Additional paths exposed under `hostRoot`; `access` defaults to `ro` and may be `rw`. Relative paths resolve against the workspace root. |
+| `buildDirBase` | string | no | — | Host filesystem base for per-cell IC build dirs (`<buildDirBase>/<slug>`). Must be on a separate filesystem from `/`. Omit to use container-local `/tmp`. |
 | `logLevel` | [LogLevel](./types.md#loglevel) | no | `info` | IC `--log-level`. |
 | `imageCacheDir` | string (host path) | cond | — | Host dir for IC `--image-cache-dir` (caches registry-downloaded base images). Needed only when an image uses an `oci`/`azureLinux` base; tailor may auto-default it (e.g. `./.tailor/cache`). |
 | `janitorImage` | {`container` (req), `tag`?} | no | a busybox-class image | Digest-pinned minimal image for sudo-free ownership/cleanup of IC's root-owned outputs. |
@@ -59,7 +60,18 @@ Container-runtime settings. Sensible defaults; rarely overridden.
 ```yaml
 runtime:
   imageCacheDir: ./.tailor/cache   # required here because the images use azureLinux (MCR) bases
+  buildDirBase: /mnt/tailor-build
+  mounts:
+    hostRoot: /host
+    dev: true
+    extraPaths:
+      - path: /opt/shared-scripts
+      - path: /data/scratch
+        access: rw
 ```
+
+tailor binds the workspace read-only by default, then adds narrowly scoped writable carve-outs for
+outputs, cache, logs, staging, and `buildDirBase`. It never emits `-v /:/host`.
 
 ## defaults
 

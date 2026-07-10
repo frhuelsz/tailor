@@ -153,11 +153,17 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "hostRoot": { "type": "string", "description": "Container-side mount of host '/' and the prefix for ALL host->container path translation. Default /host." },
-            "dev": { "type": "boolean", "description": "Bind /dev:/dev. Default true." }
+            "hostRoot": { "type": "string", "description": "Container-side namespace prefix for host->container path translation. Default /host. This is not a whole-host bind." },
+            "dev": { "type": "boolean", "description": "Bind /dev:/dev. Default true." },
+            "extraPaths": {
+              "type": "array",
+              "description": "Additional host paths exposed under hostRoot. Read-only by default; writable only with access: rw. Relative paths resolve against the workspace root.",
+              "items": { "$ref": "#/$defs/ExtraMount" },
+              "default": []
+            }
           }
         },
-        "buildDir": { "type": "string", "description": "IC --build-dir (container-internal; NOT host-translated). Default /tmp." },
+        "buildDirBase": { "type": "string", "description": "Host filesystem base for per-cell IC --build-dir values (<buildDirBase>/<slug>). Must be on a separate filesystem from /. Omit to use container-local /tmp." },
         "logLevel": { "$ref": "#/$defs/LogLevel" },
         "imageCacheDir": {
           "type": "string",
@@ -174,6 +180,24 @@
           }
         }
       }
+    },
+
+    "ExtraMount": {
+      "type": "object",
+      "description": "Explicit additional host path exposed under runtime.mounts.hostRoot.",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "description": "Host path. Relative paths resolve against the workspace root." },
+        "access": { "$ref": "#/$defs/MountAccess" }
+      }
+    },
+
+    "MountAccess": {
+      "type": "string",
+      "enum": ["ro", "rw"],
+      "default": "ro",
+      "description": "Container bind access. Defaults to read-only."
     },
 
     "LogLevel": {

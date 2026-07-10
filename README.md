@@ -19,7 +19,7 @@ flowchart LR
 
 ## Why tailor
 
-The Image Customizer is powerful but low-level: building an image means hand-assembling a privileged `docker run` — the right container tag, a `-v /:/host` mount, **host paths rewritten** into that mount, a base image, the output format, RPM sources, and a config YAML — repeated per image, per architecture, per output format. That glue is exactly what teams end up hand-writing around IC; tailor turns it into a reusable, declarative tool — your image set lives in YAML, not in code.
+The Image Customizer is powerful but low-level: building an image means hand-assembling a privileged `docker run` — the right container tag, narrowly scoped container mounts, **host paths rewritten** into the `/host` namespace, a base image, the output format, RPM sources, and a config YAML — repeated per image, per architecture, per output format. That glue is exactly what teams end up hand-writing around IC; tailor turns it into a reusable, declarative tool — your image set lives in YAML, not in code.
 
 ### Manage layered, varied configuration — without copy-paste
 
@@ -36,7 +36,7 @@ The nuance lives in a handful of small, reviewable files instead of N copy-paste
 You describe *what* you want; tailor handles the *how*. For each cell it assembles and runs the complete IC invocation through the Docker API (no shelling out):
 
 - **Base resolution** — a local file, an `oci:` reference, or `azureLinux:` (MCR) shorthand, resolved to a digest and pinned in `tailor.lock`.
-- **The privileged run** — `--privileged`, the `/:/host` bind, the correct `--platform linux/<arch>`, and **every host path rewritten** into the mount (an easy-to-get-wrong step you'd otherwise script by hand).
+- **The privileged run** — `--privileged`, a read-only workspace mount plus narrow writable carve-outs, the correct `--platform linux/<arch>`, and **every host path rewritten** into `/host` (an easy-to-get-wrong step you'd otherwise script by hand).
 - **Output & cleanup** — per-format `--output-image-format`, streamed logs, exit/output verification, and **sudo-free cleanup** of the root-owned files IC leaves behind.
 - **Reproducibility** — `tailor build --locked` pins the IC container and base digests; `tailor build --dry-run` prints the exact `docker run …` first.
 
@@ -87,11 +87,14 @@ docker run \
   --rm \
   --privileged \
   --platform linux/amd64 \
-  -v /:/host \
+  -v /home/you/hello:/host/home/you/hello:ro \
+  -v /home/you/hello/.tailor/cache:/host/home/you/hello/.tailor/cache:rw \
+  -v /home/you/hello/artifacts:/host/home/you/hello/artifacts:rw \
   -v /dev:/dev \
   mcr.microsoft.com/azurelinux/imagecustomizer:latest \
   customize \
   --config-file /host/home/you/hello/.tailor-render.hello_amd64_cosi.ic.yaml \
+  --build-dir /tmp \
   --image oci:mcr.microsoft.com/azurelinux/3.0/image/minimal-os \
   --output-image-format cosi \
   --output-image-file /host/home/you/hello/artifacts/hello_amd64_cosi.cosi

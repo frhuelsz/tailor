@@ -122,13 +122,14 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         plan: &BuildPlan,
         tool: &ToolConfig,
         lock: &Lockfile,
+        workspace_root: &Path,
         output_dir: &Path,
         options: &BuildOptions,
         cancel: CancellationToken,
         progress: &mut dyn FnMut(BuildProgress<'_>),
         signer_for: &dyn Fn(&Cell) -> Option<Arc<dyn Signer>>,
     ) -> Result<Vec<ExecutionResult>, CoreError> {
-        let runtime = runtime_config(tool, lock);
+        let runtime = runtime_config(tool, lock, workspace_root);
         let mut results = Vec::new();
         for planned in &plan.cells {
             if planned.up_to_date && !options.force {
@@ -177,10 +178,11 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         targets: &[Arc<Target>],
         tool: &ToolConfig,
         selector: &Selector,
+        workspace_root: &Path,
         output_dir: &Path,
         signer_for: &dyn Fn(&Cell) -> Option<Arc<dyn Signer>>,
     ) -> Result<Vec<ExecutionResult>, CoreError> {
-        let runtime = runtime_config(tool, &Lockfile::default());
+        let runtime = runtime_config(tool, &Lockfile::default(), workspace_root);
         let mut results = Vec::new();
         for target in targets {
             let (_, toolchain) = toolchain_for(target, tool)?;
@@ -442,13 +444,23 @@ fn slug_for(
     }
 }
 
-/// Build the execution runtime config from the tool config and lock (janitor digest).
-pub fn runtime_config(tool: &ToolConfig, lock: &Lockfile) -> RuntimeConfig {
+/// Build the execution runtime config from the tool config, workspace root, and lock (janitor digest).
+pub fn runtime_config(tool: &ToolConfig, lock: &Lockfile, workspace_root: &Path) -> RuntimeConfig {
     let runtime = tool.runtime.as_ref();
-    let host_root = runtime
-        .and_then(|r| r.mounts.as_ref())
+    let mounts = runtime.and_then(|r| r.mounts.as_ref());
+    let host_root = mounts
         .and_then(|m| m.host_root.clone())
         .unwrap_or_else(|| DEFAULT_HOST_ROOT.into());
+    let extra_paths = mounts.map_or_else(Vec::new, |mounts| {
+        mounts
+            .extra_paths
+            .iter()
+            .map(|mount| tailor_config::ExtraMount {
+                path: tailor_config::absolutize(&mount.path, workspace_root),
+                access: mount.access,
+            })
+            .collect()
+    });
     let janitor = runtime.and_then(|r| r.janitor_image.as_ref());
     let janitor_image = janitor.map_or_else(
         || {
@@ -474,11 +486,16 @@ pub fn runtime_config(tool: &ToolConfig, lock: &Lockfile) -> RuntimeConfig {
     );
     RuntimeConfig {
         host_root,
+        workspace_root: workspace_root.to_path_buf(),
         privileged: runtime.and_then(|r| r.privileged).unwrap_or(true),
-        build_dir: runtime.and_then(|r| r.build_dir.clone()).map(Into::into),
+        mount_dev: mounts.and_then(|m| m.dev).unwrap_or(true),
+        build_dir_base: runtime
+            .and_then(|r| r.build_dir_base.clone())
+            .map(|path| tailor_config::absolutize(path, workspace_root)),
         log_level: runtime.and_then(|r| r.log_level.map(|l| l.as_str().to_owned())),
         image_cache_dir: runtime.and_then(|r| r.image_cache_dir.clone()),
         log_dir: runtime.and_then(|r| r.log_dir.clone()),
+        extra_paths,
         janitor_image,
     }
 }
@@ -636,6 +653,7 @@ mod tests {
                 &tool,
                 &lock,
                 out.path(),
+                out.path(),
                 &BuildOptions::default(),
                 CancellationToken::new(),
                 &mut |_| {},
@@ -674,6 +692,7 @@ mod tests {
                 &[target],
                 &tool_config(),
                 &Selector::default(),
+                out.path(),
                 out.path(),
                 &|_| None,
             )

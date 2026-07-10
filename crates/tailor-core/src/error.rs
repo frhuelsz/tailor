@@ -31,6 +31,9 @@ pub enum ExecError {
         source: std::io::Error,
     },
 
+    #[error("unsafe directory `{}`: {reason}", .path.display())]
+    UnsafeDir { path: PathBuf, reason: String },
+
     #[error("{0}")]
     Other(String),
 }

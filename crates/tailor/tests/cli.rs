@@ -327,7 +327,8 @@ fn build_dry_run_prints_the_docker_prelude_offline() {
             predicate::str::contains("(dry-run)")
                 .and(predicate::str::contains("docker run \\"))
                 .and(predicate::str::contains("--privileged"))
-                .and(predicate::str::contains("-v /:/host")),
+                .and(predicate::str::contains(":ro"))
+                .and(predicate::str::contains("-v /:/host").not()),
         );
 }
 

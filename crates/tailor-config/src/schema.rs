@@ -154,7 +154,7 @@ pub struct Runtime {
     #[serde(default)]
     pub mounts: Option<Mounts>,
     #[serde(default)]
-    pub build_dir: Option<String>,
+    pub build_dir_base: Option<PathBuf>,
     #[serde(default)]
     pub log_level: Option<LogLevel>,
     #[serde(default)]
@@ -174,6 +174,24 @@ pub struct Mounts {
     pub host_root: Option<PathBuf>,
     #[serde(default)]
     pub dev: Option<bool>,
+    #[serde(default)]
+    pub extra_paths: Vec<ExtraMount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExtraMount {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub access: Access,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Access {
+    #[default]
+    Ro,
+    Rw,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -603,7 +621,7 @@ pub type AxisValues = IndexMap<String, Vec<String>>;
 
 #[cfg(test)]
 mod tests {
-    use super::{BaseImageCatalogue, Engine, Runtime, Toolchains};
+    use super::{Access, BaseImageCatalogue, Engine, Runtime, Toolchains};
     use super::{SigningBackend, SigningConfig, SigningRef, resolve_signing};
 
     #[test]
@@ -648,6 +666,50 @@ mod tests {
         let runtime: Runtime = serde_yaml_ng::from_str("privileged: true\n").unwrap();
         assert_eq!(runtime.engine, None);
         assert_eq!(runtime.host, None);
+    }
+
+    #[test]
+    fn runtime_parses_build_dir_base() {
+        let runtime: Runtime =
+            serde_yaml_ng::from_str("buildDirBase: /mnt/tailor-build\n").unwrap();
+        assert_eq!(
+            runtime.build_dir_base.as_deref(),
+            Some(std::path::Path::new("/mnt/tailor-build"))
+        );
+    }
+
+    #[test]
+    fn runtime_rejects_old_build_dir_field() {
+        let err = serde_yaml_ng::from_str::<Runtime>("buildDir: /mnt/tailor-build\n").unwrap_err();
+        assert!(
+            err.to_string().contains("buildDir"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn runtime_mounts_extra_paths_parse_default_ro_and_explicit_rw() {
+        let runtime: Runtime = serde_yaml_ng::from_str(indoc::indoc! {"
+            mounts:
+              extraPaths:
+                - path: shared/scripts
+                - path: /data/scratch
+                  access: rw
+        "})
+        .unwrap();
+        let mounts = runtime.mounts.unwrap();
+
+        assert_eq!(mounts.extra_paths.len(), 2);
+        assert_eq!(
+            mounts.extra_paths[0].path,
+            std::path::Path::new("shared/scripts")
+        );
+        assert_eq!(mounts.extra_paths[0].access, Access::Ro);
+        assert_eq!(
+            mounts.extra_paths[1].path,
+            std::path::Path::new("/data/scratch")
+        );
+        assert_eq!(mounts.extra_paths[1].access, Access::Rw);
     }
 
     // ----- signing -----
