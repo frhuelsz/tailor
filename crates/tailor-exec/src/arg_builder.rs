@@ -963,6 +963,7 @@ mod tests {
         context.tools_dir = Some(ToolsDirPlan {
             image_ref: "registry.example/tools@sha256:abc".to_owned(),
             digest: "sha256:abc".to_owned(),
+            pull: true,
             cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             mount_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             access: Access::Ro,
@@ -995,6 +996,7 @@ mod tests {
         context.tools_dir = Some(ToolsDirPlan {
             image_ref: "registry.example/tools@sha256:abc".to_owned(),
             digest: "sha256:abc".to_owned(),
+            pull: true,
             cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             mount_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             access: Access::Ro,
@@ -1032,6 +1034,7 @@ mod tests {
         context.tools_dir = Some(ToolsDirPlan {
             image_ref: "registry.example/tools@sha256:abc".to_owned(),
             digest: "sha256:abc".to_owned(),
+            pull: true,
             cache_dir: PathBuf::from("/cache/tools-dirs/sha256_abc"),
             mount_dir: copy.clone(),
             access: Access::Rw,
@@ -1098,6 +1101,7 @@ mod tests {
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: false,
+            pull: true,
             signer: None,
             runtime: RuntimeConfig {
                 host_root: PathBuf::from("/host"),

@@ -24,12 +24,14 @@ pub use domain::{BuildPlan, Cell, CellSlug, Fingerprint, PlannedCell, Target};
 pub use error::{CoreError, ExecError, ResolveError};
 pub use lockfile::{LockedBase, LockedContainer, LockedRuntime, Lockfile};
 pub use orchestrator::{
-    BuildOptions, BuildProgress, Orchestrator, artifact_name, cells, cells_selected, runtime_config,
+    BuildOptions, BuildProgress, Orchestrator, ResolvedToolchain, ResolvedToolsDirSource,
+    artifact_name, cells, cells_selected, runtime_config, toolchain_for, toolchain_key,
+    tools_dir_key,
 };
 pub use ports::{
     BaseImageFetcher, BaseResolver, ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo,
-    ExecutionContext, ExecutionResult, Executor, FetchedBase, FilesystemOps, ResolvedBase,
-    RuntimeConfig, Signer, SigningPlan, SigningResult, ToolsDirPlan,
+    ExecutionContext, ExecutionResult, Executor, FetchedBase, FilesystemOps, LocalImage,
+    ResolvedBase, RuntimeConfig, Signer, SigningPlan, SigningResult, ToolsDirPlan,
 };
 pub use selector::Selector;
 pub use signing::{

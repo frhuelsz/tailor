@@ -52,6 +52,7 @@ mod tests {
     use super::*;
 
     use semver::Version;
+    use tailor_config::PullPolicy;
 
     fn toolchain(tag: Option<String>) -> ToolchainEntry {
         ToolchainEntry {
@@ -59,6 +60,7 @@ mod tests {
             container: "mcr.microsoft.com/azurelinux/imagecustomizer".to_owned(),
             version: Some(Version::parse("1.3.0").unwrap()),
             tag,
+            pull: PullPolicy::Missing,
         }
     }
 
@@ -77,6 +79,7 @@ mod tests {
             container: "mcr.microsoft.com/azurelinux/imagecustomizer".to_owned(),
             version: None,
             tag: None,
+            pull: PullPolicy::Missing,
         };
         assert_eq!(
             toolchain_reference(&entry),

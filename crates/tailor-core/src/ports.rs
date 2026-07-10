@@ -58,6 +58,9 @@ pub struct ExecutionContext {
     pub clone_index: Option<u32>,
     /// Print the resolved IC argument vector without running.
     pub dry_run: bool,
+    /// Whether the executor should pull the IC image before running it. `false` for local-only
+    /// images resolved by pull policy.
+    pub pull: bool,
     /// The resolved signer for this cell, when its image opts into `signing:` (`meta/docs/signing.md`
     /// §5/§6). `None` for unsigned cells — the executor then runs the single-pass `customize`. Held as
     /// a `dyn Signer` so per-cell profiles can differ; the executor calls it on a blocking thread.
@@ -72,6 +75,7 @@ pub struct ExecutionContext {
 pub struct ToolsDirPlan {
     pub image_ref: String,
     pub digest: String,
+    pub pull: bool,
     pub cache_dir: PathBuf,
     pub mount_dir: PathBuf,
     pub access: Access,
@@ -173,6 +177,11 @@ impl Default for RuntimeConfig {
 pub trait ContainerRuntime: Send + Sync {
     fn pull_image(&self, reference: &str) -> impl Future<Output = Result<(), ExecError>> + Send;
 
+    fn inspect_image(
+        &self,
+        reference: &str,
+    ) -> impl Future<Output = Result<Option<LocalImage>, ExecError>> + Send;
+
     fn create_and_run(
         &self,
         config: ContainerConfig,
@@ -185,9 +194,16 @@ pub trait ContainerRuntime: Send + Sync {
         &self,
         image_ref: &str,
         platform: &str,
+        pull: bool,
         dest_dir: &Path,
         cancel: CancellationToken,
     ) -> impl Future<Output = Result<(), ExecError>> + Send;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalImage {
+    pub id: String,
+    pub repo_digests: Vec<String>,
 }
 
 /// A request to create and run one container.

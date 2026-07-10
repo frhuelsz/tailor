@@ -116,6 +116,9 @@ pub enum CoreError {
     #[error("unknown toolchain id `{id}` (image `{image}`)")]
     UnknownToolchain { id: String, image: String },
 
+    #[error("toolchain `{id}` (`{reference}`) was not resolved before planning")]
+    MissingResolvedToolchain { id: String, reference: String },
+
     #[error(
         "image `{image}` references tools-dir source `{name}`, undefined in tailor.yaml `toolsDirSources` (known: {known})"
     )]
@@ -124,6 +127,9 @@ pub enum CoreError {
         name: String,
         known: String,
     },
+
+    #[error("tools-dir source `{reference}` was not resolved before planning")]
+    MissingResolvedToolsDir { reference: String },
 
     #[error(
         "image `{image}` sets `toolsDir`, but its inline IC config must include previewFeatures: [tools-dir]"

@@ -95,7 +95,7 @@
 
     "Toolchains": {
       "type": "object",
-      "description": "Repo-wide Image Customizer toolchain(s). Each entry resolves to a registry digest pinned in tailor.lock. This is where the IC VERSION lives.",
+      "description": "Repo-wide Image Customizer toolchain(s). Each entry resolves according to its pull policy and lockfile state. Registry/RepoDigest results are pinned in tailor.lock; local Id-only images are not lockable.",
       "additionalProperties": false,
       "required": ["default", "entries"],
       "properties": {
@@ -114,7 +114,7 @@
 
     "ToolchainEntry": {
       "type": "object",
-      "description": "An Image Customizer container. `name` and `container` are required; the pull tag defaults to `tag`, else `version`, else `latest`.",
+      "description": "An Image Customizer container. `name` and `container` are required; the pull tag defaults to `tag`, else `version`, else `latest`. `pull` defaults to `missing`.",
       "additionalProperties": false,
       "required": ["name", "container"],
       "properties": {
@@ -134,7 +134,8 @@
         "tag": {
           "type": "string",
           "description": "Registry tag actually pulled. Defaults to `version` (MCR publishes unprefixed tags, e.g. :1.3.0), and to `latest` when neither `tag` nor `version` is set. The resolved DIGEST is authoritative and is written to tailor.lock."
-        }
+        },
+        "pull": { "$ref": "#/$defs/PullPolicy" }
       }
     },
 
@@ -146,23 +147,31 @@
       ]
     },
 
+    "PullPolicy": {
+      "type": "string",
+      "enum": ["always", "missing", "never"],
+      "default": "missing",
+      "description": "Container image pull policy. `always` resolves/pulls from a registry. `missing` uses a local image if present (locked digest wins), else resolves/pulls. `never` requires a locked digest or local image and never pulls. Local Id-only images are usable but not lockable."
+    },
+
 
     "ToolsDirSources": {
       "type": "array",
-      "description": "Named container root filesystems tailor exports, caches, and passes to IC as --tools-dir. Each item carries a unique name.",
+      "description": "Named container root filesystems tailor exports, caches, and passes to IC as --tools-dir. Each item carries a unique name and resolves according to its pull policy.",
       "items": { "$ref": "#/$defs/ToolsDirSource" },
       "default": []
     },
 
     "ToolsDirSource": {
       "type": "object",
-      "description": "A named tools-dir source. `tag` defaults to `latest`; the resolved digest is pinned in tailor.lock when locked.",
+      "description": "A named tools-dir source. `tag` defaults to `latest`; `pull` defaults to `missing`. Registry/RepoDigest results are pinned in tailor.lock when locked; local Id-only images are not lockable.",
       "additionalProperties": false,
       "required": ["name", "container"],
       "properties": {
         "name": { "type": "string", "description": "Unique tools-dir source name." },
         "container": { "type": "string", "description": "Container image whose flattened rootfs provides the tools dir." },
-        "tag": { "type": "string", "description": "Registry tag. Defaults to latest when the container reference has no tag/digest." }
+        "tag": { "type": "string", "description": "Registry tag. Defaults to latest when the container reference has no tag/digest." },
+        "pull": { "$ref": "#/$defs/PullPolicy" }
       }
     },
 
@@ -173,7 +182,8 @@
       "required": ["container"],
       "properties": {
         "container": { "type": "string", "description": "Container image whose flattened rootfs provides the tools dir." },
-        "tag": { "type": "string", "description": "Registry tag. Defaults to latest when the container reference has no tag/digest." }
+        "tag": { "type": "string", "description": "Registry tag. Defaults to latest when the container reference has no tag/digest." },
+        "pull": { "$ref": "#/$defs/PullPolicy" }
       }
     },
 

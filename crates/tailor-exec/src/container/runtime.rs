@@ -19,7 +19,9 @@ use tokio_util::{
 use tracing::{debug, warn};
 
 use tailor_config::Engine;
-use tailor_core::{ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo, ExecError};
+use tailor_core::{
+    ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo, ExecError, LocalImage,
+};
 
 use crate::ic_log::{self, IcCapture};
 
@@ -150,6 +152,19 @@ impl ContainerRuntime for BollardRuntime {
             .map_err(|err| map_runtime_error(&err))
     }
 
+    async fn inspect_image(&self, reference: &str) -> Result<Option<LocalImage>, ExecError> {
+        match self.docker.inspect_image(reference).await {
+            Ok(image) => Ok(Some(LocalImage {
+                id: image.id.unwrap_or_default(),
+                repo_digests: image.repo_digests.unwrap_or_default(),
+            })),
+            Err(BollardError::DockerResponseServerError {
+                status_code: 404, ..
+            }) => Ok(None),
+            Err(err) => Err(map_runtime_error(&err)),
+        }
+    }
+
     async fn create_and_run(
         &self,
         config: ContainerConfig,
@@ -227,11 +242,14 @@ impl ContainerRuntime for BollardRuntime {
         &self,
         image_ref: &str,
         platform: &str,
+        pull: bool,
         dest_dir: &Path,
         cancel: CancellationToken,
     ) -> Result<(), ExecError> {
         let name = format!("{EXPORT_NAME_PREFIX}-{}", std::process::id());
-        self.pull_image(image_ref).await?;
+        if pull {
+            self.pull_image(image_ref).await?;
+        }
         self.docker
             .create_container(
                 Some(CreateContainerOptions {
@@ -299,6 +317,10 @@ impl ContainerRuntime for NoopRuntime {
         Err(no_engine())
     }
 
+    async fn inspect_image(&self, _reference: &str) -> Result<Option<LocalImage>, ExecError> {
+        Err(no_engine())
+    }
+
     async fn create_and_run(
         &self,
         _config: ContainerConfig,
@@ -315,6 +337,7 @@ impl ContainerRuntime for NoopRuntime {
         &self,
         _image_ref: &str,
         _platform: &str,
+        _pull: bool,
         _dest_dir: &Path,
         _cancel: CancellationToken,
     ) -> Result<(), ExecError> {

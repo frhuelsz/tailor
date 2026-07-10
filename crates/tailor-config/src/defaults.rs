@@ -6,7 +6,7 @@
 //! - [`DEFAULT_IC_TAG`] — the tag pulled when a toolchain pins neither a `tag` nor a `version`
 //!   (see [`ToolchainEntry::effective_tag`](crate::ToolchainEntry::effective_tag)).
 
-use crate::schema::{ToolConfig, ToolchainEntry, Toolchains};
+use crate::schema::{PullPolicy, ToolConfig, ToolchainEntry, Toolchains};
 
 /// The default Image Customizer container image, used in standalone mode when there is no
 /// `tailor.yaml` pinning a toolchain.
@@ -40,6 +40,7 @@ pub fn default_tool_config() -> ToolConfig {
         container: DEFAULT_IC_CONTAINER.to_owned(),
         version: None,
         tag: None,
+        pull: PullPolicy::Missing,
     }];
     ToolConfig {
         schema_version: 1,

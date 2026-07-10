@@ -20,8 +20,9 @@ Schema: [`#/$defs/ToolConfig`](../tailor.schema.json).
 
 ## toolchains
 
-The Image Customizer container(s), repo-wide. Each entry resolves to a registry **digest** pinned in
-`tailor.lock`.
+The Image Customizer container(s), repo-wide. Each entry resolves according to its pull policy.
+Registry/RepoDigest results are pinned in `tailor.lock`; local Id-only images are usable but not
+lockable.
 
 | Field | Type | Req | Notes |
 | ----- | ---- | --- | ----- |
@@ -35,6 +36,7 @@ toolchains:
     - name: ic-1.3
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"          # optional, informational; omit to track `latest`
+      pull: missing             # always | missing (default) | never
     - name: ic-1.1
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
@@ -42,6 +44,16 @@ toolchains:
 
 An image selects one with the top-level [`toolchain:`](./image-yaml.md#top-level-fields) field
 (`toolchain: ic-1.1`), or omits it to use `default`. See [ToolchainRef](./types.md#toolchainref).
+
+`pull` controls registry access:
+
+- `always` resolves from the registry and pulls before use.
+- `missing` (default) uses a local image when present, otherwise resolves and pulls. If
+  `tailor.lock` already pins a digest for the named source, the lock wins.
+- `never` requires a locked digest or a local image and never pulls.
+
+Local images with a `RepoDigest` are lockable and run as `container@sha256:…`. Local-only images
+without one run by local image `Id` and are omitted from `tailor.lock`.
 
 ## toolsDirSources
 
@@ -53,16 +65,18 @@ Named container root filesystems that tailor can export to a digest-keyed cache 
 | `name` | string | **yes** | Source name used by `toolsDir.source`. |
 | `container` | string | **yes** | Container image whose flattened root filesystem becomes the tools dir. |
 | `tag` | string | no | Defaults to `latest` when `container` has no tag or digest. |
+| `pull` | `always`\|`missing`\|`never` | no | Pull policy. Defaults to `missing`; same semantics as toolchains. |
 
 ```yaml
 toolsDirSources:
   - name: acl
     container: mcr.microsoft.com/azurelinux/base/core
     tag: "3.0"
+    pull: missing
 ```
 
 `tailor lock` pins named tools-dir source digests in `tailor.lock`. Local-only images without a
-registry digest may fail digest resolution for now. tailor never passes `--tools-dir /`.
+registry digest run by image `Id` and are not lockable. tailor never passes `--tools-dir /`.
 
 ## runtime
 
@@ -139,6 +153,7 @@ toolchains:
     - name: ic-1.3
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.3.0"
+      pull: missing
     - name: ic-1.1
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       version: "1.1.0"
@@ -147,6 +162,7 @@ toolsDirSources:
   - name: acl
     container: mcr.microsoft.com/azurelinux/base/core
     tag: "3.0"
+    pull: missing
 
 runtime:
   imageCacheDir: ./.tailor/cache

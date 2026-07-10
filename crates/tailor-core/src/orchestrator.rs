@@ -59,6 +59,19 @@ pub enum BuildProgress<'a> {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedToolchain {
+    pub ic_image_ref: String,
+    pub pull: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedToolsDirSource {
+    pub image_ref: String,
+    pub digest: String,
+    pub pull: bool,
+}
+
 /// Wires concrete adapters (a resolver and an executor) into the build pipeline.
 pub struct Orchestrator<E, R> {
     executor: E,
@@ -72,34 +85,38 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
 
     /// Plan a build: render and resolve every selected cell of every target, fingerprint it, and
     /// decide whether it is up to date against its build stamp.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "planning needs config, lock, pre-resolved images, selection, and output root"
+    )]
     pub async fn plan(
         &self,
         targets: &[Arc<Target>],
         tool: &ToolConfig,
         lock: &Lockfile,
+        toolchains: &BTreeMap<String, ResolvedToolchain>,
+        tools_dir_sources: &BTreeMap<String, ResolvedToolsDirSource>,
         selector: &Selector,
         output_dir: &Path,
     ) -> Result<BuildPlan, CoreError> {
         let mut planned = Vec::new();
         for target in targets {
             let (toolchain_id, toolchain) = toolchain_for(target, tool)?;
-            let toolchain_digest = self
-                .toolchain_digest(&toolchain_id, &toolchain, lock)
-                .await?;
+            let resolved_toolchain = resolved_toolchain(toolchains, &toolchain_id, &toolchain)?;
             for cell in cells_selected(target, selector)? {
                 let resolved = self
                     .resolver
                     .resolve(&cell.base, cell.arch, &cell.target.dir)
                     .await?;
-                let tools_dir_digest = self.tools_dir_digest(&cell, lock).await?;
+                let resolved_tools_dir = resolved_tools_dir(tools_dir_sources, &cell)?;
                 let print = fingerprint(&FingerprintInputs {
                     slug: cell.slug.as_ref(),
-                    toolchain_digest: &toolchain_digest,
+                    toolchain_digest: &resolved_toolchain.ic_image_ref,
                     base: &resolved,
                     ic_config: &cell.ic_config,
                     operation: target.definition.operation.unwrap_or_default(),
                     inject_files: target.definition.inject_files.unwrap_or(false),
-                    tools_dir_digest: tools_dir_digest.as_deref(),
+                    tools_dir_digest: resolved_tools_dir.map(|source| source.digest.as_str()),
                     extra_dependency_hashes: &[],
                     rpm_source_hashes: &[],
                 });
@@ -108,8 +125,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                 let up_to_date =
                     stamp::is_up_to_date(output_dir, cell.slug.as_ref(), print, &artifact);
                 let runtime = runtime_config(tool, lock, &target.root);
-                let tools_dir_plan =
-                    tools_dir_plan_for(&cell, tools_dir_digest.as_deref(), &runtime)?;
+                let tools_dir_plan = tools_dir_plan_for(&cell, resolved_tools_dir, &runtime)?;
                 planned.push(PlannedCell {
                     cell,
                     fingerprint: print,
@@ -133,6 +149,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         plan: &BuildPlan,
         tool: &ToolConfig,
         lock: &Lockfile,
+        toolchains: &BTreeMap<String, ResolvedToolchain>,
         workspace_root: &Path,
         output_dir: &Path,
         options: &BuildOptions,
@@ -147,17 +164,16 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                 continue;
             }
             let (toolchain_id, toolchain) = toolchain_for(&planned.cell.target, tool)?;
-            let toolchain_digest = self
-                .toolchain_digest(&toolchain_id, &toolchain, lock)
-                .await?;
+            let resolved_toolchain = resolved_toolchain(toolchains, &toolchain_id, &toolchain)?;
             let context = ExecutionContext {
                 output_dir: output_dir.to_path_buf(),
-                ic_image_ref: format!("{}@{toolchain_digest}", toolchain.container),
+                ic_image_ref: resolved_toolchain.ic_image_ref.clone(),
                 base_ref: planned.base_ref.clone(),
                 tools_dir: planned.tools_dir.clone(),
                 platform: format!("linux/{}", planned.cell.arch),
                 clone_index: options.clone_index,
                 dry_run: options.dry_run,
+                pull: resolved_toolchain.pull,
                 signer: signer_for(&planned.cell),
                 runtime: runtime.clone(),
             };
@@ -210,6 +226,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     platform: format!("linux/{}", cell.arch),
                     clone_index: None,
                     dry_run: true,
+                    pull: false,
                     signer: signer_for(&cell),
                     runtime: runtime.clone(),
                 };
@@ -222,40 +239,10 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         }
         Ok(results)
     }
-
-    async fn toolchain_digest(
-        &self,
-        id: &str,
-        toolchain: &ToolchainEntry,
-        lock: &Lockfile,
-    ) -> Result<String, CoreError> {
-        match lock.toolchain_digest(id) {
-            Some(digest) => Ok(digest.to_owned()),
-            None => Ok(self.resolver.resolve_toolchain(toolchain).await?),
-        }
-    }
-
-    async fn tools_dir_digest(
-        &self,
-        cell: &Cell,
-        lock: &Lockfile,
-    ) -> Result<Option<String>, CoreError> {
-        let Some(tools_dir) = &cell.tools_dir else {
-            return Ok(None);
-        };
-        if let Some(name) = &tools_dir.source_name
-            && let Some(digest) = lock.tools_dir_digest(name)
-        {
-            return Ok(Some(digest.to_owned()));
-        }
-        Ok(Some(
-            self.resolver.resolve_tools_dir(&tools_dir.source).await?,
-        ))
-    }
 }
 
 /// Resolve a target's toolchain to its `(name, entry)`, applying the workspace default if unset.
-fn toolchain_for(
+pub fn toolchain_for(
     target: &Target,
     tool: &ToolConfig,
 ) -> Result<(String, ToolchainEntry), CoreError> {
@@ -276,6 +263,48 @@ fn toolchain_for(
             Ok((id.clone(), lookup(id)?))
         }
     }
+}
+
+pub fn toolchain_key(entry: &ToolchainEntry) -> String {
+    if has_tag_or_digest(&entry.container) {
+        return entry.container.clone();
+    }
+    format!("{}:{}", entry.container, entry.effective_tag())
+}
+
+pub fn tools_dir_key(source: &ToolsDirSourceInline) -> String {
+    if has_tag_or_digest(&source.container) {
+        return source.container.clone();
+    }
+    format!("{}:{}", source.container, source.effective_tag())
+}
+
+fn resolved_toolchain<'a>(
+    toolchains: &'a BTreeMap<String, ResolvedToolchain>,
+    id: &str,
+    entry: &ToolchainEntry,
+) -> Result<&'a ResolvedToolchain, CoreError> {
+    let key = toolchain_key(entry);
+    toolchains
+        .get(&key)
+        .ok_or_else(|| CoreError::MissingResolvedToolchain {
+            id: id.to_owned(),
+            reference: key,
+        })
+}
+
+fn resolved_tools_dir<'a>(
+    sources: &'a BTreeMap<String, ResolvedToolsDirSource>,
+    cell: &Cell,
+) -> Result<Option<&'a ResolvedToolsDirSource>, CoreError> {
+    let Some(tools_dir) = &cell.tools_dir else {
+        return Ok(None);
+    };
+    let key = tools_dir_key(&tools_dir.source);
+    sources
+        .get(&key)
+        .map(Some)
+        .ok_or(CoreError::MissingResolvedToolsDir { reference: key })
 }
 
 fn resolve_tools_dir(target: &Target) -> Result<Option<CellToolsDir>, CoreError> {
@@ -341,14 +370,14 @@ fn tools_dir_preview_enabled(config: &serde_yaml_ng::Value) -> bool {
 
 fn tools_dir_plan_for(
     cell: &Cell,
-    digest: Option<&str>,
+    resolved: Option<&ResolvedToolsDirSource>,
     runtime: &RuntimeConfig,
 ) -> Result<Option<ToolsDirPlan>, CoreError> {
     let Some(tools_dir) = &cell.tools_dir else {
         return Ok(None);
     };
-    let resolved_digest = digest.map(str::to_owned);
-    let cache_key = resolved_digest.as_deref().map_or_else(
+    let resolved_digest = resolved.map(|source| source.digest.as_str());
+    let cache_key = resolved_digest.map_or_else(
         || unpinned_tools_dir_key(&tools_dir.source),
         sanitize_digest,
     );
@@ -376,22 +405,16 @@ fn tools_dir_plan_for(
         }
     };
     Ok(Some(ToolsDirPlan {
-        image_ref: tools_dir_image_ref(&tools_dir.source, resolved_digest.as_deref()),
-        digest: resolved_digest.unwrap_or(cache_key),
+        image_ref: resolved.map_or_else(
+            || tools_dir_key(&tools_dir.source),
+            |source| source.image_ref.clone(),
+        ),
+        digest: resolved_digest.map_or_else(|| cache_key.clone(), str::to_owned),
+        pull: resolved.is_some_and(|source| source.pull),
         cache_dir,
         mount_dir,
         access: tools_dir.access,
     }))
-}
-
-fn tools_dir_image_ref(source: &ToolsDirSourceInline, digest: Option<&str>) -> String {
-    match digest {
-        Some(digest) if digest.starts_with("sha256:") => {
-            format!("{}@{digest}", oci_repository(&source.container))
-        }
-        _ if has_tag_or_digest(&source.container) => source.container.clone(),
-        _ => format!("{}:{}", source.container, source.effective_tag()),
-    }
 }
 
 fn sanitize_digest(digest: &str) -> String {
@@ -785,16 +808,47 @@ mod tests {
         .unwrap()
     }
 
+    fn resolved_toolchains(tool: &ToolConfig) -> BTreeMap<String, ResolvedToolchain> {
+        let entry = tool.toolchains.get(&tool.toolchains.default).unwrap();
+        BTreeMap::from([(
+            toolchain_key(entry),
+            ResolvedToolchain {
+                ic_image_ref: "registry.example/imagecustomizer@sha256:faketoolchain".to_owned(),
+                pull: true,
+            },
+        )])
+    }
+
+    fn resolved_tools_dir_sources() -> BTreeMap<String, ResolvedToolsDirSource> {
+        BTreeMap::from([(
+            "registry.example/tools:latest".to_owned(),
+            ResolvedToolsDirSource {
+                image_ref: "registry.example/tools@sha256:faketoolsdir".to_owned(),
+                digest: "sha256:faketoolsdir".to_owned(),
+                pull: true,
+            },
+        )])
+    }
+
     #[tokio::test]
     async fn plans_all_cells_as_stale() {
         let orchestrator = Orchestrator::new(FakeExecutor::default(), FakeResolver);
         let (_tmp, target) = mini_target();
         let tool = tool_config();
+        let toolchains = resolved_toolchains(&tool);
         let lock = Lockfile::default();
         let out = TempDir::new().unwrap();
 
         let plan = orchestrator
-            .plan(&[target], &tool, &lock, &Selector::default(), out.path())
+            .plan(
+                &[target],
+                &tool,
+                &lock,
+                &toolchains,
+                &BTreeMap::new(),
+                &Selector::default(),
+                out.path(),
+            )
             .await
             .unwrap();
 
@@ -811,11 +865,20 @@ mod tests {
         let orchestrator = Orchestrator::new(executor, FakeResolver);
         let (_tmp, target) = mini_target();
         let tool = tool_config();
+        let toolchains = resolved_toolchains(&tool);
         let lock = Lockfile::default();
         let out = TempDir::new().unwrap();
 
         let plan = orchestrator
-            .plan(&[target], &tool, &lock, &Selector::default(), out.path())
+            .plan(
+                &[target],
+                &tool,
+                &lock,
+                &toolchains,
+                &BTreeMap::new(),
+                &Selector::default(),
+                out.path(),
+            )
             .await
             .unwrap();
         let results = orchestrator
@@ -823,6 +886,7 @@ mod tests {
                 &plan,
                 &tool,
                 &lock,
+                &toolchains,
                 out.path(),
                 out.path(),
                 &BuildOptions::default(),
@@ -843,7 +907,15 @@ mod tests {
         // up-to-date check fails and every cell stays stale.
         let (_tmp2, target2) = mini_target();
         let replan = orchestrator
-            .plan(&[target2], &tool, &lock, &Selector::default(), out.path())
+            .plan(
+                &[target2],
+                &tool,
+                &lock,
+                &toolchains,
+                &BTreeMap::new(),
+                &Selector::default(),
+                out.path(),
+            )
             .await
             .unwrap();
         assert_eq!(replan.cells.len(), 4);
@@ -1201,11 +1273,15 @@ mod tests {
                 - tools-dir
         "});
         let out = TempDir::new().unwrap();
+        let tool = tool_config();
+        let toolchains = resolved_toolchains(&tool);
         let err = orchestrator
             .plan(
                 &[target],
-                &tool_config(),
+                &tool,
                 &Lockfile::default(),
+                &toolchains,
+                &resolved_tools_dir_sources(),
                 &Selector::default(),
                 out.path(),
             )

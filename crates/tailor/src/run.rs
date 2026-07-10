@@ -2,21 +2,24 @@
 //! and implements each CLI verb (`meta/docs/design.md` §11).
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry},
+    future::Future,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use serde::Serialize;
 use tailor_config::{
-    Arch, BaseSource, OutputFormat, OutputSpec, RenderedCell, ToolConfig, Workspace, discover,
-    expand, find_manifest, merge_plan, render_image, write_golden,
+    Arch, BaseSource, OutputFormat, OutputSpec, PullPolicy, RenderedCell, ToolConfig,
+    ToolchainEntry, ToolsDirSourceInline, Workspace, discover, expand, find_manifest, merge_plan,
+    render_image, write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, Cell, CoreError, Executor, LockedBase, LockedContainer, Lockfile,
-    MissingPrerequisite, Orchestrator, ResolvedBase, Selector, SignError, Signer,
-    SigningRequirement, SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download,
-    is_valid_var_name, runtime_config, summarize, verify,
+    BaseResolver, BuildOptions, Cell, ContainerRuntime, CoreError, Executor, LockedBase,
+    LockedContainer, Lockfile, MissingPrerequisite, Orchestrator, ResolvedBase, ResolvedToolchain,
+    ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement, SlotSource,
+    SlotSummary, Target, ado_matrix, cells_selected, download, is_valid_var_name, runtime_config,
+    summarize, toolchain_for, toolchain_key, tools_dir_key, verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
@@ -124,8 +127,8 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             MatrixFormat::Slugs,
             None,
         ),
-        Command::Resolve(args) => resolve_verb(&workspace, &args.images).await,
-        Command::Lock | Command::Update => lock(&workspace).await,
+        Command::Resolve(args) => resolve_verb(&workspace, &args.images, &engine).await,
+        Command::Lock | Command::Update => lock(&workspace, &engine).await,
         Command::Build(args) => build(&workspace, args, &engine, &logging).await,
         Command::Clean(args) => {
             clean(
@@ -502,56 +505,276 @@ fn referenced_slots(workspace: &Workspace) -> Result<BTreeSet<String>, AppError>
 
 // ───────────────────────────── network verbs (registry resolution) ─────────────────────────────
 
-async fn resolve_verb(workspace: &Workspace, names: &[String]) -> Result<(), AppError> {
+async fn resolve_verb(
+    workspace: &Workspace,
+    names: &[String],
+    engine: &EngineOverride,
+) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, names)?;
-    let lock = build_lock(&tool, &targets, &OciResolver::new()).await?;
+    let runtime = establish_runtime(engine, &tool).await?;
+    let lock = build_lock(&tool, &targets, &runtime, &OciResolver::new()).await?;
     let yaml = serde_yaml_ng::to_string(&lock)
         .map_err(|e| AppError::Message(format!("serialize lock: {e}")))?;
     print!("{yaml}");
     Ok(())
 }
 
-async fn lock(workspace: &Workspace) -> Result<(), AppError> {
+async fn lock(workspace: &Workspace, engine: &EngineOverride) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, &[])?;
-    let lock = build_lock(&tool, &targets, &OciResolver::new()).await?;
+    let runtime = establish_runtime(engine, &tool).await?;
+    let lock = build_lock(&tool, &targets, &runtime, &OciResolver::new()).await?;
     let path = workspace.root.join(LOCK_FILE);
     lock.write(&path)?;
     println!("wrote {}", path.display());
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedContainerImage {
+    image_ref: String,
+    digest: String,
+    pull: bool,
+    lock_digest: Option<String>,
+}
+
+async fn resolve_container_image<R, F, Fut>(
+    id: Option<&str>,
+    reference: &str,
+    pull: PullPolicy,
+    runtime: &R,
+    resolve_digest: F,
+    lock_digest: Option<&str>,
+) -> Result<ResolvedContainerImage, AppError>
+where
+    R: ContainerRuntime,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<String, tailor_core::ResolveError>>,
+{
+    if let Some(digest) = lock_digest {
+        return Ok(ResolvedContainerImage {
+            image_ref: digest_ref(reference, digest),
+            digest: digest.to_owned(),
+            pull: true,
+            lock_digest: Some(digest.to_owned()),
+        });
+    }
+
+    match pull {
+        PullPolicy::Always => {
+            let digest = resolve_digest().await?;
+            Ok(ResolvedContainerImage {
+                image_ref: digest_ref(reference, &digest),
+                digest: digest.clone(),
+                pull: true,
+                lock_digest: Some(digest),
+            })
+        }
+        PullPolicy::Missing | PullPolicy::Never => {
+            match local_container_image(runtime, reference).await? {
+                Some(local) => Ok(local),
+                None if pull == PullPolicy::Missing => {
+                    let digest = resolve_digest().await?;
+                    Ok(ResolvedContainerImage {
+                        image_ref: digest_ref(reference, &digest),
+                        digest: digest.clone(),
+                        pull: true,
+                        lock_digest: Some(digest),
+                    })
+                }
+                None => {
+                    let name =
+                        id.map_or_else(|| reference.to_owned(), std::borrow::ToOwned::to_owned);
+                    Err(CoreError::Resolve(tailor_core::ResolveError::Other(format!(
+                        "image `{reference}` (source `{name}`) not found locally and pull policy is never"
+                    )))
+                    .into())
+                }
+            }
+        }
+    }
+}
+
+async fn local_container_image<R: ContainerRuntime>(
+    runtime: &R,
+    reference: &str,
+) -> Result<Option<ResolvedContainerImage>, AppError> {
+    let Some(image) = runtime.inspect_image(reference).await? else {
+        return Ok(None);
+    };
+    if let Some(repo_digest) = image.repo_digests.first()
+        && let Some(digest) = digest_from_repo_digest(repo_digest)
+    {
+        return Ok(Some(ResolvedContainerImage {
+            image_ref: digest_ref(reference, digest),
+            digest: digest.to_owned(),
+            pull: false,
+            lock_digest: Some(digest.to_owned()),
+        }));
+    }
+    Ok(Some(ResolvedContainerImage {
+        image_ref: image.id.clone(),
+        digest: image.id,
+        pull: false,
+        lock_digest: None,
+    }))
+}
+
+fn digest_ref(reference: &str, digest: &str) -> String {
+    format!("{}@{digest}", repository(reference))
+}
+
+fn digest_from_repo_digest(reference: &str) -> Option<&str> {
+    reference.split_once('@').map(|(_, digest)| digest)
+}
+
+fn repository(reference: &str) -> &str {
+    let without_digest = reference.split('@').next().unwrap_or(reference);
+    match without_digest.rfind('/') {
+        Some(slash) => match without_digest[slash..].find(':') {
+            Some(colon) => &without_digest[..slash + colon],
+            None => without_digest,
+        },
+        None => without_digest.split(':').next().unwrap_or(without_digest),
+    }
+}
+
+async fn resolve_toolchain_ref<R: ContainerRuntime, S: BaseResolver>(
+    id: &str,
+    entry: &ToolchainEntry,
+    runtime: &R,
+    resolver: &S,
+    lock: &Lockfile,
+) -> Result<ResolvedContainerImage, AppError> {
+    let reference = toolchain_key(entry);
+    resolve_container_image(
+        Some(id),
+        &reference,
+        entry.pull,
+        runtime,
+        || resolver.resolve_toolchain(entry),
+        lock.toolchain_digest(id),
+    )
+    .await
+}
+
+async fn resolve_tools_dir_ref<R: ContainerRuntime, S: BaseResolver>(
+    id: Option<&str>,
+    source: &ToolsDirSourceInline,
+    runtime: &R,
+    resolver: &S,
+    lock: &Lockfile,
+) -> Result<ResolvedContainerImage, AppError> {
+    let reference = tools_dir_key(source);
+    resolve_container_image(
+        id,
+        &reference,
+        source.pull,
+        runtime,
+        || resolver.resolve_tools_dir(source),
+        id.and_then(|id| lock.tools_dir_digest(id)),
+    )
+    .await
+}
+
+async fn resolve_toolchains<R: ContainerRuntime, S: BaseResolver>(
+    targets: &[Arc<Target>],
+    tool: &ToolConfig,
+    runtime: &R,
+    resolver: &S,
+    lock: &Lockfile,
+) -> Result<BTreeMap<String, ResolvedToolchain>, AppError> {
+    let mut images = BTreeMap::new();
+    for target in targets {
+        let (id, entry) = toolchain_for(target, tool)?;
+        if let Entry::Vacant(slot) = images.entry(toolchain_key(&entry)) {
+            let image = resolve_toolchain_ref(&id, &entry, runtime, resolver, lock).await?;
+            slot.insert(ResolvedToolchain {
+                ic_image_ref: image.image_ref,
+                pull: image.pull,
+            });
+        }
+    }
+    Ok(images)
+}
+
+async fn resolve_tools_dir_sources<R: ContainerRuntime, S: BaseResolver>(
+    targets: &[Arc<Target>],
+    runtime: &R,
+    resolver: &S,
+    lock: &Lockfile,
+) -> Result<BTreeMap<String, ResolvedToolsDirSource>, AppError> {
+    let mut images = BTreeMap::new();
+    for target in targets {
+        for cell in cells_selected(target, &Selector::default())? {
+            let Some(tools_dir) = &cell.tools_dir else {
+                continue;
+            };
+            if let Entry::Vacant(slot) = images.entry(tools_dir_key(&tools_dir.source)) {
+                let image = resolve_tools_dir_ref(
+                    tools_dir.source_name.as_deref(),
+                    &tools_dir.source,
+                    runtime,
+                    resolver,
+                    lock,
+                )
+                .await?;
+                slot.insert(ResolvedToolsDirSource {
+                    image_ref: image.image_ref,
+                    digest: image.digest,
+                    pull: image.pull,
+                });
+            }
+        }
+    }
+    Ok(images)
+}
+
 async fn build_lock(
     tool: &ToolConfig,
     targets: &[Arc<Target>],
+    runtime: &impl ContainerRuntime,
     resolver: &OciResolver,
 ) -> Result<Lockfile, AppError> {
     let mut lock = Lockfile::default();
     for entry in &tool.toolchains.entries {
-        let digest = resolver.resolve_toolchain(entry).await?;
-        lock.toolchains.insert(
-            entry.name.clone(),
-            LockedContainer {
-                container: entry.container.clone(),
-                version: entry.version.as_ref().map(ToString::to_string),
-                tag: Some(entry.effective_tag()),
-                digest,
-            },
-        );
+        let image =
+            resolve_toolchain_ref(&entry.name, entry, runtime, resolver, &Lockfile::default())
+                .await?;
+        if let Some(digest) = image.lock_digest {
+            lock.toolchains.insert(
+                entry.name.clone(),
+                LockedContainer {
+                    container: entry.container.clone(),
+                    version: entry.version.as_ref().map(ToString::to_string),
+                    tag: Some(entry.effective_tag()),
+                    digest,
+                },
+            );
+        }
     }
     for source in &tool.tools_dir_sources {
         let inline = source.inline();
-        let digest = resolver.resolve_tools_dir(&inline).await?;
-        lock.tools_dirs.insert(
-            source.name.clone(),
-            LockedContainer {
-                container: source.container.clone(),
-                version: None,
-                tag: Some(source.effective_tag()),
-                digest,
-            },
-        );
+        let image = resolve_tools_dir_ref(
+            Some(&source.name),
+            &inline,
+            runtime,
+            resolver,
+            &Lockfile::default(),
+        )
+        .await?;
+        if let Some(digest) = image.lock_digest {
+            lock.tools_dirs.insert(
+                source.name.clone(),
+                LockedContainer {
+                    container: source.container.clone(),
+                    version: None,
+                    tag: Some(source.effective_tag()),
+                    digest,
+                },
+            );
+        }
     }
     for target in targets {
         for cell in render_image(&target.definition, &target.dir)? {
@@ -644,14 +867,22 @@ async fn build(
 
     // A real build contacts the engine: resolve it and fail fast now if it is missing or
     // unreachable (`meta/docs/container-runtimes.md` §4-§5).
-    let orchestrator = Orchestrator::new(
-        IcExecutor::new(establish_runtime(engine, &tool).await?),
-        OciResolver::new(),
-    );
-
+    let runtime = establish_runtime(engine, &tool).await?;
+    let resolver = OciResolver::new();
     let lock = Lockfile::read(&workspace.root.join(LOCK_FILE))?;
+    let toolchains = resolve_toolchains(&targets, &tool, &runtime, &resolver, &lock).await?;
+    let tools_dir_sources = resolve_tools_dir_sources(&targets, &runtime, &resolver, &lock).await?;
+    let orchestrator = Orchestrator::new(IcExecutor::new(runtime), resolver);
     let plan = orchestrator
-        .plan(&targets, &tool, &lock, &selection, &output_dir)
+        .plan(
+            &targets,
+            &tool,
+            &lock,
+            &toolchains,
+            &tools_dir_sources,
+            &selection,
+            &output_dir,
+        )
         .await?;
     let stale = plan.stale().count();
 
@@ -697,6 +928,7 @@ async fn build(
                 &plan,
                 &tool,
                 &lock,
+                &toolchains,
                 &workspace.root,
                 &output_dir,
                 &options,
@@ -1530,10 +1762,7 @@ params:
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LogOverrides, MatrixEntry, apply_log_overrides, describe_base, describe_toolchains,
-        format_bytes, format_duration, resolve_image_cache_dir, resolve_log_dir, status_line,
-    };
+    use super::*;
 
     use std::{
         collections::BTreeMap,
@@ -1542,6 +1771,243 @@ mod tests {
     };
 
     use tailor_config::{AzureLinuxBase, BaseSource, OciBase, defaults::default_tool_config};
+    use tailor_core::{ContainerConfig, ContainerResult, ExecError, LocalImage};
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Debug, Clone, Default)]
+    struct MockRuntime {
+        image: Option<LocalImage>,
+    }
+
+    impl ContainerRuntime for MockRuntime {
+        async fn pull_image(&self, _reference: &str) -> Result<(), ExecError> {
+            Ok(())
+        }
+
+        async fn inspect_image(&self, _reference: &str) -> Result<Option<LocalImage>, ExecError> {
+            Ok(self.image.clone())
+        }
+
+        async fn create_and_run(
+            &self,
+            _config: ContainerConfig,
+            _cancel: CancellationToken,
+        ) -> Result<ContainerResult, ExecError> {
+            Err(ExecError::Other("not used".to_owned()))
+        }
+
+        async fn daemon_info(&self) -> Result<tailor_core::DaemonInfo, ExecError> {
+            Ok(tailor_core::DaemonInfo::default())
+        }
+
+        async fn export_container(
+            &self,
+            _image_ref: &str,
+            _platform: &str,
+            _pull: bool,
+            _dest_dir: &Path,
+            _cancel: CancellationToken,
+        ) -> Result<(), ExecError> {
+            Err(ExecError::Other("not used".to_owned()))
+        }
+    }
+
+    fn local_entry(container: &str, pull: PullPolicy) -> ToolchainEntry {
+        ToolchainEntry {
+            name: "ic".to_owned(),
+            container: container.to_owned(),
+            version: None,
+            tag: Some("local".to_owned()),
+            pull,
+        }
+    }
+
+    fn local_image(repo_digests: Vec<String>) -> LocalImage {
+        LocalImage {
+            id: "sha256:localid".to_owned(),
+            repo_digests,
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_uses_local_toolchain_repo_digest_without_pull() {
+        let runtime = MockRuntime {
+            image: Some(local_image(vec![
+                "registry.example/ic@sha256:localdigest".to_owned(),
+            ])),
+        };
+
+        let resolved = resolve_toolchain_ref(
+            "ic",
+            &local_entry("registry.example/ic", PullPolicy::Missing),
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolved.image_ref, "registry.example/ic@sha256:localdigest");
+        assert_eq!(resolved.lock_digest.as_deref(), Some("sha256:localdigest"));
+        assert!(!resolved.pull);
+    }
+
+    #[tokio::test]
+    async fn missing_uses_local_toolchain_id_without_locking() {
+        let runtime = MockRuntime {
+            image: Some(local_image(Vec::new())),
+        };
+
+        let resolved = resolve_toolchain_ref(
+            "ic",
+            &local_entry("acl-imagecustomizer", PullPolicy::Missing),
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolved.image_ref, "sha256:localid");
+        assert_eq!(resolved.lock_digest, None);
+        assert!(!resolved.pull);
+    }
+
+    #[tokio::test]
+    async fn missing_prefers_a_locked_digest_over_the_local_copy() {
+        let runtime = MockRuntime {
+            image: Some(local_image(vec![
+                "registry.example/ic@sha256:localdigest".to_owned(),
+            ])),
+        };
+        let mut lock = Lockfile::default();
+        lock.toolchains.insert(
+            "ic".to_owned(),
+            LockedContainer {
+                container: "registry.example/ic".to_owned(),
+                version: None,
+                tag: Some("local".to_owned()),
+                digest: "sha256:locked".to_owned(),
+            },
+        );
+
+        let resolved = resolve_toolchain_ref(
+            "ic",
+            &local_entry("registry.example/ic", PullPolicy::Missing),
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &lock,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolved.image_ref, "registry.example/ic@sha256:locked");
+        assert!(resolved.pull);
+    }
+
+    #[tokio::test]
+    async fn missing_resolves_absent_toolchain_from_registry() {
+        let runtime = MockRuntime::default();
+
+        let resolved = resolve_toolchain_ref(
+            "ic",
+            &local_entry("registry.example/ic", PullPolicy::Missing),
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resolved.image_ref,
+            "registry.example/ic@sha256:faketoolchain"
+        );
+        assert_eq!(
+            resolved.lock_digest.as_deref(),
+            Some("sha256:faketoolchain")
+        );
+        assert!(resolved.pull);
+    }
+
+    #[tokio::test]
+    async fn never_errors_when_toolchain_is_absent_locally() {
+        let runtime = MockRuntime::default();
+
+        let err = resolve_toolchain_ref(
+            "ic",
+            &local_entry("acl-imagecustomizer", PullPolicy::Never),
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("not found locally and pull policy is never"),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_dir_missing_uses_local_image_id_without_locking() {
+        let runtime = MockRuntime {
+            image: Some(local_image(Vec::new())),
+        };
+        let source = ToolsDirSourceInline {
+            container: "acl-tools".to_owned(),
+            tag: Some("local".to_owned()),
+            pull: PullPolicy::Missing,
+        };
+
+        let resolved = resolve_tools_dir_ref(
+            Some("acl"),
+            &source,
+            &runtime,
+            &tailor_core::testing::FakeResolver,
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolved.image_ref, "sha256:localid");
+        assert_eq!(resolved.lock_digest, None);
+        assert!(!resolved.pull);
+    }
+
+    #[tokio::test]
+    async fn build_lock_skips_local_image_ids_without_repo_digests() {
+        let runtime = MockRuntime {
+            image: Some(local_image(Vec::new())),
+        };
+        let tool: ToolConfig = serde_yaml_ng::from_str(
+            r"
+schemaVersion: 1
+toolchains:
+  default: ic
+  entries:
+    - name: ic
+      container: acl-imagecustomizer
+      tag: local
+      pull: never
+toolsDirSources:
+  - name: acl
+    container: acl-tools
+    tag: local
+    pull: never
+",
+        )
+        .unwrap();
+
+        let lock = build_lock(&tool, &[], &runtime, &OciResolver::new())
+            .await
+            .unwrap();
+
+        assert!(lock.toolchains.is_empty());
+        assert!(lock.tools_dirs.is_empty());
+    }
 
     #[test]
     fn status_line_right_aligns_and_colors_the_verb() {

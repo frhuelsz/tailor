@@ -262,7 +262,11 @@ impl<R: ContainerRuntime> IcExecutor<R> {
         log_file: Option<&PathBuf>,
         cancel: CancellationToken,
     ) -> Result<ContainerResult, ExecError> {
-        self.runtime.pull_image(&context.ic_image_ref).await?;
+        // Pull policy resolution happens in the composition root; local-only images run without a
+        // registry pull.
+        if context.pull {
+            self.runtime.pull_image(&context.ic_image_ref).await?;
+        }
         self.runtime
             .create_and_run(
                 ContainerConfig {
@@ -445,6 +449,7 @@ async fn prepare_tools_dir<R: ContainerRuntime>(
             .export_container(
                 &plan.image_ref,
                 &context.platform,
+                plan.pull,
                 &plan.cache_dir,
                 cancel.clone(),
             )
@@ -667,6 +672,7 @@ mod tests {
             platform: "linux/amd64".to_owned(),
             clone_index: None,
             dry_run: true,
+            pull: true,
             signer: None,
             runtime: RuntimeConfig::default(),
         }
@@ -675,11 +681,21 @@ mod tests {
     #[derive(Debug, Default, Clone)]
     struct ExportRuntime {
         exports: Arc<Mutex<Vec<PathBuf>>>,
+        pulls: Arc<Mutex<Vec<String>>>,
+        runs: Arc<Mutex<usize>>,
     }
 
     impl ContainerRuntime for ExportRuntime {
-        async fn pull_image(&self, _reference: &str) -> Result<(), ExecError> {
+        async fn pull_image(&self, reference: &str) -> Result<(), ExecError> {
+            self.pulls.lock().unwrap().push(reference.to_owned());
             Ok(())
+        }
+
+        async fn inspect_image(
+            &self,
+            _reference: &str,
+        ) -> Result<Option<tailor_core::LocalImage>, ExecError> {
+            Ok(None)
         }
 
         async fn create_and_run(
@@ -687,7 +703,12 @@ mod tests {
             _config: ContainerConfig,
             _cancel: CancellationToken,
         ) -> Result<ContainerResult, ExecError> {
-            Err(ExecError::Other("not used".to_owned()))
+            *self.runs.lock().unwrap() += 1;
+            Ok(ContainerResult {
+                exit_code: 0,
+                logs: String::new(),
+                failure_dump: None,
+            })
         }
 
         async fn daemon_info(&self) -> Result<tailor_core::DaemonInfo, ExecError> {
@@ -698,6 +719,7 @@ mod tests {
             &self,
             _image_ref: &str,
             _platform: &str,
+            _pull: bool,
             dest_dir: &Path,
             _cancel: CancellationToken,
         ) -> Result<(), ExecError> {
@@ -722,6 +744,7 @@ mod tests {
         context.tools_dir = Some(tailor_core::ToolsDirPlan {
             image_ref: "registry.example/tools@sha256:abc".to_owned(),
             digest: "sha256:abc".to_owned(),
+            pull: true,
             cache_dir: root.path().join("cache/tools-dirs/sha256_abc"),
             mount_dir: root.path().join("cache/tools-dirs/sha256_abc"),
             access: Access::Ro,
@@ -740,6 +763,30 @@ mod tests {
                 .join("cache/tools-dirs/sha256_abc/tdnf")
                 .exists()
         );
+    }
+
+    #[tokio::test]
+    async fn run_ic_skips_pull_when_context_pull_is_false() {
+        let runtime = ExportRuntime::default();
+        let executor = IcExecutor::new(runtime.clone());
+        let mut context = dry_run_context();
+        context.dry_run = false;
+        context.pull = false;
+
+        executor
+            .run_ic(
+                &dry_run_cell(),
+                &context,
+                vec!["--version".to_owned()],
+                &[],
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert!(runtime.pulls.lock().unwrap().is_empty());
+        assert_eq!(*runtime.runs.lock().unwrap(), 1);
     }
 
     // A dry-run renders the invocation without ever calling the runtime; `NoopRuntime` (whose

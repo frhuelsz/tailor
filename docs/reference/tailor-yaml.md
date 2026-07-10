@@ -12,6 +12,7 @@ toolchains:
       container: mcr.microsoft.com/azurelinux/imagecustomizer
       # version: "1.3.0"
       # tag: "1.3.0"
+      # pull: missing
 
 defaults:
   outputs:
@@ -22,8 +23,8 @@ defaults:
 | --- | --- | --- | --- |
 | `schemaVersion` | integer | yes | Current value: `1`. |
 | `toolchains.default` | string | yes | Default toolchain name for images that omit `toolchain:`. |
-| `toolchains.entries` | list of `{name, container, version?, tag?}` | yes | Named toolchain definitions. Each `name` must be unique. `tag` defaults to `version`, else `latest`. |
-| `toolsDirSources` | list of `{name, container, tag?}` | no | Named tools-dir sources. Each `name` must be unique. `tag` defaults to `latest`. Images opt in with `toolsDir.source`. |
+| `toolchains.entries` | list of `{name, container, version?, tag?, pull?}` | yes | Named toolchain definitions. Each `name` must be unique. `tag` defaults to `version`, else `latest`; `pull` defaults to `missing`. |
+| `toolsDirSources` | list of `{name, container, tag?, pull?}` | no | Named tools-dir sources. Each `name` must be unique. `tag` defaults to `latest`; `pull` defaults to `missing`. Images opt in with `toolsDir.source`. |
 | `runtime.engine` | enum | no | Container engine: `docker` (default), `podman`, or `auto`. See [Select a container engine](../how-to/select-a-container-engine.md). |
 | `runtime.host` | string | no | Explicit engine endpoint (`unix://…`, a bare socket path, or `tcp://…`), overriding the engine default and `DOCKER_HOST` / `CONTAINER_HOST`. |
 | `runtime.privileged` | bool | no | Default `true`; IC requires privileged container execution. |
@@ -42,6 +43,19 @@ defaults:
 
 Runtime mounts expose only the workspace (read-only), tailor-owned writable carve-outs, and declared
 out-of-workspace inputs. The old whole-host `-v /:/host` bind is never emitted.
+
+## Pull policy
+
+Toolchains and tools-dir sources support `pull: always | missing | never`:
+
+- `always` resolves the image from its registry and pulls before use.
+- `missing` (default) uses a local image when present, otherwise resolves and pulls from the registry.
+  If `tailor.lock` already pins a digest for the named source, the locked digest wins.
+- `never` requires a locked digest or a local image and never contacts the registry.
+
+Local images that expose a `RepoDigest` are lockable and run as `container@sha256:…`. Local-only
+images without a `RepoDigest` run by their image `Id` and are intentionally omitted from
+`tailor.lock`.
 
 ```yaml
 runtime:
@@ -67,6 +81,7 @@ toolsDirSources:
   - name: acl
     container: mcr.microsoft.com/azurelinux/base/core
     tag: "3.0"
+    pull: missing
   - name: fedora
     container: quay.io/fedora/fedora
     tag: "42"
@@ -77,9 +92,10 @@ toolsDirSources:
 | `name` | string | yes | Unique source name used by image `toolsDir.source`. |
 | `container` | string | yes | Container image whose flattened root filesystem becomes the tools dir. |
 | `tag` | string | no | Registry tag. Defaults to `latest` when `container` has no tag or digest. |
+| `pull` | `always`\|`missing`\|`never` | no | Pull policy. Defaults to `missing`; see [Pull policy](#pull-policy). |
 
-Run `tailor lock` to pin named tools-dir source digests in `tailor.lock`. Local-only images without a
-registry digest may fail digest resolution for now.
+Run `tailor lock` to pin named tools-dir source digests in `tailor.lock`. Local-only tools-dir
+images without a registry digest are usable by local image `Id`, but are not lockable.
 
 ## Base-image catalogue
 

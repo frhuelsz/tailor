@@ -5,8 +5,8 @@ Reusable types referenced by [`tailor.yaml`](./tailor-yaml.md), [`image.yaml`](.
 
 ## ToolchainEntry
 
-A pinned Image Customizer container. The resolved registry **digest** (not the tag) is written to
-`tailor.lock`.
+A pinned Image Customizer container. Registry/RepoDigest results are written to `tailor.lock`;
+local Id-only images are usable but not lockable.
 
 | Field | Type | Req | Notes |
 | ----- | ---- | --- | ----- |
@@ -14,6 +14,7 @@ A pinned Image Customizer container. The resolved registry **digest** (not the t
 | `container` | string | **yes** | Registry path, e.g. `mcr.microsoft.com/azurelinux/imagecustomizer`. |
 | `version` | string (semver) | no | Optional, informational IC version (tailor does not gate IC versions). Used as the pull tag when `tag` is absent. |
 | `tag` | string | no | Registry tag pulled. Default = `version` (MCR publishes unprefixed tags, e.g. `:1.3.0`), else `latest` when neither is set. |
+| `pull` | `always`\|`missing`\|`never` | no | Pull policy. Defaults to `missing`; `never` requires a locked digest or local image. |
 
 ## ToolchainRef
 
@@ -27,6 +28,7 @@ How an [image](./image-yaml.md) selects its toolchain (the `toolchain:` field). 
     name: ic-inline
     container: mcr.microsoft.com/azurelinux/imagecustomizer
     version: "1.3.0"
+    pull: missing
   ```
 - **omitted** — use the workspace `toolchains.default`, or tailor's built-in default when standalone.
 

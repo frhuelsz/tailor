@@ -12,6 +12,10 @@
 > **Layering (tailor ↔ IC ↔ ACL):** `--tools-dir` is an *IC* capability. tailor wraps it generically
 > for any distro base (Azure Linux, Fedora, …); tailor has **no ACL-specific knowledge**. ACL just
 > happens to be the common case that needs it.
+>
+> **2026-07-09 update:** the `pull:` policy and local-image-`Id` machinery described below is now
+> implemented for tools-dir sources as well as toolchains. Local images with a `RepoDigest` are
+> lockable; local-only images without one run by image `Id` and are omitted from `tailor.lock`.
 
 ---
 

@@ -87,6 +87,8 @@ pub struct ToolchainEntry {
     pub version: Option<Version>,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
+    pub pull: PullPolicy,
 }
 
 impl ToolchainEntry {
@@ -111,6 +113,8 @@ pub struct ToolsDirSource {
     pub container: String,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
+    pub pull: PullPolicy,
 }
 
 impl ToolsDirSource {
@@ -125,6 +129,7 @@ impl ToolsDirSource {
         ToolsDirSourceInline {
             container: self.container.clone(),
             tag: self.tag.clone(),
+            pull: self.pull,
         }
     }
 }
@@ -136,6 +141,8 @@ pub struct ToolsDirSourceInline {
     pub container: String,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
+    pub pull: PullPolicy,
 }
 
 impl ToolsDirSourceInline {
@@ -244,6 +251,15 @@ pub enum Access {
     #[default]
     Ro,
     Rw,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PullPolicy {
+    Always,
+    #[default]
+    Missing,
+    Never,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -692,8 +708,7 @@ pub type AxisValues = IndexMap<String, Vec<String>>;
 
 #[cfg(test)]
 mod tests {
-    use super::{Access, BaseImageCatalogue, Engine, Runtime, Toolchains};
-    use super::{SigningBackend, SigningConfig, SigningRef, resolve_signing};
+    use super::*;
 
     #[test]
     fn engine_deserializes_lowercase_tokens() {
@@ -737,6 +752,52 @@ mod tests {
         let runtime: Runtime = serde_yaml_ng::from_str("privileged: true\n").unwrap();
         assert_eq!(runtime.engine, None);
         assert_eq!(runtime.host, None);
+    }
+
+    #[test]
+    fn pull_policy_parses_for_toolchains_and_tools_dir_sources() {
+        let tool: ToolConfig = serde_yaml_ng::from_str(
+            r"
+schemaVersion: 1
+toolchains:
+  default: ic
+  entries:
+    - name: ic
+      container: registry.example/ic
+    - name: pinned
+      container: registry.example/pinned
+      pull: always
+    - name: local
+      container: acl-imagecustomizer
+      tag: local
+      pull: never
+toolsDirSources:
+  - name: acl
+    container: acl-tools
+  - name: local-tools
+    container: acl-tools-local
+    tag: local
+    pull: never
+",
+        )
+        .unwrap();
+
+        assert_eq!(tool.toolchains.get("ic").unwrap().pull, PullPolicy::Missing);
+        assert_eq!(
+            tool.toolchains.get("pinned").unwrap().pull,
+            PullPolicy::Always
+        );
+        assert_eq!(
+            tool.toolchains.get("local").unwrap().pull,
+            PullPolicy::Never
+        );
+        assert_eq!(tool.tools_dir_sources[0].pull, PullPolicy::Missing);
+        assert_eq!(tool.tools_dir_sources[1].pull, PullPolicy::Never);
+
+        let inline: ToolsDirSourceInline =
+            serde_yaml_ng::from_str("container: acl-tools-inline\ntag: local\npull: never\n")
+                .unwrap();
+        assert_eq!(inline.pull, PullPolicy::Never);
     }
 
     #[test]
