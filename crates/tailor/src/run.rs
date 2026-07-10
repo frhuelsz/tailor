@@ -890,7 +890,7 @@ async fn build(
 ) -> Result<(), AppError> {
     let mut tool = tool_config(workspace);
     resolve_image_cache_dir(&mut tool, &workspace.root);
-    apply_log_overrides(&mut tool, logging);
+    apply_log_overrides(&mut tool, logging, &workspace.root)?;
     let targets = build_targets(workspace, &args.images)?;
     let selection = selector(&args.select, &args.arch)?;
     let output_dir = tailor_config::absolutize(
@@ -1252,15 +1252,29 @@ fn resolve_image_cache_dir(tool: &mut ToolConfig, workspace_root: &Path) {
 /// resolving the log directory by precedence (flag > `TAILOR_LOG_DIR` > manifest;
 /// `meta/docs/logging.md` §5.5). Only mutates `runtime` when there is an override to apply, so a plain
 /// `tailor build` keeps persistence off.
-fn apply_log_overrides(tool: &mut ToolConfig, logging: &LogOverrides) {
-    let manifest_log_dir = tool.runtime.as_ref().and_then(|r| r.log_dir.clone());
-    let log_dir = resolve_log_dir(
-        logging.log_dir.clone(),
-        log_dir_from_env(),
-        manifest_log_dir,
-    );
+fn apply_log_overrides(
+    tool: &mut ToolConfig,
+    logging: &LogOverrides,
+    workspace_root: &Path,
+) -> Result<(), AppError> {
+    // Absolutize each source against its own base BEFORE it reaches path translation: a relative log
+    // dir would otherwise become `/host/` + `./…` = the host root's directory (the same host-root
+    // escape class as the wipe). Flag/env resolve against the CWD, the manifest against the workspace.
+    let cwd =
+        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let flag = logging
+        .log_dir
+        .clone()
+        .map(|dir| tailor_config::absolutize(dir, &cwd));
+    let env = log_dir_from_env().map(|dir| tailor_config::absolutize(dir, &cwd));
+    let manifest = tool
+        .runtime
+        .as_ref()
+        .and_then(|r| r.log_dir.clone())
+        .map(|dir| tailor_config::absolutize(dir, workspace_root));
+    let log_dir = resolve_log_dir(flag, env, manifest);
     if log_dir.is_none() && logging.ic_log_level.is_none() {
-        return;
+        return Ok(());
     }
     let runtime = tool
         .runtime
@@ -1269,6 +1283,7 @@ fn apply_log_overrides(tool: &mut ToolConfig, logging: &LogOverrides) {
     if let Some(level) = logging.ic_log_level {
         runtime.log_level = Some(level);
     }
+    Ok(())
 }
 
 // ───────────────────────────── signing (meta/docs/signing.md) ─────────────────────────────
@@ -2294,7 +2309,7 @@ toolsDirSources:
     #[test]
     fn apply_log_overrides_leaves_persistence_off_without_opt_in() {
         let mut tool = default_tool_config();
-        apply_log_overrides(&mut tool, &LogOverrides::default());
+        apply_log_overrides(&mut tool, &LogOverrides::default(), Path::new("/ws")).unwrap();
         // No flag/env/manifest log dir → persistence stays off (no runtime.log_dir).
         assert!(
             tool.runtime
@@ -2311,10 +2326,43 @@ toolsDirSources:
             log_dir: Some(PathBuf::from("/flag/logs")),
             ic_log_level: Some(tailor_config::LogLevel::Trace),
         };
-        apply_log_overrides(&mut tool, &logging);
+        apply_log_overrides(&mut tool, &logging, Path::new("/ws")).unwrap();
         let runtime = tool.runtime.as_ref().expect("runtime created");
         assert_eq!(runtime.log_dir.as_deref(), Some(Path::new("/flag/logs")));
         assert_eq!(runtime.log_level, Some(tailor_config::LogLevel::Trace));
+    }
+
+    #[test]
+    fn apply_log_overrides_absolutizes_a_relative_manifest_log_dir() {
+        // A relative `runtime.logDir` must be absolutized against the workspace root — never left
+        // relative, or path translation turns it into `/host/./…` (the host root's dir).
+        let mut tool = default_tool_config();
+        tool.runtime = Some(tailor_config::Runtime {
+            log_dir: Some(PathBuf::from("./.tailor/logs")),
+            ..tailor_config::Runtime::default()
+        });
+
+        apply_log_overrides(&mut tool, &LogOverrides::default(), Path::new("/ws")).unwrap();
+
+        let log_dir = tool.runtime.and_then(|r| r.log_dir).expect("log dir set");
+        assert!(log_dir.is_absolute(), "expected absolute, got {log_dir:?}");
+        assert_eq!(log_dir, Path::new("/ws/.tailor/logs"));
+    }
+
+    #[test]
+    fn apply_log_overrides_absolutizes_a_relative_flag_log_dir_against_cwd() {
+        // The `--log-dir` flag resolves against the CWD (not the workspace) and must be absolutized.
+        let mut tool = default_tool_config();
+        let logging = LogOverrides {
+            log_dir: Some(PathBuf::from("mylogs")),
+            ic_log_level: None,
+        };
+
+        apply_log_overrides(&mut tool, &logging, Path::new("/ws")).unwrap();
+
+        let log_dir = tool.runtime.and_then(|r| r.log_dir).expect("log dir set");
+        let expected = std::env::current_dir().unwrap().join("mylogs");
+        assert_eq!(log_dir, expected);
     }
 
     #[test]
