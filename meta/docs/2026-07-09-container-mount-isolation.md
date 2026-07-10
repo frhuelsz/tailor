@@ -1,6 +1,6 @@
 # tailor — workspace-scoped container mounts (workspace read-only by default)
 
-> **Status:** Design · _2026-07-09_
+> **Status:** Implemented (commit `b7943ad`) · _2026-07-09_
 >
 > Prevention design following the 2026-07-06 host wipe. tailor stops bind-mounting the whole host
 > filesystem into the IC container. Instead the container sees, under a single `/host` prefix, **only

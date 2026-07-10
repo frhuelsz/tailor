@@ -1,6 +1,6 @@
 # tailor — `toolsDirSources`: tailor-managed IC `--tools-dir` from a container base
 
-> **Status:** Design · _2026-07-09_
+> **Status:** Implemented (commit `4659713`) · _2026-07-09_
 >
 > Wraps IC's `--tools-dir` capability the way tailor wraps IC's other flags: the user declares one or
 > more **tools-dir sources** (a container image, local or remote) in `tailor.yaml`, an image
