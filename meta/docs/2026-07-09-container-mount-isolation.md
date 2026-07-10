@@ -1,192 +1,218 @@
-# tailor — targeted container mount isolation (drop the full `-v /:/host` bind)
+# tailor — workspace-scoped container mounts (workspace read-only by default)
 
 > **Status:** Design · _2026-07-09_
 >
-> Prevention design following the 2026-07-06 host wipe. Replaces tailor's single "bind the whole
-> host root into the IC container" mount with a **minimal set of purpose-scoped binds, read-only by
-> default**. The goal is that IC — even if it misbehaves in the exact way that caused the incident
-> (a teardown `rm -rf`/`os.RemoveAll` traversing a live mount) — **cannot see or delete anything on
-> the host except the few directories a build genuinely needs to write.**
+> Prevention design following the 2026-07-06 host wipe. tailor stops bind-mounting the whole host
+> filesystem into the IC container. Instead the container sees, under a single `/host` prefix, **only
+> the tailor workspace — mounted read-only by default — plus the specific out-of-workspace inputs a
+> build needs and a small set of tailor-owned writable carve-outs**. Everything else on the host is
+> simply absent from the container.
 
 ---
 
 ## 1. Problem
 
-Today every IC container is launched with the **entire host filesystem** bind-mounted in:
+Every IC container today is launched with the entire host filesystem bound in, writable:
 
 ```
 docker run --privileged -v /:/host -v /dev:/dev <ic-image> customize \
-  --config-file /host/<abs>  --image-file /host/<abs>  --output-image-file /host/<abs> ...
+  --config-file /host/<abs> --image-file /host/<abs> --output-image-file /host/<abs> …
 ```
 
-`arg_builder` path-translates every host path to `/host/<abs>` (`crates/tailor-exec/src/path_translate.rs`),
-and the executor binds `/:/host` + `/dev:/dev` (`arg_builder.rs`, `host_root_bind`/`DEV_BIND`).
+`arg_builder` translates each host path to `/host/<abs>` (`crates/tailor-exec/src/path_translate.rs`,
+`to_container_path`) and binds the host root at `/host` (`arg_builder.rs`, `HOST_ROOT_SOURCE = "/"`,
+`host_root_bind`).
 
-This is the **root enabler of the wipe** (`meta/target`/incident analysis): the host root is present
-in the container at `/host`, writable, so any IC file operation that escapes its intended scope —
-notably the teardown `os.RemoveAll` of a build/chroot dir that still has a live mount under it — can
-reach and destroy the whole host. The full bind is a blast radius the size of the machine.
+That single bind is the structural enabler of the wipe: the real host root is present in the
+container at `/host`, **writable**, so an IC operation that escapes its intended scope reaches the
+whole machine. In the incident, `--tools-dir /` drove a failed `safechroot` initialization whose
+cleanup ran `os.RemoveAll("/")`; because `/host` is a live writable bind *under* `/`, the delete
+recursed through it into the real filesystem (root disk **and** every nested data mount). See
+`meta/target/ic-tools-dir-host-wipe-footgun.md` for the proven mechanism.
 
-**tailor does not need the whole host.** It needs a handful of specific paths, and most of them are
-**inputs it only reads.**
-
----
-
-## 2. What a build actually touches
-
-Enumerated from the IC arg vectors `arg_builder` emits (customize / convert / inject-files):
-
-| Purpose | Host path source | IC flag | Access |
-| --- | --- | --- | --- |
-| Merged IC config (working copy) | `<image-dir>/.tailor-render.<slug>.ic.yaml` | `--config-file` | **RO** |
-| Relative `files:` / `scripts:` in the config | `<image-dir>/…` | (resolved by IC) | **RO** |
-| Local base image | `base.path` (a file) | `--image-file` | **RO** |
-| RPM sources | each `rpmSources` entry (dir/file) | `--rpm-source` | **RO** |
-| Tools dir (future, §see tools-dir design) | staged tools tree | `--tools-dir` | **RO** |
-| Output image | `<output-dir>` | `--output-image-file` | **RW** |
-| Image cache (registry bases) | `runtime.imageCacheDir` | `--image-cache-dir` | **RW** |
-| Build/scratch | `runtime.buildDirBase/<slug>` | `--build-dir` | **RW** |
-| `output.artifacts` staging | `<image-dir>/.tailor-stage.<slug>.<run-id>` | (relocated by tailor) | **RW** |
-| Per-cell IC log | `runtime.logDir` | `--log-file` | **RW** |
-| Device access (loopback mount of the image) | `/dev` | — | **RW** (see §5) |
-
-Everything above the output rows is an **input tailor only reads**. The writable set is small and
-tailor-owned: output dir, cache, build dir, staging, log dir.
+The fix is to stop exposing the machine: bind only the workspace (read-only) and the few paths a
+build actually reads or writes.
 
 ---
 
-## 3. Design — minimal, identity, RO-by-default binds
+## 2. Model
 
-### 3.1 One bind per needed path, at its real path (identity), no `/host`
+Path translation is **unchanged** — a host path `P` is still presented to IC as `/host` + `P`
+(`to_container_path`; `runtime.mounts.hostRoot` names the prefix, default `/host`). Only the bind set
+changes, to four kinds of bind, all mapped into the `/host` namespace:
 
-Replace `-v /:/host` + `/host/<abs>` translation with **identity binds**: each needed host directory
-is bound into the container **at the same absolute path**, so the arg vector passes the real path and
-**no path translation is needed** (`path_translate::to_container_path` collapses to identity and can
-be retired). This mirrors what the janitor already does for its sudo-free chown/rm
-(`crates/tailor-exec/src/janitor.rs`, `"{path}:{path}"`).
+1. **Workspace root — read-only (default).** The whole tailor workspace (`workspace.root`) is bound
+   `ro`. This covers the config, image dirs, config fragments, in-tree `files:`/`scripts:`, local
+   bases and rpm sources that live in the tree, and any `../` reference that stays inside the
+   workspace — i.e. the large majority of what a build reads, in one bind.
+2. **Tailor-owned writable carve-outs.** The small set of paths tailor writes — build dir, image
+   cache, output dir, `output.artifacts` staging, per-cell log — bound `rw`. When one is *inside* the
+   workspace, it is a more-specific `rw` bind nested inside the `ro` workspace bind (proven viable,
+   §4.2).
+3. **Out-of-workspace inputs — read-only.** A local base image or rpm source that lives *outside* the
+   workspace gets its own targeted `ro` bind.
+4. **`extraPaths`** — an explicit escape hatch for anything else a config references outside the
+   workspace; `ro` by default, `rw` only when declared (§4.4).
+
+Mapping everything under `/host` (rather than at real paths) keeps the mirror from ever colliding with
+the IC container's own root filesystem (`/etc`, `/usr`, `/tmp`, …): a host path `/etc/foo` lands at
+`/host/etc/foo`, never shadowing the container's `/etc`.
+
+The blast radius of any IC misbehavior is now bounded to the workspace (read-only) plus the handful of
+disposable, tailor-owned writable carve-outs — never the host root.
+
+---
+
+## 3. Mechanics
+
+### 3.1 Workspace root, read-only
 
 ```
-docker run --privileged \
-  -v /work/img/gizmo:/work/img/gizmo:ro \          # image dir (config + relative files/scripts)
-  -v /work/bases/gizmo.vhdx:/work/bases/gizmo.vhdx:ro \   # base image (if outside the image dir)
-  -v /work/rpms:/work/rpms:ro \                    # each rpm-source parent
-  -v /data/tailor-build/gizmo_amd64_cosi:/data/tailor-build/gizmo_amd64_cosi:rw \   # build dir (isolated fs)
-  -v /work/out:/work/out:rw \                      # output dir
-  -v /work/.tailor/cache:/work/.tailor/cache:rw \  # image cache
-  -v /dev:/dev \                                   # device access (see §5)
-  <ic-image> customize --config-file /work/img/gizmo/.tailor-render.….yaml …
+-v /work/proj:/host/work/proj:ro          # workspace.root (contains configs, image dirs, in-tree inputs)
 ```
 
-Binds are **read-only unless the path is a tailor-owned write target** (output, cache, build,
-staging, log). Directories (not individual files) are bound, at their parent when a single file is
-needed, to keep the set small.
+On modern engines (Docker 25+, podman on kernel ≥ 5.12) a `:ro` bind is **recursively read-only**:
+nested mounts under the workspace inherit `ro` automatically (verified on Docker 29.6.1 / kernel 7.0 —
+a nested tmpfs under the bind was read-only in the container). This is the desired behavior and tailor
+relies on it by default.
 
-### 3.2 Computing the bind set
+**If the engine/kernel does not provide recursive-RO**, a filesystem mounted *inside* the workspace
+could surface writable in the container despite the `ro` parent. This is a bounded residual — the
+worst case is a writable mount *within the workspace tree*, never the host root — and is acceptable
+given it strictly minimizes blast radius versus today's whole-host-RW bind. As optional hardening,
+tailor may request recursive-RO explicitly
+(`--mount type=bind,…,readonly,bind-recursive=readonly,bind-propagation=rprivate`, verified working);
+this is not required for the safety guarantee.
 
-The executor derives the set from the same resolved inputs it already has per cell:
+### 3.2 Writable carve-outs (nested in the RO workspace)
 
-1. Collect `(path, access)` requests: image dir (RO), base file's parent (RO) if outside the image
-   dir, each rpm-source parent (RO), tools dir (RO), output dir (RW), cache dir (RW), build dir (RW),
-   log dir (RW), staging dir (RW).
-2. **Absolutize** every path (already done, `meta` path-resolution memory) — a relative bind source
-   is rejected by Docker.
-3. **Normalize + dedupe + resolve nesting:** if path B is inside an already-bound path A —
-   - same access, or A is RW ⊇ B: drop B (covered).
-   - B needs RW but A is RO (e.g. the staging dir inside the RO image dir): keep **both**, with the
-     more-specific RW bind **nested** inside the RO one. Docker honors the most-specific bind, so the
-     source tree stays RO while the one staging subdir is writable (§3.3).
-4. Emit `-v <path>:<path>:<ro|rw>` for each, sorted shortest-first so parents mount before children.
+A more-specific `rw` bind nested inside the `ro` workspace bind is valid and behaves as needed — the
+parent stays read-only, only the carve-out is writable, and writes propagate to the host (verified on
+Docker 29.6.1: `-v ws:/host/ws:ro -v ws/carve:/host/ws/carve:rw` → root RO, carve-out writable):
 
-### 3.3 The `output.artifacts` staging carve-out
+```
+-v /work/proj:/host/work/proj:ro
+-v /work/proj/out:/host/work/proj/out:rw                      # output dir (inside workspace)
+-v /work/proj/.tailor/cache:/host/work/proj/.tailor/cache:rw  # image cache (inside workspace)
+-v /work/proj/img/gizmo/.tailor-stage.gizmo.<run>:…:rw        # output.artifacts staging (§3.4)
+```
 
-`output-artifacts-staging.md` §3.2 keeps IC's staging **colocated** in the image dir (so IC resolves
-its relative `output.artifacts.path` there). With the image dir now **RO**, IC cannot write the
-staging. Resolution: keep the image dir bind **RO**, and add a **nested RW bind** for exactly the
-tailor-named staging dir `<image-dir>/.tailor-stage.<slug>.<run-id>` (tailor knows the name before
-IC runs). The rest of the source tree remains read-only; only the staging subdir is writable — and
-it is reclaimed after the run as today.
+Carve-outs that live *outside* the workspace (a `buildDirBase` on a separate disk, an external log
+dir) are simply their own top-level `rw` binds under `/host`.
 
-### 3.4 Build dir isolation (ties into `buildDirBase`)
+### 3.3 Out-of-workspace inputs (read-only)
 
-The build dir is the one large RW area and the one IC recursively deletes on teardown. It **must** be
-an isolated, tailor-owned RW bind on a filesystem that is **not** the host root:
+A local base or rpm source outside the workspace is bound `ro` at its own path:
 
-- Resolved from `runtime.buildDirBase/<slug>` (the reconstructed `buildDirBase` feature), on a
-  dedicated volume / disk / tmpfs.
-- Bound **only as itself** (`-v <build>:<build>:rw`) — never as a child of a host-root bind, because
-  there is no host-root bind anymore.
-- A **guard refuses to run** if the resolved build dir (or tools dir) is `/`, an ancestor of `/`, on
-  the same device as `/`, or — the incident's exact shape — a path that is itself a bind of the host
-  root. This is belt-and-suspenders: with targeted binds there is no `/host` to nest under, but the
-  guard closes the door explicitly.
+```
+-v /data/bases/gizmo.vhdx:/host/data/bases/gizmo.vhdx:ro
+-v /srv/rpms:/host/srv/rpms:ro
+```
+
+Inputs *inside* the workspace need no extra bind — they are covered by §3.1.
+
+### 3.4 `runtime.mounts.extraPaths` — declaring additional paths
+
+For anything a config references that is outside the workspace and not auto-derived, the tailor config
+declares it. **Read-only by default; writable only when `access: rw` is set:**
+
+```yaml
+runtime:
+  mounts:
+    extraPaths:
+      - path: /opt/shared-scripts        # referenced from a config, outside the workspace
+        # access defaults to ro
+      - path: /data/scratch
+        access: rw                       # writable only because explicitly requested
+```
+
+Each entry becomes a `-v <path>:/host<path>:<ro|rw>` bind. **Relative paths are allowed**, resolved
+against the **workspace root** — consistent with the sibling `runtime.imageCacheDir`, which
+absolutizes against `workspace.root` (`resolve_image_cache_dir(…, &workspace.root)`). Absolute paths
+are used as-is; **cwd is never the anchor** (a relative bind source is rejected by the engine). tailor
+absolutizes each entry before emitting its bind. Writable extra paths pass through the guard (§3.5).
+
+### 3.5 Build dir isolation + fail-closed guard
+
+The build dir is the one large RW area and the one IC recursively deletes. It must be an isolated,
+tailor-owned RW path on a filesystem that is **not** the host root, resolved from
+`runtime.buildDirBase/<slug>` (the reconstructed `buildDirBase` feature) and bound only as itself.
+
+Before launching, a **guard canonicalizes** the resolved build dir, any `access: rw` carve-out or
+extra path, and any future tools dir, and **refuses to run** if any is `/`, an ancestor of `/`, on the
+**same device** as the running root filesystem, or otherwise resolves to (part of) the host root.
+tailor **never** constructs `--tools-dir /`. With no whole-host bind this is belt-and-suspenders, but
+it closes the door explicitly and protects user-supplied `rw` paths.
+
+### 3.6 Relative-to-config resolution
+
+IC resolves a config's relative `files:`/`scripts:` entries against the config file's directory. Under
+this model that works unchanged: the config lives at `/host/<image-dir>/…`; in-directory relatives
+resolve within the workspace bind, and `../` references resolve correctly as paths because `/host`
+mirrors the real layout — covered by the workspace bind while they stay in the tree, and by
+`extraPaths` when they escape it.
 
 ---
 
-## 4. Why this prevents the incident
-
-The wipe required the host root to be present, writable, in the container, with a build/mount tree
-sitting on it. Under this design:
-
-- **There is no `/host`.** The host root is never bound in. IC cannot address host paths that tailor
-  did not explicitly, individually expose.
-- **Inputs are read-only.** The base image, the source/image dir, and rpm sources are RO — IC's
-  teardown `os.RemoveAll` over any of them fails `EROFS` (exactly as the read-only ACL overlay did in
-  the reproduction), so a stray delete cannot destroy inputs or the source tree.
-- **The writable set is small and tailor-owned.** The worst a runaway teardown can do is delete
-  inside the build dir, staging dir, output dir, cache, or log dir — all disposable, tailor-managed,
-  and none of them the host root. The blast radius shrinks from "the whole machine" to "this build's
-  scratch."
-- **The build dir is isolated + guarded**, so even that RW area cannot be the host root.
-
----
-
-## 5. `/dev` — the one remaining broad mount
+## 4. `/dev`
 
 IC loopback-mounts the image (`losetup`) and needs device nodes, so `/dev` access is required for a
-real (privileged) build. Options, least-to-most invasive:
-
-- **Keep `-v /dev:/dev`** (default today). `/dev` is device nodes, not the host filesystem tree, so it
-  is not a data-loss vector the way `/` is — but it is still broad.
-- **Preferred:** rely on the container runtime's own `/dev` (Docker gives the container a minimal
-  `/dev`) plus `--device-cgroup-rule` / dynamic `--device` for the specific loop device, so no host
-  `/dev` bind at all. Feasibility depends on loop-device allocation inside the container; validate
-  against a real ACL build before committing.
-- `runtime.mounts.dev` stays as the escape hatch to force the bind on/off.
-
-This is called out as an **open question** (§7) rather than decided, because it needs a live test.
+real privileged build. tailor keeps `-v /dev:/dev` (the current default) for compatibility. `/dev` is
+device nodes, not the host filesystem tree, so it is not a data-loss vector the way `/` is.
+`runtime.mounts.dev` remains the on/off escape hatch.
 
 ---
 
-## 6. Config & compatibility changes
+## 5. Config & compatibility
 
-- **`runtime.mounts.hostRoot` is removed** (there is no host-root bind). `deny_unknown_fields` rejects
-  it with a message pointing at this model. `runtime.mounts.dev` stays (§5).
-- **`path_translate::to_container_path` is retired** (identity binds). The `RuntimeConfig.host_root`
-  field and every `/host/<abs>` construction in `arg_builder` are removed; the arg vectors carry real
-  absolute paths.
-- The janitor already uses identity binds, so its chown/rm sweep is unaffected (and it, too, should
-  bind only the specific managed paths, not `/host`).
-- `--dry-run` renders the new, narrower `-v` set — making the isolation visible/inspectable.
+`runtime.mounts`:
+
+```yaml
+runtime:
+  mounts:
+    hostRoot: /host        # the /host namespace prefix (default /host); paths are mapped under it
+    dev: true              # bind /dev (default true)
+    extraPaths:            # additional out-of-workspace paths (RO unless access: rw)
+      - path: /opt/shared-scripts
+      - path: /data/scratch
+        access: rw
+```
+
+- `hostRoot` and `dev` are retained. `hostRoot` no longer means "bind the whole host here" — it is the
+  prefix of the mapped namespace.
+- `extraPaths` is new: a list of `{ path, access: ro|rw }`, `access` defaulting to `ro`.
+- No whole-host bind is emitted; `host_root_bind` (the `/:/host` volume) is removed. `arg_builder`
+  instead emits the computed bind set (workspace RO + carve-outs + out-of-workspace inputs + extras).
+  `to_container_path` and the `/host` prefix are unchanged.
+- The janitor's own chown/rm binds are unaffected (they already bind specific tailor-owned paths).
+- `--dry-run` renders the full computed `-v` set, making the exposed surface inspectable.
+
+---
+
+## 6. Why this prevents the incident
+
+- **The host root is never in the container.** Only the workspace (RO) and explicitly mapped paths
+  exist under `/host`. A stray `os.RemoveAll` — even `RemoveAll("/")` inside the container — cannot
+  reach a host path tailor did not map.
+- **The workspace and all inputs are read-only.** A stray delete over them fails `EROFS` (as the
+  read-only overlay did in the reproduction), so configs, the source tree, bases, and rpm sources
+  survive.
+- **The writable set is small, tailor-owned, disposable.** The worst a runaway can do is delete inside
+  the build, cache, output, staging, or log dir — none of them the host root. Blast radius drops from
+  "the whole machine" to "this build's scratch."
+- **The build dir (and any RW path) is isolated and guarded**, so no writable target can be the host
+  root or on its filesystem.
 
 ---
 
 ## 7. Open questions
 
-- **`/dev` without a full bind (§5)** — can IC allocate/attach its loop device with only the
-  container's own `/dev` + a device-cgroup rule? Needs a live ACL build to confirm.
-- **Overlapping RW-in-RO nesting** — confirm the target runtime (Docker + podman) both honor a
-  more-specific RW bind nested inside a RO bind for the staging carve-out (§3.3); if podman differs,
-  fall back to relocating staging to a dedicated RW dir and teaching IC's relative resolution via a
-  symlink/`--output-artifacts`-path override.
-- **Base images / rpm sources on many scattered paths** — a build referencing dozens of distinct host
-  dirs yields many binds; fine functionally, but consider a cap / warning.
-- **SELinux/`:z`/`:Z` relabeling** — decide whether shared binds need `:z` (they did not under the
-  single `/host` bind); RO binds should not be relabeled.
-
-## 8. Summary
-
-Stop h-mounting the machine. Bind only what a cell reads or writes, read-only wherever possible, at
-real paths (no `/host`, no translation). Inputs (base, source tree, rpm sources, tools dir) are RO;
-the small writable set (build, staging, output, cache, log) is tailor-owned and disposable; the build
-dir is isolated and guarded. This removes the structural condition that let an IC teardown delete the
-host, and shrinks the blast radius of any future IC misbehavior to a single build's scratch.
+- **podman parity** — verify podman honors (a) recursive read-only on a `:ro` bind and (b) a
+  more-specific `rw` bind nested inside a `ro` bind, matching the Docker behavior verified here. If it
+  differs, request recursive-RO explicitly and/or relocate the staging carve-out.
+- **Recursive-RO on old engines** — on pre-25 Docker / kernel < 5.12, a nested mount under the
+  workspace may surface writable; decide whether to detect and warn, or accept the bounded residual.
+- **Many scattered out-of-workspace inputs** — a build referencing many external dirs yields many
+  binds; functionally fine, but consider a cap / warning.
+- **SELinux `:z` / `:Z` relabeling** — decide whether shared binds need relabeling under this model;
+  RO input binds should not be relabeled.
