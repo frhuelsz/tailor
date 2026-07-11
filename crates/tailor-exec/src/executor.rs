@@ -177,10 +177,19 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                 .await;
             let _ = fs::remove_file(&working_copy_path);
 
-            if result.is_ok() {
-                // Reclaim IC's root-owned staging tree before propagating any IC failure, so a failed
-                // build never strands root-owned scratch (§3.4): chown always; scratch also removes.
-                if let Some(plan) = &staging {
+            // Reclaim IC's root-owned staging tree. On success: chown so the caller can read the
+            // outputs, then remove if the policy is scratch. On an IC failure: reclaim best-effort,
+            // subordinate to the IC error (§3.4, ACL shakeout #2).
+            if let Some(plan) = &staging {
+                if ic_run_failed(&result) {
+                    self.reclaim_subordinate(
+                        slice::from_ref(&plan.dir),
+                        &context.runtime,
+                        cancel.clone(),
+                        true,
+                    )
+                    .await?;
+                } else {
                     janitor::chown_paths(
                         &self.runtime,
                         slice::from_ref(&plan.dir),
@@ -201,12 +210,16 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             }
             result
         };
+        // The per-cell tools-dir copy is disposable scratch on `buildDirBase`; when IC crashes it can
+        // still carry the chroot's `proc`/`sys`/`dev` mounts, so its `rm` may hit `EBUSY`. Subordinate
+        // that cleanup to the IC failure so the real cause is the headline (ACL shakeout #2).
+        let ic_failed = ic_run_failed(&result);
         if let Some(copy) = &prepared_tools_dir.rw_copy {
-            janitor::remove_paths(
-                &self.runtime,
+            self.reclaim_subordinate(
                 slice::from_ref(copy),
                 &context.runtime,
                 cancel.clone(),
+                ic_failed,
             )
             .await?;
         }
@@ -416,6 +429,34 @@ impl<R: ContainerRuntime> IcExecutor<R> {
             tracing::warn!(error = %err, "failed to reclaim signed build scratch (will be swept next run)");
         }
     }
+
+    /// Reclaim a janitor-managed scratch path, subordinating the cleanup to a failed IC run: when
+    /// `ic_failed`, a cleanup error (e.g. `EBUSY` on a tools-dir whose chroot mounts IC left behind
+    /// on its crash) is logged and swallowed so the real IC failure stays the headline (ACL shakeout
+    /// #2); the leftover is swept on the next run. When IC succeeded, a cleanup failure is a genuine
+    /// error and propagates.
+    async fn reclaim_subordinate(
+        &self,
+        paths: &[PathBuf],
+        runtime: &RuntimeConfig,
+        cancel: CancellationToken,
+        ic_failed: bool,
+    ) -> Result<(), ExecError> {
+        match janitor::remove_paths(&self.runtime, paths, runtime, cancel).await {
+            Ok(()) => Ok(()),
+            Err(err) if ic_failed => {
+                tracing::warn!(error = %err, "cleanup after a failed Image Customizer run did not complete; leftovers are swept next run");
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
+}
+
+/// Whether the IC run failed — a transport error, or a non-zero container exit. Cleanup failures are
+/// subordinated to this so a janitor error never buries the real IC failure (ACL shakeout #2).
+fn ic_run_failed(result: &Result<ContainerResult, ExecError>) -> bool {
+    !matches!(result, Ok(outcome) if outcome.exit_code == 0)
 }
 
 #[derive(Debug, Default)]
@@ -776,6 +817,91 @@ mod tests {
                 .join("cache/tools-dirs/sha256_abc/tdnf")
                 .exists()
         );
+    }
+
+    #[test]
+    fn ic_run_failed_classifies_transport_and_exit_codes() {
+        assert!(!ic_run_failed(&Ok(ContainerResult {
+            exit_code: 0,
+            logs: String::new(),
+            failure_dump: None,
+        })));
+        assert!(ic_run_failed(&Ok(ContainerResult {
+            exit_code: 1,
+            logs: String::new(),
+            failure_dump: None,
+        })));
+        assert!(ic_run_failed(&Err(ExecError::Runtime("boom".to_owned()))));
+    }
+
+    #[derive(Clone, Default)]
+    struct FailingJanitor;
+
+    impl ContainerRuntime for FailingJanitor {
+        async fn pull_image(&self, _reference: &str) -> Result<(), ExecError> {
+            Ok(())
+        }
+
+        async fn inspect_image(
+            &self,
+            _reference: &str,
+        ) -> Result<Option<tailor_core::LocalImage>, ExecError> {
+            Ok(None)
+        }
+
+        async fn create_and_run(
+            &self,
+            _config: ContainerConfig,
+            _cancel: CancellationToken,
+        ) -> Result<ContainerResult, ExecError> {
+            Ok(ContainerResult {
+                exit_code: 1,
+                logs: "/bin/rm: cannot remove: Device or resource busy".to_owned(),
+                failure_dump: None,
+            })
+        }
+
+        async fn daemon_info(&self) -> Result<tailor_core::DaemonInfo, ExecError> {
+            Ok(tailor_core::DaemonInfo::default())
+        }
+
+        async fn export_container(
+            &self,
+            _image_ref: &str,
+            _platform: &str,
+            _pull: bool,
+            _dest_dir: &Path,
+            _cancel: CancellationToken,
+        ) -> Result<(), ExecError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn reclaim_subordinate_swallows_cleanup_error_when_ic_failed_but_propagates_otherwise() {
+        let dir = tempfile::Builder::new()
+            .prefix("tailor-reclaim-")
+            .tempdir_in(std::env::current_dir().unwrap())
+            .unwrap();
+        let executor = IcExecutor::new(FailingJanitor);
+        let config = RuntimeConfig {
+            janitor_image: "janitor@sha256:abc".to_owned(),
+            ..RuntimeConfig::default()
+        };
+        let paths = [dir.path().to_path_buf()];
+
+        // IC already failed → the janitor EBUSY is swallowed so the IC error stays the headline.
+        executor
+            .reclaim_subordinate(&paths, &config, CancellationToken::new(), true)
+            .await
+            .unwrap();
+
+        // IC succeeded → a cleanup failure is a genuine error and propagates.
+        let err = executor
+            .reclaim_subordinate(&paths, &config, CancellationToken::new(), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ExecError::Runtime(_)), "got {err:?}");
     }
 
     #[tokio::test]

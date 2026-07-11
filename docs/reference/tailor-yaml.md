@@ -69,6 +69,19 @@ error: toolchain `local-ic` local image is `amd64` but cell `gizmo_arm64_cosi` t
 `pull: never` with no local image and no locked digest fails the same way — never silently reaching a
 registry. See [Use a locally-built Image Customizer image](../how-to/use-a-local-ic-image.md).
 
+A toolchain entry with every optional key set:
+
+```yaml
+toolchains:
+  default: ic
+  entries:
+    - name: ic
+      container: mcr.microsoft.com/azurelinux/imagecustomizer
+      version: "1.3.0"     # optional semver metadata; used as the tag when `tag` is unset
+      tag: "1.3.0"         # the registry tag actually pulled (defaults to `version`, else `latest`)
+      pull: missing        # always | missing (default) | never
+```
+
 ```yaml
 runtime:
   buildDirBase: /mnt/tailor-build

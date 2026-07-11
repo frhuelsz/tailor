@@ -7,6 +7,7 @@ use std::{
 };
 
 use tailor_core::{ResolveError, ResolvedBase};
+use tracing::debug;
 use xxhash_rust::xxh3::{self, Xxh3};
 
 const HASH_BUFFER_SIZE: usize = 8 * 1024 * 1024;
@@ -35,12 +36,18 @@ fn resolve_blocking(path: &Path, cache_dir: Option<&Path>) -> Result<ResolvedBas
     if let (Some(dir), Some(mtime_ns)) = (cache_dir, mtime_ns)
         && let Some(content_hash) = read_cache_entry(dir, metadata_size, mtime_ns, &abs_path)
     {
+        debug!(
+            path = %abs_path,
+            size = metadata_size,
+            "base unchanged (size + mtime match); reusing cached hash, skipping read"
+        );
         return Ok(ResolvedBase::LocalFile {
             content_hash,
             size: metadata_size,
         });
     }
 
+    debug!(path = %abs_path, size = metadata_size, "hashing local base (no cache hit)");
     let (content_hash, size) = hash_file(path)?;
     if let (Some(dir), Some(mtime_ns)) = (cache_dir, mtime_ns) {
         let _ = write_cache_entry(dir, size, mtime_ns, &content_hash, &abs_path);

@@ -27,8 +27,11 @@ security or provenance digest, and local files are not pinned in `tailor.lock`.
 Large bases are cached on the build path. After the first hash, `tailor build` stores a versioned
 entry under `<output>/.tailor/base-hashes/` keyed by the base path and guarded by the stored absolute
 path, size, and mtime. If the size and mtime still match, the cached XXH3-128 value is reused and
-the base file is not re-read; if anything is missing, malformed, unwritable, or changed, tailor just
-hashes the file again.
+the base file is not re-read (run with `-v` to see a `reusing cached hash, skipping read` line); if
+anything is missing, malformed, unwritable, or changed, tailor just hashes the file again.
+
+`tailor build --force` deliberately ignores all incremental checks, so it re-hashes the base every
+time — omit `--force` for fast back-to-back iterations on an unchanged base.
 
 ## The catalogue model
 
