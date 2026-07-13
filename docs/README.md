@@ -1,4 +1,21 @@
-# tailor documentation
+# tailor
+
+**Manifest-driven front-end for the Azure Linux Image Customizer.**
+
+tailor lets you describe Azure Linux images in small YAML definitions instead of hand-writing Docker/Image Customizer invocations. It merges layered `image.yaml` fragments, expands matrices into build cells, resolves base images, and runs the Azure Linux Image Customizer (`mcr.microsoft.com/azurelinux/imagecustomizer`) once per cell. The `config:` tree remains Image Customizer YAML: tailor passes it through without modeling the IC schema.
+
+```mermaid
+flowchart LR
+  A["image.yaml"]
+  F["by-&lt;axis&gt;/&lt;value&gt;.yaml fragments"]
+  A --> M["matrix expansion"]
+  F --> M
+  M --> C["cells"]
+  C --> IC["Image Customizer container"]
+  IC --> O["artifacts"]
+```
+
+## Documentation
 
 This documentation is organized into four sections, each with a different job.
 

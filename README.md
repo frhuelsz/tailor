@@ -1,7 +1,7 @@
 # tailor
 
 [![CI](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml/badge.svg)](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-frhuelsz.github.io%2Ftailor-blue)](https://frhuelsz.github.io/tailor/)
+[![Docs](https://img.shields.io/badge/docs-frhuelsz.github.io%2Ftailor-orange)](https://frhuelsz.github.io/tailor/)
 
 **Manifest-driven front-end for the Azure Linux Image Customizer.**
 
@@ -111,9 +111,8 @@ Releases publish static Linux musl binaries for `x86_64` and `aarch64`, plus `.s
 
 ```bash
 set -euo pipefail
-version="v0.1.0"
 target="x86_64-unknown-linux-musl" # or aarch64-unknown-linux-musl
-base="https://github.com/frhuelsz/tailor/releases/download/${version}"
+base="https://github.com/frhuelsz/tailor/releases/latest/download"
 
 curl -L -O "${base}/tailor-${target}"
 curl -L -O "${base}/tailor-${target}.sha256"
