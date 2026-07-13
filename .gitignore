@@ -12,3 +12,5 @@
 
 comparison/**
 test/**
+# MkDocs build output (docs site is built in CI, deployed to gh-pages via mike)
+/site/

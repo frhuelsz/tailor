@@ -1,0 +1,4 @@
+# Documentation site toolchain (MkDocs Material + versioned docs via mike).
+# Pinned for reproducible GitHub Pages builds; see .github/workflows/docs.yml.
+mkdocs-material==9.5.44
+mike==2.1.3

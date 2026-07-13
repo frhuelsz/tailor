@@ -1,0 +1,70 @@
+name: Docs
+
+# Versioned documentation site (MkDocs Material + mike), published to GitHub Pages.
+#   - push to main            -> deploys the `dev` version
+#   - push a tag `vX.Y.Z`     -> deploys version `X.Y` and moves the `latest` alias (+ site default)
+#   - manual run from a tag   -> same as a tag push (use this to backfill an existing release, e.g. v0.2.0)
+#
+# mike publishes the built site to the `gh-pages` branch. Enable Pages once:
+#   Settings -> Pages -> Build and deployment -> Source: "Deploy from a branch" -> Branch: gh-pages / (root).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# mike commits the built site to the gh-pages branch.
+permissions:
+  contents: write
+
+# Never let two deploys race on the gh-pages branch.
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install docs toolchain
+        run: pip install -r .github/docs/requirements.txt
+
+      - name: Configure git identity for mike
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve target version
+        id: target
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"   # v0.2.0 -> 0.2.0
+            minor="${version%.*}"            # 0.2.0  -> 0.2
+            echo "version=$minor"  >> "$GITHUB_OUTPUT"
+            echo "alias=latest"    >> "$GITHUB_OUTPUT"
+            echo "default=true"    >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev"     >> "$GITHUB_OUTPUT"
+            echo "alias="          >> "$GITHUB_OUTPUT"
+            echo "default=false"   >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy with mike
+        env:
+          CONFIG: .github/docs/mkdocs.yml
+          VERSION: ${{ steps.target.outputs.version }}
+          ALIAS: ${{ steps.target.outputs.alias }}
+          SET_DEFAULT: ${{ steps.target.outputs.default }}
+        run: |
+          mike deploy --push --update-aliases --config-file "$CONFIG" "$VERSION" $ALIAS
+          if [ "$SET_DEFAULT" = "true" ]; then
+            mike set-default --push --config-file "$CONFIG" "${ALIAS:-$VERSION}"
+          fi

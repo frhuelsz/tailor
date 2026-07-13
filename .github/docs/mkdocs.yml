@@ -1,0 +1,92 @@
+site_name: tailor
+site_description: A build tool that wraps Microsoft Image Customizer.
+site_url: https://frhuelsz.github.io/tailor/
+repo_url: https://github.com/frhuelsz/tailor
+repo_name: frhuelsz/tailor
+edit_uri: edit/main/docs/
+
+# This config lives in .github/docs/; the documentation content stays in the repo-root docs/ tree.
+docs_dir: ../../docs
+site_dir: ../../site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+extra:
+  version:
+    provider: mike
+    default: latest
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: README.md
+  - Tutorials:
+      - tutorials/README.md
+      - Getting started: tutorials/getting-started.md
+      - Your first matrix: tutorials/your-first-matrix.md
+  - How-to guides:
+      - how-to/README.md
+      - Add an image: how-to/add-an-image.md
+      - Add an axis: how-to/add-an-axis.md
+      - Select and build one cell: how-to/select-and-build-one-cell.md
+      - Cross-arch building: how-to/cross-arch-building.md
+      - Change an output format: how-to/change-an-output-format.md
+      - Build from an Azure Linux base: how-to/build-with-an-azure-linux-base.md
+      - Use a base-image catalogue: how-to/use-a-base-image-catalogue.md
+      - Override a base per axis: how-to/override-a-base-per-axis.md
+      - Share config with $include: how-to/share-config-with-include.md
+      - Pin the Image Customizer version: how-to/pin-the-ic-version.md
+      - Use a locally-built IC image: how-to/use-a-local-ic-image.md
+      - Use a tools dir for sealed images: how-to/use-a-tools-dir.md
+      - Select a container engine: how-to/select-a-container-engine.md
+      - Sign an image: how-to/sign-an-image.md
+      - Build a portable binary: how-to/build-a-portable-binary.md
+  - Reference:
+      - reference/README.md
+      - CLI: reference/cli.md
+      - tailor.yaml: reference/tailor-yaml.md
+      - image.yaml: reference/image-yaml.md
+      - Merge directives: reference/directives.md
+      - Output formats: reference/output-formats.md
+  - Explanation:
+      - explanation/README.md
+      - Concepts: explanation/concepts.md
+      - Architecture: explanation/architecture.md
+      - Architectures: explanation/architectures.md
+      - Base images: explanation/base-images.md
+      - Merge model: explanation/merge-model.md
+      - Design rationale: explanation/design-rationale.md
