@@ -1,6 +1,7 @@
 # tailor
 
 [![CI](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml/badge.svg)](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-frhuelsz.github.io%2Ftailor-blue)](https://frhuelsz.github.io/tailor/)
 
 **Manifest-driven front-end for the Azure Linux Image Customizer.**
 
@@ -157,7 +158,9 @@ The `advanced` scaffold creates a workspace `tailor.yaml`, a `myimage/image.yaml
 
 ## Documentation
 
-Start with the [documentation hub](docs/README.md):
+📖 **Full documentation: [frhuelsz.github.io/tailor](https://frhuelsz.github.io/tailor/)** (versioned; the `latest` release plus in-development `dev`).
+
+The same content lives in [`docs/`](docs/README.md):
 
 - [Tutorials](docs/tutorials/README.md): learn tailor hands-on.
 - [How-to guides](docs/how-to/README.md): accomplish specific tasks.
