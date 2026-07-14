@@ -3,6 +3,10 @@
 [![CI](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml/badge.svg)](https://github.com/frhuelsz/tailor/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-frhuelsz.github.io%2Ftailor-orange)](https://frhuelsz.github.io/tailor/)
 
+<p align="center">
+  <img src="docs/resources/logo_small.png" alt="tailor" width="360">
+</p>
+
 **Manifest-driven front-end for the Azure Linux Image Customizer.**
 
 tailor lets you describe Azure Linux images in small YAML definitions instead of hand-writing Docker/Image Customizer invocations. It merges layered `image.yaml` fragments, expands matrices into build cells, resolves base images, and runs the Azure Linux Image Customizer (`mcr.microsoft.com/azurelinux/imagecustomizer`) once per cell. The `config:` tree remains Image Customizer YAML: tailor passes it through without modeling the IC schema.

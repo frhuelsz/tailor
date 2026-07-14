@@ -11,6 +11,8 @@ site_dir: ../../site
 
 theme:
   name: material
+  logo: resources/icon.png
+  favicon: resources/icon.png
   features:
     - navigation.sections
     - navigation.indexes
