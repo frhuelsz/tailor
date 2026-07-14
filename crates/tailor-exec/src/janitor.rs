@@ -7,8 +7,27 @@ use tailor_core::{ContainerConfig, ContainerRuntime, ExecError, RuntimeConfig};
 
 const CHOWN_BINARY: &str = "/bin/chown";
 const RM_BINARY: &str = "/bin/rm";
-const JANITOR_PLATFORM: &str = "linux/amd64";
 const NAME_PREFIX: &str = "tailor-janitor";
+
+/// The container platform the janitor runs as: the **host's native architecture**.
+///
+/// The janitor only runs `chown`/`rm` against bind-mounted host files, so it must run as a
+/// container the host can execute natively — its architecture is irrelevant to the file operation
+/// but decides whether the container can run at all. This must NOT be hardcoded: a fixed
+/// `linux/amd64` fails with a 404 ("image ... does not provide the specified platform
+/// (linux/amd64)") on an arm64 host, aborting an otherwise-successful build during cleanup.
+///
+/// Host arch (not the cell arch) is correct because the janitor operates on the host: it also fixes
+/// `tailor clean` (no single cell arch) and a cross-arch build (an arm64 cell on an amd64 host still
+/// cleans up natively as amd64, not under emulation). The janitor image is multi-arch and pinned by
+/// its manifest-list tag/digest, so `--platform` selects the matching sub-manifest.
+fn host_platform() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "linux/arm64",
+        // tailor targets amd64/arm64; treat x86_64 and any other host as amd64.
+        _ => "linux/amd64",
+    }
+}
 
 pub(crate) async fn chown_paths<R: ContainerRuntime>(
     runtime: &R,
@@ -67,7 +86,7 @@ async fn run_janitor<R: ContainerRuntime>(
         .create_and_run(
             ContainerConfig {
                 image_ref: runtime_config.janitor_image.clone(),
-                platform: JANITOR_PLATFORM.to_owned(),
+                platform: host_platform().to_owned(),
                 name: format!("{NAME_PREFIX}-{}", std::process::id()),
                 args,
                 binds: paths.iter().map(|path| identity_bind(path)).collect(),
@@ -99,4 +118,22 @@ fn identity_bind(path: &Path) -> String {
 
 fn path_arg(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_platform_matches_the_running_arch() {
+        let platform = host_platform();
+        assert!(
+            platform == "linux/amd64" || platform == "linux/arm64",
+            "got {platform}"
+        );
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(platform, "linux/arm64");
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(platform, "linux/amd64");
+    }
 }
