@@ -60,6 +60,7 @@ markdown_extensions:
 
 nav:
   - Home: README.md
+  - Installation: installation.md
   - Tutorials:
       - tutorials/README.md
       - Getting started: tutorials/getting-started.md
