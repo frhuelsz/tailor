@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use nix::unistd::{Gid, Uid};
 use tokio_util::sync::CancellationToken;
 
-use tailor_core::{ContainerConfig, ContainerRuntime, ExecError, RuntimeConfig};
+use tailor_core::{ContainerConfig, ContainerRuntime, ExecError, LogSource, RuntimeConfig};
 
 const CHOWN_BINARY: &str = "/bin/chown";
 const RM_BINARY: &str = "/bin/rm";
@@ -92,6 +92,7 @@ async fn run_janitor<R: ContainerRuntime>(
                 binds: paths.iter().map(|path| identity_bind(path)).collect(),
                 privileged: false,
                 cell_slug: String::new(),
+                log_source: LogSource::Janitor,
                 log_file: None,
             },
             cancel,

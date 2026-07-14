@@ -290,6 +290,7 @@ impl<R: ContainerRuntime> IcExecutor<R> {
                     binds: arg_builder::container_binds(cell, context, extra_rw)?,
                     privileged: context.runtime.privileged,
                     cell_slug: cell.slug.as_ref().to_owned(),
+                    log_source: tailor_core::LogSource::ImageCustomizer,
                     log_file: log_file.cloned(),
                 },
                 cancel,

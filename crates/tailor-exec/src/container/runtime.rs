@@ -21,6 +21,7 @@ use tracing::{debug, warn};
 use tailor_config::Engine;
 use tailor_core::{
     ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo, ExecError, LocalImage,
+    LogSource,
 };
 
 use crate::ic_log::{self, IcCapture};
@@ -174,6 +175,7 @@ impl ContainerRuntime for BollardRuntime {
     ) -> Result<ContainerResult, ExecError> {
         let name = config.name.clone();
         let cell_slug = config.cell_slug.clone();
+        let log_source = config.log_source;
         let log_file = config.log_file.clone();
         let docker_config = DockerConfig {
             image: Some(config.image_ref),
@@ -212,7 +214,7 @@ impl ContainerRuntime for BollardRuntime {
             )
             .await
             .map_err(|err| map_runtime_error(&err))?;
-        let log_task = stream_logs(attach.output, cell_slug);
+        let log_task = stream_logs(attach.output, cell_slug, log_source);
 
         self.docker
             .start_container::<String>(&name, None)
@@ -409,6 +411,7 @@ fn stream_logs(
         >,
     >,
     cell_slug: String,
+    log_source: LogSource,
 ) -> JoinHandle<IcCapture> {
     tokio::spawn(async move {
         let mut capture = IcCapture::default();
@@ -422,18 +425,18 @@ fn stream_logs(
                     pending.push_str(&chunk.to_string());
                     while let Some(newline) = pending.find('\n') {
                         let line: String = pending.drain(..=newline).collect();
-                        ingest(&line, &cell_slug, &mut capture);
+                        ingest(&line, &cell_slug, log_source, &mut capture);
                     }
                 }
                 Err(err) => {
                     let line = format!("container log stream error: {err}");
-                    ingest(&line, &cell_slug, &mut capture);
+                    ingest(&line, &cell_slug, log_source, &mut capture);
                 }
             }
         }
         // Flush any trailing line without a final newline.
         if !pending.is_empty() {
-            ingest(&pending, &cell_slug, &mut capture);
+            ingest(&pending, &cell_slug, log_source, &mut capture);
         }
         capture
     })
@@ -441,13 +444,13 @@ fn stream_logs(
 
 /// Parse one IC output line, re-emit it live as a `tracing` event, and keep it in the capture. Blank
 /// lines are skipped so they neither clutter the live view nor pad the capture.
-fn ingest(line: &str, cell_slug: &str, capture: &mut IcCapture) {
+fn ingest(line: &str, cell_slug: &str, log_source: LogSource, capture: &mut IcCapture) {
     let trimmed = line.trim_end_matches(['\n', '\r']);
     if trimmed.is_empty() {
         return;
     }
     let parsed = ic_log::parse_ic_line(trimmed);
-    ic_log::emit(&parsed, cell_slug);
+    ic_log::emit(&parsed, cell_slug, log_source);
     capture.push(parsed);
 }
 

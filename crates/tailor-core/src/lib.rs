@@ -30,7 +30,7 @@ pub use orchestrator::{
 };
 pub use ports::{
     BaseImageFetcher, BaseResolver, ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo,
-    ExecutionContext, ExecutionResult, Executor, FetchedBase, FilesystemOps, LocalImage,
+    ExecutionContext, ExecutionResult, Executor, FetchedBase, FilesystemOps, LocalImage, LogSource,
     ResolvedBase, RuntimeConfig, Signer, SigningPlan, SigningResult, ToolsDirPlan,
 };
 pub use selector::Selector;

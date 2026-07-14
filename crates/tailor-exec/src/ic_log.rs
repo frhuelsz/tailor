@@ -3,21 +3,29 @@
 //! IC runs with `--log-format=json --log-level=debug --log-color=never`, so each stderr line is one
 //! logrus object `{"level":..,"msg":..,"time":..}`. This module turns that stream into something
 //! tailor controls: it parses each line, re-emits it as a `tracing` event at the mapped level under
-//! target `ic` (so tailor's existing verbosity filter governs the live display), keeps every line in
+//! target `ic` for real IC output (or `janitor` for tailor's own cleanup — see [`emit`]), so tailor's
+//! existing verbosity filter governs the live display and IC-attributed lines are only ever genuine
+//! IC output; keeps every line in
 //! an always-on in-memory capture, and — keyed off the **non-zero exit code** — renders a
 //! categorized, bounded failure dump from that capture.
 
 use std::fmt::Write as _;
 use std::path::Path;
 
+use tailor_core::LogSource;
 use tracing::{debug, error, info, trace, warn};
 
 /// How many `info`/`warn` context lines to include in a failure dump (§5.4).
 const CONTEXT_TAIL: usize = 50;
 
-/// The tracing target every re-emitted IC event carries, so `RUST_LOG=ic=debug` works and IC output
-/// can be filtered separately from tailor's own logs (§5.3).
-const TARGET: &str = "ic";
+/// The tracing target real Image Customizer output carries, so `RUST_LOG=ic=debug` works and IC
+/// output can be filtered separately from tailor's own logs (§5.3).
+const TARGET_IC: &str = "ic";
+
+/// The tracing target for tailor's ownership/cleanup janitor (`chown`/`rm`). Keeping it distinct from
+/// `ic` ensures IC-attributed lines are only ever genuine IC output — a janitor `rm` warning must
+/// never appear as `ic:` (§5.3).
+const TARGET_JANITOR: &str = "janitor";
 
 /// A logrus level mapped to the `tracing` level tailor re-emits it at (§5.3). `fatal`/`panic`
 /// collapse into `Error` (tracing has no `fatal`); the original label is retained for the dump.
@@ -78,18 +86,31 @@ fn parse_structured(line: &str) -> Option<IcLine> {
     })
 }
 
+/// Re-emit one parsed line at a fixed tracing `target` (which must be a literal, as it is baked into
+/// the callsite metadata). Shared by [`emit`] across sources so only the target differs.
+macro_rules! emit_at {
+    ($target:expr, $line:expr, $cell:expr) => {{
+        let cell = $cell;
+        match $line {
+            IcLine::Structured { level, msg, .. } => match level {
+                IcLevel::Trace => trace!(target: $target, cell, "{msg}"),
+                IcLevel::Debug => debug!(target: $target, cell, "{msg}"),
+                IcLevel::Info => info!(target: $target, cell, "{msg}"),
+                IcLevel::Warn => warn!(target: $target, cell, "{msg}"),
+                IcLevel::Error => error!(target: $target, cell, "{msg}"),
+            },
+            IcLine::Raw(text) => warn!(target: $target, cell, "{text}"),
+        }
+    }};
+}
+
 /// Re-emit one parsed line as a `tracing` event at its mapped level, tagged with the cell slug, under
-/// target `ic`. Non-JSON lines surface at `WARN` (their failure role is handled in the dump, §5.4).
-pub(crate) fn emit(line: &IcLine, cell: &str) {
-    match line {
-        IcLine::Structured { level, msg, .. } => match level {
-            IcLevel::Trace => trace!(target: TARGET, cell, "{msg}"),
-            IcLevel::Debug => debug!(target: TARGET, cell, "{msg}"),
-            IcLevel::Info => info!(target: TARGET, cell, "{msg}"),
-            IcLevel::Warn => warn!(target: TARGET, cell, "{msg}"),
-            IcLevel::Error => error!(target: TARGET, cell, "{msg}"),
-        },
-        IcLine::Raw(text) => warn!(target: TARGET, cell, "{text}"),
+/// the target for `source` (`ic` for real Image Customizer output, `janitor` for tailor's cleanup).
+/// Non-JSON lines surface at `WARN` (their failure role is handled in the dump, §5.4).
+pub(crate) fn emit(line: &IcLine, cell: &str, source: LogSource) {
+    match source {
+        LogSource::ImageCustomizer => emit_at!(TARGET_IC, line, cell),
+        LogSource::Janitor => emit_at!(TARGET_JANITOR, line, cell),
     }
 }
 
@@ -247,6 +268,72 @@ fn push_indented(out: &mut String, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::{Arc, Mutex};
+
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::{Layer, Registry};
+
+    /// A minimal tracing layer that records the `target` of every event, so a test can assert which
+    /// target (`ic` vs `janitor`) a re-emitted line was attributed to.
+    #[derive(Clone, Default)]
+    struct TargetCapture(Arc<Mutex<Vec<String>>>);
+
+    impl<S: tracing::Subscriber> Layer<S> for TargetCapture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(event.metadata().target().to_owned());
+        }
+    }
+
+    fn targets_of(source: LogSource) -> Vec<String> {
+        let capture = TargetCapture::default();
+        let subscriber = Registry::default().with(capture.clone());
+        with_default(subscriber, || {
+            emit(
+                &IcLine::Raw("/bin/rm: cannot remove: busy".to_owned()),
+                "",
+                source,
+            );
+            emit(
+                &IcLine::Structured {
+                    level: IcLevel::Info,
+                    logrus_level: "info".to_owned(),
+                    msg: "hello".to_owned(),
+                },
+                "gizmo_amd64_cosi",
+                source,
+            );
+        });
+        capture.0.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn janitor_output_is_attributed_to_janitor_not_ic() {
+        let targets = targets_of(LogSource::Janitor);
+        assert!(!targets.is_empty());
+        assert!(
+            targets.iter().all(|target| target == "janitor"),
+            "janitor lines must never be attributed to `ic`, got {targets:?}"
+        );
+    }
+
+    #[test]
+    fn image_customizer_output_is_attributed_to_ic() {
+        let targets = targets_of(LogSource::ImageCustomizer);
+        assert!(!targets.is_empty());
+        assert!(
+            targets.iter().all(|target| target == "ic"),
+            "IC lines must be attributed to `ic`, got {targets:?}"
+        );
+    }
 
     #[test]
     fn parses_logrus_json_into_mapped_levels() {

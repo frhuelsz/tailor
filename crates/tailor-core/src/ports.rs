@@ -219,9 +219,24 @@ pub struct ContainerConfig {
     /// The cell slug, tagged onto every re-emitted IC log event (`cell = <slug>`); empty for
     /// non-cell containers such as the ownership janitor (`meta/docs/logging.md` §5.3).
     pub cell_slug: String,
+    /// What this container's output represents, so re-emitted log lines are attributed to the right
+    /// source — real Image Customizer output vs. tailor's own cleanup janitor (`meta/docs/logging.md` §5.3).
+    pub log_source: LogSource,
     /// Host path of the per-cell on-disk IC log, when persistence is enabled — used only to point at
     /// it in the failure dump (IC itself writes the file via `--log-file`; `meta/docs/logging.md` §5.4-§5.5).
     pub log_file: Option<PathBuf>,
+}
+
+/// What a container's re-emitted output stream represents. Governs the `tracing` target (and thus the
+/// live-log prefix) so a line is only attributed to Image Customizer when it is genuinely IC output —
+/// tailor's own cleanup janitor is attributed separately (`meta/docs/logging.md` §5.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogSource {
+    /// Image Customizer's own stdout/stderr (logrus JSON).
+    #[default]
+    ImageCustomizer,
+    /// tailor's ownership/cleanup janitor (`chown`/`rm`) — not IC.
+    Janitor,
 }
 
 /// The outcome of a container run.
