@@ -8,8 +8,10 @@ use semver::Version;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
-use crate::error::ConfigError;
-use crate::types::{Arch, LogLevel, Operation, OutputArtifactsPolicy, OutputFormat, ParamValue};
+use crate::{
+    error::ConfigError,
+    types::{Arch, LogLevel, Operation, OutputArtifactsPolicy, OutputFormat, ParamValue},
+};
 
 // ===== tailor.yaml — workspace / tool config (reference/tailor-yaml.md) =====
 
