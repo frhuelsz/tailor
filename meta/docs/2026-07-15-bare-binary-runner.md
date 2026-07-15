@@ -12,7 +12,9 @@
 >
 > **This mode is strictly less safe than the container mode** and is documented as such. The
 > 2026-07-06 wipe is the reason tailor is container-first; process mode removes the boundary that
-> (imperfectly) backstops it, so it is gated behind explicit opt-in and hardened guards (§4).
+> (imperfectly) backstops it, so running it requires an explicit, deliberately-unwieldy per-build
+> CLI flag and hardened guards (§4). It is **implied by the toolchain** (a `binary:` entry), not a
+> separate runtime switch.
 
 ## 1. What the container gives us — and what a bare binary loses
 
@@ -43,37 +45,44 @@ both run as root against real host paths with **no boundary**. That is precisely
 
 ## 3. Config surface
 
-Add a **runtime execution mode** and let a toolchain provide a **binary** instead of a container.
+Process mode is **not** a separate runtime switch — it is **implied by the toolchain**. A toolchain
+entry that provides a bare `binary:` (instead of a `container:`/`build:` source) *is* a process-mode
+toolchain; any cell whose selected toolchain is a `binary:` one runs as a host process. There is
+**no `runtime.exec` key** — the toolchain choice already carries the mode, so a separate switch would
+be redundant.
 
 ```yaml
-runtime:
-  exec: container            # container (default) | process
-  # process mode requires the host to already be root and to carry IC's runtime deps.
-
 toolchains:
   default: ic-native
   entries:
     - name: ic-native
-      binary: /usr/local/bin/imagecustomizer   # a prebuilt IC binary on the host
-      # (mutually exclusive with `container:` / `build:`)
+      binary: /usr/local/bin/imagecustomizer   # bare IC binary on the host → process mode
+      # `binary:` is mutually exclusive with `container:` / `build:`
 ```
 
 Interactions:
 
-- `exec: process` requires every selected toolchain to resolve to a **binary** (`binary:` path, or
-  the commit-build feature producing a binary instead of a container — the two designs compose).
-- Container-only runtime knobs (`privileged`, `mounts.hostRoot`, `mounts.dev`, `janitorImage`) are
-  **rejected/ignored** under `exec: process` with a clear diagnostic, not silently dropped.
-- `buildDirBase` is still honored (and more important than ever — §4).
+- A cell is a **process-mode cell** iff its resolved toolchain has a `binary:` source. Container-mode
+  and process-mode cells can coexist in one workspace (different images/toolchains); each cell runs
+  in its own mode.
+- Container-only runtime knobs (`privileged`, `mounts.hostRoot`, `mounts.dev`, `janitorImage`) do
+  not apply to a process-mode cell (a container-mode cell in the same run still honors them).
+- `buildDirBase` is still honored for process-mode cells (and more important than ever — §4).
 
 ## 4. Safety model (the heart of this design)
 
 Process mode must be **fail-closed** and loud:
 
-1. **Explicit opt-in only.** `exec: process` never defaults on; there is no auto-detection that
-   silently drops the boundary. Consider requiring an additional acknowledgement
-   (`runtime.processMode.iUnderstandTheRisk: true` or a `--allow-process-mode` flag) so it cannot be
-   enabled by copy-pasting a config without intent.
+1. **Explicit per-build opt-in via a deliberately-unwieldy flag.** Selecting a `binary:` toolchain is
+   not enough to *run* it. Any build that would execute a process-mode cell requires the CLI flag
+   **`--allow-ic-host-process-mode`** — intentionally long and annoying so it is never muscle-memory
+   or casually copy-pasted. It is a **run-time consent, never a config key**: it lives only on the
+   command line, so a checked-in `tailor.yaml` can never silently enable host execution.
+   - **Without the flag:** every matched cell whose toolchain is process-mode is **skipped with a
+     prominent warning** (naming the cell and its toolchain), and the build **continues** for all
+     container-mode cells. This is a skip, not a hard error — a mixed workspace still builds its
+     container cells cleanly; process-mode cells are simply not run.
+   - **With the flag:** process-mode cells run, subject to every guard below.
 2. **Reuse the directory guards unconditionally.** The same fail-closed guards that protect the
    container path (`guard::ensure_safe_build_dir`, `ensure_safe_rw_target`,
    `ensure_safe_removal_parent`) gate every path tailor creates, writes, or removes — now enforcing
@@ -96,10 +105,12 @@ Process mode must be **fail-closed** and loud:
 
 ## 5. Code touch-points
 
-- `tailor-config` — `Runtime.exec: ExecMode { Container | Process }`; `binary:` toolchain source;
-  validation that process mode + non-container toolchains + rejected container knobs are consistent.
-- `tailor-core` — the run path stays behind the port trait; add a process-mode capability (or a
-  second `Executor` impl) so the composition root selects container vs process at startup.
+- `tailor-config` — a `binary:` toolchain source (mutually exclusive with `container:`/`build:`);
+  **no `runtime.exec` key**. Validation only ensures `binary:` is not combined with container fields.
+- CLI (`tailor` binary) — the `--allow-ic-host-process-mode` flag; the target/cell selection layer
+  detects process-mode cells and, when the flag is absent, filters them out with a warning.
+- `tailor-core` — the run path stays behind the port trait; the composition root picks the
+  container vs process executor **per cell** based on the resolved toolchain's source.
 - `tailor-exec` — a new `process_runner` module: `tokio::process::Command`, native stdout/stderr
   streamed through `ic_log`, native (`host_root=/`) arg building, in-process guarded cleanup
   replacing the janitor. Root + dependency preflight.
@@ -124,6 +135,9 @@ records the binary's fingerprint so incremental rebuilds detect a changed binary
 
 ## Open questions
 
-1. Gate strength: a config acknowledgement flag, a CLI `--allow-process-mode`, or both?
-2. Should process mode auto-enable **only** when tailor detects it is itself inside a container/VM,
-   or always require explicit opt-in regardless of environment? (Leaning: always explicit.)
+1. When the flag is absent and *every* selected cell is process-mode (so nothing is left to build),
+   is that success-with-warnings or a distinct non-zero "nothing ran" exit? (Leaning: non-zero, so a
+   misconfigured CI job fails loudly rather than silently doing nothing.)
+2. Should the skip-with-warning be promotable to a hard error for strict callers (e.g. under
+   `--locked` or an explicit `--strict`), for pipelines that would rather fail than silently drop
+   targets?
