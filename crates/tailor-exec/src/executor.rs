@@ -6,7 +6,7 @@ use std::{
 };
 
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use tailor_config::{OutputArtifactsPolicy, OutputFormat};
 use tailor_core::{
@@ -430,7 +430,7 @@ impl<R: ContainerRuntime> IcExecutor<R> {
     ) {
         let paths = [staging.to_path_buf(), intermediate.to_path_buf()];
         if let Err(err) = janitor::remove_paths(&self.runtime, &paths, runtime, cancel).await {
-            tracing::warn!(error = %err, "failed to reclaim signed build scratch (will be swept next run)");
+            warn!(error = %err, "failed to reclaim signed build scratch (will be swept next run)");
         }
     }
 
@@ -450,7 +450,7 @@ impl<R: ContainerRuntime> IcExecutor<R> {
         match janitor::remove_paths(&self.runtime, paths, runtime, cancel).await {
             Ok(()) => Ok(()),
             Err(err) if ic_failed => {
-                tracing::warn!(error = %err, "cleanup after a failed Image Customizer run did not complete; leftovers are swept next run");
+                warn!(error = %err, "cleanup after a failed Image Customizer run did not complete; leftovers are swept next run");
                 Ok(())
             }
             Err(err) => Err(err),

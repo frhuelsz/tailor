@@ -18,6 +18,7 @@ use serde::Deserialize;
 use tailor_config::{SigningBackend, SigningProfile};
 use tailor_core::{MissingPrerequisite, SignError, Signer, SigningPlan, SigningResult};
 use tempfile::TempDir;
+use tracing::debug;
 
 /// The `openssl` binary — CA/leaf minting and verity-hash CMS signing.
 const OPENSSL: &str = "openssl";
@@ -200,7 +201,7 @@ impl Signer for HostSigner {
                 ArtifactKind::Pe => sign_pe(&path, &key, &cert)?,
                 ArtifactKind::Verity => sign_verity(&path, &key, &cert)?,
                 ArtifactKind::Skip => {
-                    tracing::debug!(source = %artifact.source.display(), "skipping unrecognized artifact type");
+                    debug!(source = %artifact.source.display(), "skipping unrecognized artifact type");
                 }
             }
         }
