@@ -1,4 +1,4 @@
-//! In-memory fakes for testing port consumers without Docker or a network (`meta/docs/architecture.md`
+//! In-memory fakes for testing port consumers without Docker or a network (`meta/docs/2026-06-22-architecture.md`
 //! §8.3). The orchestrator and downstream crates use these to exercise the build pipeline.
 
 use std::{

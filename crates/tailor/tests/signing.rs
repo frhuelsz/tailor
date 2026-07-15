@@ -1,4 +1,4 @@
-//! End-to-end CLI integration tests for the signing foundation (`meta/docs/signing.md`).
+//! End-to-end CLI integration tests for the signing foundation (`meta/docs/2026-06-29-signing.md`).
 //!
 //! These drive the real `tailor` binary against the synthetic `tests/fixtures/signing/` workspace.
 //! They cover the `signing:` config surface, profile resolution, the fail-fast preflight, and the

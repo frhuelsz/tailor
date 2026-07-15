@@ -44,7 +44,7 @@ pub struct BollardRuntime {
 
 impl BollardRuntime {
     /// Connect to the resolved engine and **fail fast** if it is missing or unreachable, then
-    /// reconcile the declared engine against the live daemon (`meta/docs/container-runtimes.md`
+    /// reconcile the declared engine against the live daemon (`meta/docs/2026-06-29-container-runtimes.md`
     /// §4-§5). Run once before any build/clean.
     pub async fn establish(plan: &ConnectionPlan) -> Result<Self, ExecError> {
         match &plan.resolution {
@@ -310,7 +310,7 @@ impl ContainerRuntime for BollardRuntime {
 }
 
 /// A [`ContainerRuntime`] that never connects to an engine — the stand-in for `build --dry-run`,
-/// which renders container invocations without contacting any daemon (`meta/docs/container-runtimes.md`
+/// which renders container invocations without contacting any daemon (`meta/docs/2026-06-29-container-runtimes.md`
 /// §4). Dry-run execution returns before touching the runtime, so these methods are never reached; if
 /// one ever is, it fails loudly instead of silently connecting.
 #[derive(Debug, Clone, Copy, Default)]
@@ -357,7 +357,7 @@ fn no_engine() -> ExecError {
 ///
 /// Docker advertises `name=rootless` / `name=userns`; Podman's compat `info` likewise reports
 /// `rootless` here, so the substring match covers both. (Podman rootless detection is flagged as an
-/// open question in `meta/docs/container-runtimes.md` §7.1 pending end-to-end validation.)
+/// open question in `meta/docs/2026-06-29-container-runtimes.md` §7.1 pending end-to-end validation.)
 fn parse_daemon_info(security_options: &[String]) -> DaemonInfo {
     DaemonInfo {
         rootless: security_options
@@ -417,7 +417,7 @@ fn stream_logs(
         let mut capture = IcCapture::default();
         // IC (logrus) emits one JSON object per newline-terminated line, but bollard hands back
         // arbitrary chunks: buffer bytes and split on '\n' so a parse always sees a whole line and a
-        // line split across chunks is reassembled (`meta/docs/logging.md` §5.3).
+        // line split across chunks is reassembled (`meta/docs/2026-06-29-logging.md` §5.3).
         let mut pending = String::new();
         while let Some(item) = output.next().await {
             match item {

@@ -1,6 +1,6 @@
 //! Build orchestration: render each image's cells, resolve their inputs, compute fingerprints,
 //! consult build stamps, and produce a `BuildPlan`; then drive execution through the `Executor`
-//! port (`meta/docs/architecture.md` §3.2, stages 11–18 of §5).
+//! port (`meta/docs/2026-06-22-architecture.md` §3.2, stages 11–18 of §5).
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -199,7 +199,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
     }
 
     /// Render and print the IC invocation for every cell **without** resolving digests or touching
-    /// the network — the offline `--dry-run`/debug path (`meta/docs/design.md` §11). Uses the toolchain
+    /// the network — the offline `--dry-run`/debug path (`meta/docs/2026-06-22-design.md` §11). Uses the toolchain
     /// tag (not a digest) for the container reference and delegates to the executor, which
     /// short-circuits before any pull/run when `dry_run` is set.
     pub async fn dry_run(
@@ -488,7 +488,7 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
 /// Resolve a `base: { ref: <name> }` reference against the workspace catalogue. Returns the
 /// effective base (a catalogue slot collapses to a workspace-root-relative `path` base), the slot
 /// name for the matrix output, and the slot's declared `arch`. An unknown name is a config error
-/// surfaced by `validate` (`meta/docs/base-image-catalogue.md` §6). `path`/`oci`/`azureLinux` pass
+/// surfaced by `validate` (`meta/docs/2026-06-29-base-image-catalogue.md` §6). `path`/`oci`/`azureLinux` pass
 /// through unchanged.
 fn resolve_base(
     target: &Target,
@@ -534,7 +534,7 @@ fn resolve_base(
 }
 
 /// Reconcile a catalogue slot's `arch` against the cell's effective arch — they must agree
-/// (`meta/docs/arch-and-platform.md` §3). A slot with no `arch` never conflicts. Offline, so
+/// (`meta/docs/2026-06-29-arch-and-platform.md` §3). A slot with no `arch` never conflicts. Offline, so
 /// `validate` catches a mismatch before any file is read.
 fn reconcile_slot_arch(
     target: &Target,
@@ -556,7 +556,7 @@ fn reconcile_slot_arch(
 
 /// Reconcile a cell's effective arch against the base image: an `oci.platform`'s arch component must
 /// equal the cell arch. `path`/`azureLinux` declare no arch, so they never conflict. Host-independent
-/// and offline, so `validate` catches a mismatch before any pull (`meta/docs/arch-and-platform.md` §3).
+/// and offline, so `validate` catches a mismatch before any pull (`meta/docs/2026-06-29-arch-and-platform.md` §3).
 fn check_platform_arch(target: &Target, base: &BaseSource, arch: Arch) -> Result<(), CoreError> {
     let BaseSource::Oci { oci } = base else {
         return Ok(());
@@ -655,7 +655,7 @@ pub fn runtime_config(tool: &ToolConfig, lock: &Lockfile, workspace_root: &Path)
     let janitor_image = janitor.map_or_else(
         || {
             // No janitor configured: fall back to the built-in default so root-owned IC outputs are
-            // still normalized sudo-free out of the box (`meta/docs/design.md` §7.7).
+            // still normalized sudo-free out of the box (`meta/docs/2026-06-22-design.md` §7.7).
             format!(
                 "{}:{}",
                 tailor_config::defaults::DEFAULT_JANITOR_CONTAINER,
@@ -700,7 +700,7 @@ fn parse_arch(value: &str) -> Option<Arch> {
 
 /// The digest-pinned IC `--image` reference for a resolved base — `Some("oci:<repo>@<digest>")` for
 /// a registry base, `None` for a local file (which uses `--image-file`). Pinning the digest keeps
-/// registry builds reproducible (`meta/docs/design.md` §5.2/§6).
+/// registry builds reproducible (`meta/docs/2026-06-22-design.md` §5.2/§6).
 fn base_image_ref(resolved: &ResolvedBase) -> Option<String> {
     match resolved {
         ResolvedBase::Oci {

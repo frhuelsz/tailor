@@ -1,5 +1,5 @@
 //! Verb dispatch and the composition root — wires concrete adapters into the core orchestrator
-//! and implements each CLI verb (`meta/docs/design.md` §11).
+//! and implements each CLI verb (`meta/docs/2026-06-22-design.md` §11).
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry},
@@ -50,7 +50,7 @@ static STARTED: OnceLock<Instant> = OnceLock::new();
 static TIMESTAMP_MODE: OnceLock<TimestampMode> = OnceLock::new();
 
 /// A per-invocation engine/endpoint override from the global `--engine` / `--host` flags
-/// (`meta/docs/container-runtimes.md` §3). Both sit above the manifest in the precedence ladder.
+/// (`meta/docs/2026-06-29-container-runtimes.md` §3). Both sit above the manifest in the precedence ladder.
 #[derive(Clone, Default)]
 pub(crate) struct EngineOverride {
     engine: Option<tailor_config::Engine>,
@@ -58,7 +58,7 @@ pub(crate) struct EngineOverride {
 }
 
 /// Per-invocation logging overrides from the global `--log-dir` / `--ic-log-level` flags
-/// (`meta/docs/logging.md` §5.1, §5.5).
+/// (`meta/docs/2026-06-29-logging.md` §5.1, §5.5).
 #[derive(Clone, Default)]
 pub(crate) struct LogOverrides {
     log_dir: Option<PathBuf>,
@@ -69,7 +69,7 @@ pub(crate) struct LogOverrides {
 const LOG_DIR_ENV: &str = "TAILOR_LOG_DIR";
 
 /// Resolve the opt-in log directory by precedence (highest first): `--log-dir` flag, `TAILOR_LOG_DIR`
-/// env, then `runtime.logDir` from the manifest (`meta/docs/logging.md` §5.5). `None` keeps persistence
+/// env, then `runtime.logDir` from the manifest (`meta/docs/2026-06-29-logging.md` §5.5). `None` keeps persistence
 /// off (the default), so nothing is written to disk.
 fn resolve_log_dir(
     flag: Option<PathBuf>,
@@ -265,7 +265,7 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
         validate_tools_dir_runtime(&cells, &tool)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
-    // Surface signing prerequisites non-fatally (meta/docs/signing.md §5.1) so they are discoverable
+    // Surface signing prerequisites non-fatally (meta/docs/2026-06-29-signing.md §5.1) so they are discoverable
     // without starting a real build.
     report_signing(&build_signers(
         &signing_requirements(&targets, tool.signing.as_ref())?,
@@ -345,7 +345,7 @@ struct MatrixEntry {
     base_image: Option<String>,
 }
 
-/// The ADO logging command that publishes a cross-stage output variable (`meta/docs/ado-matrix.md` §3):
+/// The ADO logging command that publishes a cross-stage output variable (`meta/docs/2026-06-29-ado-matrix.md` §3):
 /// `##vso[task.setvariable variable=<NAME>;isOutput=true]<compact-json>`.
 const ADO_SETVAR_PREFIX: &str = "##vso[task.setvariable variable=";
 const ADO_SETVAR_SUFFIX: &str = ";isOutput=true]";
@@ -434,7 +434,7 @@ fn eprint_ado_legs(var: &str, matrix: &BTreeMap<String, BTreeMap<String, String>
 
 // ───────────────────────────── base-image catalogue verbs ─────────────────────────────
 
-/// `tailor bases download|verify`: manage the `baseImages:` catalogue (`meta/docs/base-image-catalogue.md`
+/// `tailor bases download|verify`: manage the `baseImages:` catalogue (`meta/docs/2026-06-29-base-image-catalogue.md`
 /// §5). Download pulls slots from their `source`; verify asserts referenced slot files are present.
 async fn bases(workspace: &Workspace, what: &BasesCommand) -> Result<(), AppError> {
     let catalogue = workspace
@@ -901,7 +901,7 @@ async fn build(
     );
     let signing = signing_requirements(&targets, tool.signing.as_ref())?;
     // Build one signer per required profile (a shared CA per build); `signer_for` resolves a cell to
-    // its signer via the image name (meta/docs/signing.md §6). Empty when nothing signs.
+    // its signer via the image name (meta/docs/2026-06-29-signing.md §6). Empty when nothing signs.
     let signers = build_signers(&signing, &workspace.root);
     let image_signer: HashMap<&str, Arc<dyn Signer>> = signers
         .iter()
@@ -939,11 +939,11 @@ async fn build(
     }
 
     // Fail fast on every signing prerequisite — including the `openssl`/`sbsign` binaries — before any
-    // (slow, privileged) IC run (meta/docs/signing.md §5.1).
+    // (slow, privileged) IC run (meta/docs/2026-06-29-signing.md §5.1).
     preflight_signers(&signers)?;
 
     // A real build contacts the engine: resolve it and fail fast now if it is missing or
-    // unreachable (`meta/docs/container-runtimes.md` §4-§5).
+    // unreachable (`meta/docs/2026-06-29-container-runtimes.md` §4-§5).
     let runtime = establish_runtime(engine, &tool).await?;
     let base_hash_cache_dir = output_dir.join(TAILOR_STATE_DIR).join(BASE_HASH_CACHE_DIR);
     let _ = fs::create_dir_all(&base_hash_cache_dir);
@@ -966,7 +966,7 @@ async fn build(
         .await?;
     let stale = plan.stale().count();
 
-    // Cargo-style build report (`meta/docs/design.md` §11): toolchain in use, per-cell progress,
+    // Cargo-style build report (`meta/docs/2026-06-22-design.md` §11): toolchain in use, per-cell progress,
     // and a Finished summary. Base descriptions are looked up per slug from the plan.
     let bases: BTreeMap<&str, String> = plan
         .cells
@@ -1073,7 +1073,7 @@ async fn clean(
     Ok(())
 }
 
-/// Gather the connection-resolution inputs (`meta/docs/container-runtimes.md` §3): the per-invocation
+/// Gather the connection-resolution inputs (`meta/docs/2026-06-29-container-runtimes.md` §3): the per-invocation
 /// flags, the engine environment variables, and the manifest `runtime.engine` / `runtime.host`.
 fn resolve_inputs(engine: &EngineOverride, tool: &ToolConfig) -> ResolveInputs {
     let runtime = tool.runtime.as_ref();
@@ -1250,7 +1250,7 @@ fn resolve_image_cache_dir(tool: &mut ToolConfig, workspace_root: &Path) {
 
 /// Apply the global `--log-dir` / `--ic-log-level` overrides onto the manifest's `runtime` settings,
 /// resolving the log directory by precedence (flag > `TAILOR_LOG_DIR` > manifest;
-/// `meta/docs/logging.md` §5.5). Only mutates `runtime` when there is an override to apply, so a plain
+/// `meta/docs/2026-06-29-logging.md` §5.5). Only mutates `runtime` when there is an override to apply, so a plain
 /// `tailor build` keeps persistence off.
 fn apply_log_overrides(
     tool: &mut ToolConfig,
@@ -1286,10 +1286,10 @@ fn apply_log_overrides(
     Ok(())
 }
 
-// ───────────────────────────── signing (meta/docs/signing.md) ─────────────────────────────
+// ───────────────────────────── signing (meta/docs/2026-06-29-signing.md) ─────────────────────────────
 
 /// Gather the distinct signing profiles the selected images require, tracking which images need
-/// each (`meta/docs/signing.md` §5.1). Resolution also validates each referenced profile.
+/// each (`meta/docs/2026-06-29-signing.md` §5.1). Resolution also validates each referenced profile.
 fn signing_requirements<'a>(
     targets: &[Arc<Target>],
     workspace_signing: Option<&'a tailor_config::SigningConfig>,
@@ -1320,7 +1320,7 @@ fn signing_requirements<'a>(
 /// A required signing profile paired with its resolved [`Signer`].
 type ProfileSigner<'a> = (&'a SigningRequirement<'a>, Arc<dyn Signer>);
 
-/// Build one [`Signer`] per required profile — a shared CA per build (`meta/docs/signing.md` §6).
+/// Build one [`Signer`] per required profile — a shared CA per build (`meta/docs/2026-06-29-signing.md` §6).
 /// Relative `keypair` key/cert paths resolve against the workspace root.
 fn build_signers<'a>(
     requirements: &'a [SigningRequirement<'a>],
@@ -1337,7 +1337,7 @@ fn build_signers<'a>(
         .collect()
 }
 
-/// Fail-fast signing gate (`meta/docs/signing.md` §5.1): run every signer's preflight (tool binaries
+/// Fail-fast signing gate (`meta/docs/2026-06-29-signing.md` §5.1): run every signer's preflight (tool binaries
 /// and key material), aggregating all unmet prerequisites — with the requesting images — into one
 /// error, so the user fixes them in a single pass before any IC run.
 fn preflight_signers(signers: &[ProfileSigner<'_>]) -> Result<(), AppError> {
@@ -1367,7 +1367,7 @@ fn preflight_signers(signers: &[ProfileSigner<'_>]) -> Result<(), AppError> {
 }
 
 /// Report signing-preflight status **without failing** — for `validate` and `--dry-run`
-/// (`meta/docs/signing.md` §5.1). Runs each signer's preflight so missing `openssl`/`sbsign` binaries
+/// (`meta/docs/2026-06-29-signing.md` §5.1). Runs each signer's preflight so missing `openssl`/`sbsign` binaries
 /// surface too.
 fn report_signing(signers: &[ProfileSigner<'_>]) {
     for (requirement, signer) in signers {

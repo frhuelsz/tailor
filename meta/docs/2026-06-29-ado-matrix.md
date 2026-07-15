@@ -98,7 +98,7 @@ tailor's image matrix maps directly: each selected cell becomes one leg.
   suffix breaks any sanitisation collisions). The original slug is kept verbatim as the `slug` variable.
 - **Variables** — **all scalar strings** (ADO matrix values are `{ leg: { var: string } }`, no nesting):
   - **Reserved fields:** `image`, `slug`, `format`, and `baseImage` (when the base is a catalogue slot,
-    [`base-image-catalogue.md`](./base-image-catalogue.md) §6.2). These are what a build job keys off.
+    [`2026-06-29-base-image-catalogue.md`](./2026-06-29-base-image-catalogue.md) §6.2). These are what a build job keys off.
   - **Axes:** each cell axis as `axis_<name>` (e.g. `axis_runtime`, `axis_arch`) — kept *just in case*,
     prefixed so they can never collide with a reserved field, flat because ADO rejects nested values.
 

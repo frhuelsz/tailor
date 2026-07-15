@@ -3,7 +3,7 @@ use std::path::PathBuf;
 /// Errors from loading, parsing, and expanding tailor configuration.
 ///
 /// Typed (no `anyhow`) so diagnostics can name the contributing file, axis, or selector — see
-/// `meta/docs/architecture.md` §6.
+/// `meta/docs/2026-06-22-architecture.md` §6.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("failed to read config file `{}`", .path.display())]

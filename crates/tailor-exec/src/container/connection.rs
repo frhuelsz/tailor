@@ -1,4 +1,4 @@
-//! Engine selection and connection resolution (`meta/docs/container-runtimes.md` §3-§5).
+//! Engine selection and connection resolution (`meta/docs/2026-06-29-container-runtimes.md` §3-§5).
 //!
 //! Everything here is **pure**: it turns the raw inputs the composition root gathers (CLI flags,
 //! environment, manifest) into a [`ConnectionPlan`] — *which* engine was declared and *where* to

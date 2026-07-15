@@ -1,4 +1,4 @@
-//! The canonical per-cell fingerprint — a SHA-256 over every build-affecting input (`meta/docs/design.md`
+//! The canonical per-cell fingerprint — a SHA-256 over every build-affecting input (`meta/docs/2026-06-22-design.md`
 //! §9.1). Deterministic given a deterministic render, so it is stable across machines and runs.
 
 use serde_yaml_ng::Value;

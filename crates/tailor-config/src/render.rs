@@ -1,5 +1,5 @@
 //! The per-cell render pipeline: gather matched fragments, resolve `$include`, merge the config and
-//! tailor fields, interpolate `${…}`, and emit one runnable cell (`meta/docs/image-definitions.md` §7,
+//! tailor fields, interpolate `${…}`, and emit one runnable cell (`meta/docs/2026-06-22-image-definitions.md` §7,
 //! §9.3). Pure and deterministic, so the emitted config is a stable golden snapshot.
 
 use std::{
@@ -26,7 +26,7 @@ const OUTPUTS_FIELD: &str = "outputs";
 const RENDERED_DIR: &str = ".rendered";
 
 /// Write a cell's normalized golden snapshot to `<image_dir>/.rendered/<slug>.yaml` (for review and
-/// CI blast-radius diffing, `meta/docs/image-definitions.md` §9.3). Returns the written path.
+/// CI blast-radius diffing, `meta/docs/2026-06-22-image-definitions.md` §9.3). Returns the written path.
 pub fn write_golden(
     image_dir: &Path,
     slug: &str,

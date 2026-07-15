@@ -1,5 +1,5 @@
 //! Cell selection — narrow a target's expanded matrix to a specific cell or an axis-delimited slice
-//! (`meta/docs/design.md` §11). Selecting a single cell per build is the common ADO path, so the surface
+//! (`meta/docs/2026-06-22-design.md` §11). Selecting a single cell per build is the common ADO path, so the surface
 //! is deliberately small: pin some axes (`axis=value`), or name exact cells by slug.
 
 use std::collections::BTreeMap;

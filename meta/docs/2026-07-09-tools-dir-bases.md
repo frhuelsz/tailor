@@ -52,7 +52,7 @@ docker rm t
 A **list** of named tools-dir sources, each a container image reference. There is **no default**: an
 image that needs a tools dir must name one explicitly (§2.2). Resolution reuses the toolchain
 machinery (pull policy, digest pinning for remote, local-image `Id` for local-only builds — see
-[toolchain resolution](./design.md) / the `pull:` model).
+[toolchain resolution](./2026-06-22-design.md) / the `pull:` model).
 
 ```yaml
 # tailor.yaml
@@ -154,7 +154,7 @@ builders, appended as `--tools-dir <path>` when set (mirroring how `--image-cach
 `--tools-dir` is an IC **preview feature**: IC rejects it unless the image's IC config lists
 `tools-dir` in `previewFeatures` (`ErrToolsDirPreviewRequired` / `PreviewFeatureToolsDir`). tailor
 stays config-opaque and does **not** rewrite `previewFeatures`. But — as with the `output-artifacts`
-gate ([output-artifacts-staging.md](./output-artifacts-staging.md) §4, "narrowed opacity") — tailor
+gate ([2026-06-29-output-artifacts-staging.md](./2026-06-29-output-artifacts-staging.md) §4, "narrowed opacity") — tailor
 performs a single well-defined **read**: if an image sets `toolsDir:` but its IC config does not opt
 into the `tools-dir` preview, `tailor validate` fails with a clear message rather than emitting a
 flag IC will reject mid-build. tailor reads the flag; it never authors intent.

@@ -25,12 +25,12 @@ pub struct ToolConfig {
     pub runtime: Option<Runtime>,
     #[serde(default)]
     pub defaults: Option<Defaults>,
-    /// Workspace-wide signing profiles (`meta/docs/signing.md` §4).
+    /// Workspace-wide signing profiles (`meta/docs/2026-06-29-signing.md` §4).
     #[serde(default)]
     pub signing: Option<SigningConfig>,
     #[serde(default)]
     pub images: Option<ImageCatalogue>,
-    /// Named base-image slots referenced by `base: { ref: <name> }` (`meta/docs/base-image-catalogue.md` §3).
+    /// Named base-image slots referenced by `base: { ref: <name> }` (`meta/docs/2026-06-29-base-image-catalogue.md` §3).
     #[serde(default)]
     pub base_images: Option<BaseImageCatalogue>,
 }
@@ -75,7 +75,7 @@ impl Toolchains {
 
 /// A pinned Image Customizer container.
 ///
-/// `version` is optional, informational metadata (tailor does not gate IC versions — `meta/docs/design.md`
+/// `version` is optional, informational metadata (tailor does not gate IC versions — `meta/docs/2026-06-22-design.md`
 /// §8). The registry tag actually pulled is `tag`, else `version`, else `latest` — see
 /// [`ToolchainEntry::effective_tag`].
 #[derive(Debug, Clone, Deserialize)]
@@ -93,7 +93,7 @@ pub struct ToolchainEntry {
 
 impl ToolchainEntry {
     /// The registry tag to pull: an explicit `tag`, else the `version` string, else the built-in
-    /// [`DEFAULT_IC_TAG`](crate::defaults::DEFAULT_IC_TAG) (`meta/docs/design.md` §5.1).
+    /// [`DEFAULT_IC_TAG`](crate::defaults::DEFAULT_IC_TAG) (`meta/docs/2026-06-22-design.md` §5.1).
     pub fn effective_tag(&self) -> String {
         if let Some(tag) = &self.tag {
             return tag.clone();
@@ -163,7 +163,7 @@ pub enum ToolchainRef {
 }
 
 /// The container engine tailor talks to. Podman speaks the same Docker Engine API, so it needs no
-/// separate implementation — only a different socket (`meta/docs/container-runtimes.md` §2-§3).
+/// separate implementation — only a different socket (`meta/docs/2026-06-29-container-runtimes.md` §2-§3).
 ///
 /// This is a *selector*: it picks the default socket and the `auto` probe order. The engine that
 /// actually governs runtime behavior is whatever the endpoint reports on connect (§4-§5).
@@ -201,7 +201,7 @@ impl std::fmt::Display for Engine {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Runtime {
     /// Which container engine to use: `docker` (default), `podman`, or `auto`
-    /// (`meta/docs/container-runtimes.md` §3). A selector only — the live daemon governs behavior.
+    /// (`meta/docs/2026-06-29-container-runtimes.md` §3). A selector only — the live daemon governs behavior.
     #[serde(default)]
     pub engine: Option<Engine>,
     /// An explicit engine endpoint (`unix://…`, `tcp://…`, or a bare socket path), overriding the
@@ -219,7 +219,7 @@ pub struct Runtime {
     #[serde(default)]
     pub image_cache_dir: Option<PathBuf>,
     /// Opt-in directory for per-cell IC debug logs; persistence is off unless set
-    /// (`meta/docs/logging.md` §5.5). Overridden by `--log-dir` and `TAILOR_LOG_DIR`.
+    /// (`meta/docs/2026-06-29-logging.md` §5.5). Overridden by `--log-dir` and `TAILOR_LOG_DIR`.
     #[serde(default)]
     pub log_dir: Option<PathBuf>,
     #[serde(default)]
@@ -270,10 +270,10 @@ pub struct JanitorImage {
     pub tag: Option<String>,
 }
 
-// ===== Signing (meta/docs/signing.md) =====
+// ===== Signing (meta/docs/2026-06-29-signing.md) =====
 
 /// Workspace-wide signing profiles (`tailor.yaml`). An image opts in with [`ImageDefinition::signing`]
-/// (`meta/docs/signing.md` §4).
+/// (`meta/docs/2026-06-29-signing.md` §4).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SigningConfig {
@@ -286,7 +286,7 @@ pub struct SigningConfig {
 }
 
 /// One signing profile: a key-source `backend` plus its backend-specific settings. Private key
-/// material is always **referenced** (a path), never inlined (`meta/docs/signing.md` §4, §9).
+/// material is always **referenced** (a path), never inlined (`meta/docs/2026-06-29-signing.md` §4, §9).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SigningProfile {
@@ -309,7 +309,7 @@ pub struct SigningProfile {
     pub certificate: Option<String>,
 }
 
-/// Where a signing key comes from (`meta/docs/signing.md` §6). The PE signer is orthogonal.
+/// Where a signing key comes from (`meta/docs/2026-06-29-signing.md` §6). The PE signer is orthogonal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SigningBackend {
@@ -333,7 +333,7 @@ impl SigningBackend {
 }
 
 impl SigningProfile {
-    /// Structural validation: every backend's required fields are present (`meta/docs/signing.md` §4).
+    /// Structural validation: every backend's required fields are present (`meta/docs/2026-06-29-signing.md` §4).
     /// This is *config* validation only; capability/filesystem probing is the build-time preflight
     /// (`tailor-core` signing preflight, §5.1).
     pub fn validate(&self, profile_id: &str) -> Result<(), ConfigError> {
@@ -365,7 +365,7 @@ impl SigningProfile {
 }
 
 /// An image's `signing:` opt-in: `true` ⇒ the workspace default profile, a string ⇒ that named
-/// profile, `false`/omitted ⇒ unsigned (`meta/docs/signing.md` §4).
+/// profile, `false`/omitted ⇒ unsigned (`meta/docs/2026-06-29-signing.md` §4).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum SigningRef {
@@ -375,7 +375,7 @@ pub enum SigningRef {
     Profile(String),
 }
 
-/// Resolve an image's `signing:` ref against the workspace profiles (`meta/docs/signing.md` §4).
+/// Resolve an image's `signing:` ref against the workspace profiles (`meta/docs/2026-06-29-signing.md` §4).
 ///
 /// Returns the resolved `(profile_id, profile)` for a signed image, or `None` when unsigned
 /// (`false` / omitted). Validates the resolved profile structurally.
@@ -422,7 +422,7 @@ pub struct Defaults {
     #[serde(default)]
     pub outputs: Option<Vec<OutputSpec>>,
     /// Default `output.artifacts` staging policy for images that opt into the `output-artifacts`
-    /// preview feature (`meta/docs/output-artifacts-staging.md` §3.3); omitted ⇒ `managed`.
+    /// preview feature (`meta/docs/2026-06-29-output-artifacts-staging.md` §3.3); omitted ⇒ `managed`.
     #[serde(default, rename = "outputArtifacts")]
     pub output_artifacts: Option<OutputArtifactsPolicy>,
 }
@@ -472,11 +472,11 @@ pub struct ImageDefinition {
     #[serde(default)]
     pub operation: Option<Operation>,
     /// Per-image override of the `output.artifacts` staging policy
-    /// (`meta/docs/output-artifacts-staging.md` §3.3); omitted ⇒ the workspace default, else `managed`.
+    /// (`meta/docs/2026-06-29-output-artifacts-staging.md` §3.3); omitted ⇒ the workspace default, else `managed`.
     #[serde(default)]
     pub output_artifacts: Option<OutputArtifactsPolicy>,
     /// Signing opt-in: `true` ⇒ the workspace default profile, `<id>` ⇒ that profile, omitted ⇒
-    /// unsigned (`meta/docs/signing.md` §4).
+    /// unsigned (`meta/docs/2026-06-29-signing.md` §4).
     #[serde(default)]
     pub signing: Option<SigningRef>,
     #[serde(default)]
@@ -507,7 +507,7 @@ pub enum ToolsDirSourceRef {
 }
 
 /// The base-image catalogue: named slots in `tailor.yaml`, each a local file plus an optional remote
-/// source `tailor bases download` fills it from (`meta/docs/base-image-catalogue.md` §3). Images
+/// source `tailor bases download` fills it from (`meta/docs/2026-06-29-base-image-catalogue.md` §3). Images
 /// reference a slot by name with `base: { ref: <name> }`; the path lives once, here.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(transparent)]
@@ -551,7 +551,7 @@ impl FromIterator<BaseImageSlot> for BaseImageCatalogue {
 }
 
 /// One catalogue slot: the local `path` (build input **and** `download` output, workspace-root-relative),
-/// an optional `arch` that reconciles with the referencing cell (`meta/docs/arch-and-platform.md` §3),
+/// an optional `arch` that reconciles with the referencing cell (`meta/docs/2026-06-29-arch-and-platform.md` §3),
 /// and an optional remote `source` (`oci`/`azureLinux`); a sourceless slot is filled out-of-band (CI feed).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -604,7 +604,7 @@ pub enum BaseImageSource {
 pub enum BaseSource {
     /// A local base image file, resolved relative to the image directory, with an optional `arch`
     /// that supplies the cell arch when no `arch` matrix axis is declared
-    /// (`meta/docs/arch-and-platform.md` §3).
+    /// (`meta/docs/2026-06-29-arch-and-platform.md` §3).
     Path {
         path: PathBuf,
         #[serde(default)]
@@ -616,7 +616,7 @@ pub enum BaseSource {
     #[serde(rename_all = "camelCase")]
     AzureLinux { azure_linux: AzureLinuxBase },
     /// A reference (`ref`) to a named `baseImages` catalogue slot
-    /// (`meta/docs/base-image-catalogue.md` §4) — resolves to the slot's local file, like a `path`
+    /// (`meta/docs/2026-06-29-base-image-catalogue.md` §4) — resolves to the slot's local file, like a `path`
     /// base, but the path lives once in `tailor.yaml`.
     Ref {
         #[serde(rename = "ref")]
@@ -691,7 +691,7 @@ pub type Selector = IndexMap<String, OneOrMany>;
 ///
 /// `include` (allowlist) unions its sub-cubes into the build set (or the full product when empty);
 /// `exclude` (denylist) then removes its sub-cubes. Both lists are order-independent; `exclude`
-/// always wins over `include` (`meta/docs/matrix-constraints.md`).
+/// always wins over `include` (`meta/docs/2026-06-29-matrix-constraints.md`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Selectors {
@@ -702,7 +702,7 @@ pub struct Selectors {
 }
 
 /// An image's matrix axes: user-defined, order-preserving `name -> [values]`. The cartesian product
-/// (in declaration order, which the cell slug depends on — `meta/docs/design.md` §10) is the set of
+/// (in declaration order, which the cell slug depends on — `meta/docs/2026-06-22-design.md` §10) is the set of
 /// candidate cells; selection logic lives separately in `selectors:`.
 pub type AxisValues = IndexMap<String, Vec<String>>;
 

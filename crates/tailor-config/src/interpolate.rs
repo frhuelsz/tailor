@@ -1,6 +1,6 @@
 //! `${…}` interpolation of axis values and parameters into scalar strings.
 //!
-//! `meta/docs/image-definitions.md` §8: `params` are a convenience for interpolating axis values into
+//! `meta/docs/2026-06-22-image-definitions.md` §8: `params` are a convenience for interpolating axis values into
 //! scalars and naming a derived constant. There is exactly one construct — `${name}` substitution
 //! into a string — and it only ever produces values, never structure. A name resolves to a matrix
 //! axis value or to another parameter (which may itself interpolate, resolved here with cycle

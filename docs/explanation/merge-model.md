@@ -26,7 +26,7 @@ A fragment can target a **combination** of axes (`by-edition+arch/pro+arm64.yaml
 **several values of one axis** (`by-channel/stable+edge.yaml`, a disjunction). Such fragments sort after the
 single-axis ones they refine (more axes = more specific = later), and a narrower single-value fragment wins
 over a broader disjunction on the same axis. `tailor explain <image> --cell <slug>` prints the exact order;
-see `docs/reference/image-yaml.md` and `meta/docs/directive-design.md` §2.
+see `docs/reference/image-yaml.md` and `meta/docs/2026-06-29-directive-design.md` §2.
 
 ## Maps, lists, and scalars
 

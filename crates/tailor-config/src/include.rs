@@ -1,6 +1,6 @@
 //! `$include` resolution — splicing shared library files into a config tree before merge.
 //!
-//! `meta/docs/image-definitions.md` §7: `$include` resolves to the parsed content of a repo-root-relative
+//! `meta/docs/2026-06-22-image-definitions.md` §7: `$include` resolves to the parsed content of a repo-root-relative
 //! file and substitutes it **as the value at its position**. As a mapping value the key becomes the
 //! file's content (a bare subtree, not a re-stated key); as a list element a list file is spliced
 //! (flattened) in place. `$include` must be the sole key of its mapping and may itself contain

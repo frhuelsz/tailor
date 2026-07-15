@@ -1,5 +1,5 @@
 //! Base-image catalogue orchestration: decide which slots to download, materialise them through the
-//! [`BaseImageFetcher`] port, and assert referenced slots are present (`meta/docs/base-image-catalogue.md`
+//! [`BaseImageFetcher`] port, and assert referenced slots are present (`meta/docs/2026-06-29-base-image-catalogue.md`
 //! §5, §8). No I/O of its own beyond presence checks — the fetch is the adapter's.
 
 use std::{
@@ -12,7 +12,7 @@ use tailor_config::{Arch, BaseImageCatalogue, BaseImageSlot, BaseImageSource};
 use crate::{error::CoreError, ports::BaseImageFetcher};
 
 /// The default slot architecture when a slot declares none — the pull platform is `linux/<arch>`
-/// (`meta/docs/arch-and-platform.md` §3).
+/// (`meta/docs/2026-06-29-arch-and-platform.md` §3).
 const DEFAULT_SLOT_ARCH: Arch = Arch::Amd64;
 
 /// What `tailor bases download` did to one slot.

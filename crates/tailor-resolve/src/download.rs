@@ -1,5 +1,5 @@
 //! Base-image acquisition adapter: pull a catalogue slot's artifact for a platform and write the
-//! image file to its path (`meta/docs/base-image-catalogue.md` §5.2). Reuses `oci_client` (already a
+//! image file to its path (`meta/docs/2026-06-29-base-image-catalogue.md` §5.2). Reuses `oci_client` (already a
 //! dep for digest resolution) to stay self-contained — no shelling out to `oras`.
 //!
 //! The Azure Linux image artifact is an OCI image index; its per-`linux/<arch>` manifest carries the

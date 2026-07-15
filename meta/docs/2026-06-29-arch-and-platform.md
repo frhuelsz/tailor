@@ -46,12 +46,12 @@ flowchart LR
 | Property | Free-form axis (`variant`, …) | Reserved `arch` |
 | --- | --- | --- |
 | Value domain | any `[A-Za-z0-9.-]` string | **closed**: `amd64` \| `arm64` (`parse_arch`; else `MissingArchBase`) — `orchestrator.rs:250` |
-| How it's declared | `matrix:` only | `matrix.arch` axis **or** the `architectures:` field — **equivalent** (`design.md:382`) |
+| How it's declared | `matrix:` only | `matrix.arch` axis **or** the `architectures:` field — **equivalent** (`2026-06-22-design.md:382`) |
 | Always present? | only if declared | **yes** — `architectures` (image, else `defaults.architectures`) gives every cell a concrete arch, and an `arch` coordinate is injected so `--select`/`${arch}`/`by-arch/` work either way (`orchestrator.rs:248-259`) |
 | Drives the container | no | **`--platform linux/<arch>`** (`orchestrator.rs:142,190` → `arg_builder.rs:215`) |
 | Drives the base | no | a **`by-arch/<arch>.yaml`** fragment swaps `base` per arch (and a catalogue slot's `arch` must match) |
 | Slug | in declared order | always present; **position differs** by spelling (`slug_for`, `orchestrator.rs:317-333`) |
-| Precedence | by declaration order | treated as the **broadest** axis (`directive-design.md:231`) |
+| Precedence | by declaration order | treated as the **broadest** axis (`2026-06-29-directive-design.md:231`) |
 
 **Footgun A — silent precedence.** If both an `arch` axis *and* `architectures` are set, the axis wins
 and `architectures` is **silently ignored** (`orchestrator.rs:248-254`). The fix is to drop the
@@ -68,7 +68,7 @@ from two declarations:
 
 - the **image arch** — the `arch` axis in `image.yaml` (today also the redundant `architectures:` field,
   §5); and
-- the **base-image arch** — a catalogue slot's `arch` ([`base-image-catalogue.md`](./base-image-catalogue.md) §5.1),
+- the **base-image arch** — a catalogue slot's `arch` ([`2026-06-29-base-image-catalogue.md`](./2026-06-29-base-image-catalogue.md) §5.1),
   or the architecture component of an `oci.platform`.
 
 The rule (the full table is §3):
@@ -136,11 +136,11 @@ silent-precedence footgun. Until that lands, both-set should warn (`--strict` er
 
 A catalogue slot carries its **own** `arch` precisely because `tailor bases download` runs
 cell-independently — there is no cell to derive an arch from
-([`base-image-catalogue.md`](./base-image-catalogue.md) §5.1). When a cell then references the slot
+([`2026-06-29-base-image-catalogue.md`](./2026-06-29-base-image-catalogue.md) §5.1). When a cell then references the slot
 (`base: { ref: <name> }`), the slot's `arch` becomes the **base-image arch** in the §3 matrix: it
 agrees with, fills in, or conflicts with the image arch. This finally closes the loop that direct
 `path` bases leave open (today tailor only *warns* on a `base.path` shared across arches and never
-inspects the file — `design.md` §6); a named slot makes the base's arch explicit and checkable.
+inspects the file — `2026-06-22-design.md` §6); a named slot makes the base's arch explicit and checkable.
 
 ---
 
@@ -148,7 +148,7 @@ inspects the file — `design.md` §6); a named slot makes the base's arch expli
 
 1. **Make it obvious.** Document `arch` as the reserved axis — its dual spelling, closed value set, and
    platform/base wiring, plus the effective-arch matrix (§3) — prominently in
-   `docs/reference/image-yaml.md` and `meta/docs/image-definitions.md` on implementation (not buried in
+   `docs/reference/image-yaml.md` and `meta/docs/2026-06-22-image-definitions.md` on implementation (not buried in
    a matrix-table footnote).
 2. **Reconcile + validate** the image arch against the base-image arch (§3) at config-resolution time,
    covered by `validate`.
@@ -169,5 +169,5 @@ inspects the file — `design.md` §6); a named slot makes the base's arch expli
    build on an arm64 host emulates amd64 (or errors if emulation is unavailable). Acceptable for a
    reproducible default; the workspace overrides via `defaults.architectures` if arm64 is the norm.
 4. **Cross-arch host builds** (building an `arm64` image on an `amd64` host via binfmt/qemu) are a
-   *runtime* concern (`meta/docs/container-runtimes.md`), orthogonal to this contract — the cell's
+   *runtime* concern (`meta/docs/2026-06-29-container-runtimes.md`), orthogonal to this contract — the cell's
    effective arch is still the target, regardless of host.

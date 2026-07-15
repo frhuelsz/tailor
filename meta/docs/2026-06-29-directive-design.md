@@ -5,10 +5,10 @@
 > `$unset`, composite fragment paths, `$prepend`/`$append`, reserved `$select`, and `tailor explain` are implemented in `crates/tailor-config/src/merge.rs`, `fragment.rs`, `render.rs`, and `crates/tailor/src/run.rs`. Deferred candidates remain intentionally unbuilt.
 
 This is the forward design for the capabilities chosen out of the survey in
-[`directive-gaps.md`](./directive-gaps.md), grounded in the `comparison/` port of Trident's test images.
+[`2026-06-29-directive-gaps.md`](./2026-06-29-directive-gaps.md), grounded in the `comparison/` port of Trident's test images.
 It specifies five things:
 
-1. **`$unset`** — remove an inherited key (final design; supersedes `unset-directive.md`).
+1. **`$unset`** — remove an inherited key (final design; supersedes `2026-06-29-unset-directive.md`).
 2. **Composite fragment paths** — let a fragment target a *combination* of axis values: a conjunction
    across axes (`by-a+b/x+y.yaml`) or a disjunction within one axis (`by-a/x+y.yaml`).
 3. **`$prepend` / `$append`** — add items to either end of an inherited list.
@@ -24,7 +24,7 @@ Capabilities deliberately **not** built are listed at the end with pointers back
 | `$prepend` / `$append` | merge directives (lists) | **Implemented** (`merge.rs`) |
 | `tailor explain` | CLI inspector | **Implemented** — prints the ordered merge file list (`render.rs::merge_plan`, `run.rs`) |
 | `$select` | merge directive | **Reserved** — errors with a clear `ReservedDirective` (`merge.rs`) |
-| interpolated `$include`, `$mergeBy`, `$default`, `$rename`, ragged axes | — | Deferred / not doing — see `directive-gaps.md` |
+| interpolated `$include`, `$mergeBy`, `$default`, `$rename`, ragged axes | — | Deferred / not doing — see `2026-06-29-directive-gaps.md` |
 
 Where each piece lives in the existing per-cell pipeline:
 
@@ -267,7 +267,7 @@ positionally (require equal counts) into an AND predicate; with **1 axis**, trea
 build a membership predicate `cell[axis] ∈ {values}` (the existing single-value fragment is the
 one-element case). Validate declared axes/values and canonical ordering as above, compute the sort key
 `(arity, breadth, tie-break)`, and sort; the `merge_into` loop is otherwise unchanged. Keep arity general,
-but note that arity ≥ 3 is usually a sign the thing should be its own image (cf. `directive-gaps.md` §8).
+but note that arity ≥ 3 is usually a sign the thing should be its own image (cf. `2026-06-29-directive-gaps.md` §8).
 
 ---
 
@@ -439,7 +439,7 @@ order is guaranteed to match what a real render/build does; it cannot drift from
 
 ## Deferred / not doing
 
-Full rationale for each is in [`directive-gaps.md`](./directive-gaps.md); summarized here so this doc is
+Full rationale for each is in [`2026-06-29-directive-gaps.md`](./2026-06-29-directive-gaps.md); summarized here so this doc is
 self-contained.
 
 - **Interpolated `$include` paths** (`layouts/storage/${boot}_${verity}.yaml`) — *Medium*. A real
@@ -455,13 +455,13 @@ self-contained.
   prefer dropping it from the inventory unless a concrete IC schema-migration case appears.
 - **Ragged / dependent axes** (an axis that only applies for some values of another) — *not a feature*. When
   one axis value forces all others to a single value it is "a different kind of thing, better kept as its
-  own image" (`directive-gaps.md` §8); the installer split (`trident-installers` vs
+  own image" (`2026-06-29-directive-gaps.md` §8); the installer split (`trident-installers` vs
   `trident-container-installer`) is the worked example.
 
 ## Cross-references
 
-- [`directive-gaps.md`](./directive-gaps.md) — the full survey and rationale this design draws from.
-- [`matrix-constraints.md`](./matrix-constraints.md) — `selectors:` and the "axis value vs separate image"
+- [`2026-06-29-directive-gaps.md`](./2026-06-29-directive-gaps.md) — the full survey and rationale this design draws from.
+- [`2026-06-29-matrix-constraints.md`](./2026-06-29-matrix-constraints.md) — `selectors:` and the "axis value vs separate image"
   philosophy (§7.2) behind §2 and the ragged-axis decision.
 - `comparison/NORMALIZATION.md` — the concrete per-item divergences (`overlays: []`, selinux, script
   ordering, installer consolidation) that motivate `$unset`, composite paths, and `$prepend`/`$append`.

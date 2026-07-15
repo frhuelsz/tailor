@@ -1,4 +1,4 @@
-//! Workspace discovery (Cargo model) — `meta/docs/design.md` §5.3.
+//! Workspace discovery (Cargo model) — `meta/docs/2026-06-22-design.md` §5.3.
 //!
 //! `tailor` walks up from the current directory to find `tailor.yaml` (the workspace root); every
 //! member image (`*/image.yaml` auto-discovered at depth 1, or curated via the `images` catalogue)

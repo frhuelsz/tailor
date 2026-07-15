@@ -18,7 +18,7 @@ repository = "https://github.com/frhuelsz/tailor"
 authors = ["tailor contributors"]
 
 # All third-party deps are pinned here; per-crate manifests use `<name> = { workspace = true }`.
-# Deps are added as the crates that need them are implemented (see docs/architecture.md §9.2).
+# Deps are added as the crates that need them are implemented (see docs/2026-06-22-architecture.md §9.2).
 [workspace.dependencies]
 # --- local crates ---
 tailor-config = { path = "crates/tailor-config" }
@@ -33,7 +33,7 @@ tokio-util = { version = "0.7", features = ["rt", "io-util"] }
 
 # --- serialization ---
 serde = { version = "1", features = ["derive"] }
-serde_yaml_ng = "0.10"             # maintained serde_yaml drop-in fork (see architecture.md §11.1)
+serde_yaml_ng = "0.10"             # maintained serde_yaml drop-in fork (see 2026-06-22-architecture.md §11.1)
 serde_json = "1"
 indexmap = { version = "2", features = ["serde"] }   # order-preserving maps (matrix axis order)
 

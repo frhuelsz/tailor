@@ -19,7 +19,7 @@ use crate::{arg_builder, guard, janitor, output_artifacts, rpm_farm, working_cop
 const CONTAINER_NAME_PREFIX: &str = "tailor-ic";
 const RPM_FARM_PREFIX: &str = ".tailor-farm";
 /// The manifest IC's `customize` writes into the `output.artifacts` staging dir, describing the boot
-/// artifacts to sign and re-inject (`meta/docs/signing.md` §5).
+/// artifacts to sign and re-inject (`meta/docs/2026-06-29-signing.md` §5).
 const INJECT_FILES_MANIFEST: &str = "inject-files.yaml";
 
 #[derive(Debug, Clone)]
@@ -106,8 +106,8 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             .collect::<Vec<_>>();
 
         // Relocate IC's `output.artifacts` scratch to a tailor-owned path so it does not land
-        // root-owned in the source tree (`meta/docs/output-artifacts-staging.md`). A signed cell
-        // forces `scratch` — the staging is interim, reclaimed after `inject-files` (`signing.md` §5).
+        // root-owned in the source tree (`meta/docs/2026-06-29-output-artifacts-staging.md`). A signed cell
+        // forces `scratch` — the staging is interim, reclaimed after `inject-files` (`2026-06-29-signing.md` §5).
         let run_id = output_artifacts::run_id();
         let policy = if context.signer.is_some() {
             OutputArtifactsPolicy::Scratch
@@ -144,7 +144,7 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                 })?;
 
         // Run IC: the single-pass `customize`, or the signed three-pass (`customize` → sign →
-        // `inject-files`, `meta/docs/signing.md` §5). Both remove the working copy and reclaim the
+        // `inject-files`, `meta/docs/2026-06-29-signing.md` §5). Both remove the working copy and reclaim the
         // staging tree before propagating any failure.
         let result = if let Some(signer) = context.signer.clone() {
             self.run_signed_passes(
@@ -244,7 +244,7 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             managed_paths.push(cache_dir.clone());
         }
         // The per-cell IC log is written root-owned inside the container too; chown it so a runner can
-        // read/upload it (`meta/docs/logging.md` §5.5).
+        // read/upload it (`meta/docs/2026-06-29-logging.md` §5.5).
         if let Some(log_file) = &log_file {
             managed_paths.push(log_file.clone());
         }
@@ -301,7 +301,7 @@ impl<R: ContainerRuntime> IcExecutor<R> {
             .await
     }
 
-    /// The signed three-pass (`meta/docs/signing.md` §5): `customize` → raw intermediate → chown the
+    /// The signed three-pass (`meta/docs/2026-06-29-signing.md` §5): `customize` → raw intermediate → chown the
     /// staging → host-side `sign` → `inject-files` → final image. Returns the final pass's container
     /// result; always reclaims the staging tree and raw intermediate (best-effort) before returning.
     #[allow(
@@ -643,7 +643,7 @@ fn container_name(cell: &Cell, context: &ExecutionContext) -> String {
 }
 
 /// A per-cell (and per-clone) identifier for the signing leaf key, so parallel/clone signs never
-/// share a leaf (`meta/docs/signing.md` §7).
+/// share a leaf (`meta/docs/2026-06-29-signing.md` §7).
 fn leaf_id(cell: &Cell, context: &ExecutionContext) -> String {
     match context.clone_index {
         Some(clone) => format!("{}_clone{clone}", cell.slug.as_ref()),

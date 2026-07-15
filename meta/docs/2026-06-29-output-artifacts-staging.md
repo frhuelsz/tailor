@@ -5,14 +5,14 @@
 > tailor's design for the interim directory Image Customizer's `output.artifacts` feature creates
 > (root-owned, in the source image dir today). It settles on one approach: **gate on the
 > `output-artifacts` preview flag, relocate IC's scratch to a tailor-owned directory, reclaim it
-> sudo-free, and never destroy a user-requested output.** Amends [`signing.md`](./signing.md) §3/§5
+> sudo-free, and never destroy a user-requested output.** Amends [`2026-06-29-signing.md`](./2026-06-29-signing.md) §3/§5
 > (which currently says tailor never relocates `output.artifacts`).
 >
 > **Implemented:** the `output-artifacts` gate (§3.1), the `outputArtifacts: managed|scratch|strip`
 > policy (§3.3, `OutputArtifactsPolicy` in `crates/tailor-config`), the relocate + sudo-free
 > chown/reclaim + this-cell crash sweep (§3.2 staging, §3.4–§3.5, `crates/tailor-exec/src/output_artifacts.rs`
 > + the executor). **Pending:** the signed bridge's `sign`/`inject-files` steps (await signing
-> execution, [`signing-status.md`](./signing-status.md)), the `--keep-staging` opt-out, `--dry-run`
+> execution, [`2026-06-29-signing-status.md`](./2026-06-29-signing-status.md)), the `--keep-staging` opt-out, `--dry-run`
 > display of the staging steps, and the forward-compat stable detector (§3.1).
 
 ## 1. Problem
@@ -43,13 +43,13 @@ Two things make this a tailor problem:
    file's parent directory** (IC docs). tailor writes its merged config as a *colocated* working copy
    in the image's real directory (`crates/tailor-exec/src/working_copy.rs` —
    `.tailor-render.<slug>.ic.yaml`, colocated so IC resolves relative `files/`/`scripts/` paths against
-   the image dir, `meta/docs/design.md` §7.6). So `./output` resolves to `<image-dir>/output/`, and
+   the image dir, `meta/docs/2026-06-22-design.md` §7.6). So `./output` resolves to `<image-dir>/output/`, and
    because IC runs as root in a privileged container, everything in it is **root-owned**
-   (`meta/docs/design.md` §7.7). The leftover at `tests/images/trident-testimage/output/` (`root:root`,
+   (`meta/docs/2026-06-22-design.md` §7.7). The leftover at `tests/images/trident-testimage/output/` (`root:root`,
    holding `ukis/…efi` + `inject-files.yaml`) is exactly this.
 
 2. **It appears even when nothing signs it.** tailor's signing *execution* is not implemented yet
-   ([`signing-status.md`](./signing-status.md)), so today a cell that carries `output.artifacts` builds
+   ([`2026-06-29-signing-status.md`](./2026-06-29-signing-status.md)), so today a cell that carries `output.artifacts` builds
    an image **and** strands a root-owned `output/` — droppings in `git status`, removable only with
    `sudo`.
 
@@ -79,9 +79,9 @@ flowchart LR
   and *reclaim it with elevation*.
 - **tailor already has the reclaim mechanism.** The janitor (`crates/tailor-exec/src/janitor.rs`) runs
   a throwaway root container to `chown -R <caller>` (`chown_paths`) and `rm -rf` (`remove_paths`) — the
-  standard sudo-free substitute (`meta/docs/design.md` §7.7). The executor already tracks
+  standard sudo-free substitute (`meta/docs/2026-06-22-design.md` §7.7). The executor already tracks
   `managed_paths` and removes the working copy after each run (`crates/tailor-exec/src/executor.rs`).
-- **tailor's current stance.** [`signing.md`](./signing.md) §3/§5 passes `output.artifacts` through
+- **tailor's current stance.** [`2026-06-29-signing.md`](./2026-06-29-signing.md) §3/§5 passes `output.artifacts` through
   *opaquely* and never relocates it; this proposal amends that.
 
 ## 3. Design
@@ -183,7 +183,7 @@ Legacy/hand-authored leftovers (like the existing root-owned `output/`) are recl
 
 ## 4. Reconciling with config-opacity
 
-§3.2/§3.3 (`scratch`/`strip`) edit IC fields, which signing.md §3/§5 currently forbids, and §3.1 reads
+§3.2/§3.3 (`scratch`/`strip`) edit IC fields, which 2026-06-29-signing.md §3/§5 currently forbids, and §3.1 reads
 the config (the preview flag). This **narrows**, not abandons, opacity:
 
 - tailor never interprets the user's **intent** — `items:` is passed through verbatim; the user decides
@@ -192,7 +192,7 @@ the config (the preview flag). This **narrows**, not abandons, opacity:
   governs `--build-dir`, `--output-image-file`, and the working-copy location.
 - The §3.1 read is a single, well-defined predicate (a known feature flag), not config interpretation.
 
-signing.md §3/§5 should be amended from "never rewrites `output.artifacts`" to "relocates the
+2026-06-29-signing.md §3/§5 should be amended from "never rewrites `output.artifacts`" to "relocates the
 `output.artifacts` *path* to a managed staging dir and reclaims it after re-injection; never changes
 *what* is extracted."
 
@@ -205,7 +205,7 @@ signing.md §3/§5 should be amended from "never rewrites `output.artifacts`" to
   user-requested output (§3.3). Retained only as the explicit `strip` policy.
 - **Ephemeral working-copy directory** (move the working copy out of the image dir so `./output` lands
   in a build dir). *Rejected:* breaks colocated relative `files/`/`scripts/` resolution
-  (`meta/docs/design.md` §7.6) until the "read-only-config symlink farm" (§18 future work) exists.
+  (`meta/docs/2026-06-22-design.md` §7.6) until the "read-only-config symlink farm" (§18 future work) exists.
 
 ## 6. Sibling case — `output.selinuxPolicyPath`
 
@@ -227,7 +227,7 @@ source tree.) Whether to fold this into the same mechanism now or defer is an op
   behind version-tested behavior; the default `managed` does not depend on it.
 - **Published CA cert:** `sign.py`'s `publish_ca_certificate` writes `ca_cert.pem` into the output dir.
   In tailor's model that is a deliberate **signing-profile output** tied to the profile's
-  `publishCaCert` field (signing.md §4), not scratch — it must be written to the cell's real output dir
+  `publishCaCert` field (2026-06-29-signing.md §4), not scratch — it must be written to the cell's real output dir
   (and tracked by the build stamp), never into the swept staging dir.
 - **Incremental stamps:** ensure a relocated/kept staging dir never perturbs the up-to-date check
   (`crates/tailor-core/src/stamp.rs`).

@@ -1,4 +1,4 @@
-//! Fragments and conditional composition (`meta/docs/image-definitions.md` §6, §9.1).
+//! Fragments and conditional composition (`meta/docs/2026-06-22-image-definitions.md` §6, §9.1).
 //!
 //! A fragment is a partial document: tailor fields at the top level (`base`, `outputs`, `params`,
 //! `rpmSources`, an inline `match`) plus an opaque `config:` delta. The recommended layout encodes
@@ -41,7 +41,7 @@ pub(crate) struct Fragment {
 }
 
 /// A boolean condition over a cell's axis values and the image's enabled features
-/// (`meta/docs/image-definitions.md` §6).
+/// (`meta/docs/2026-06-22-image-definitions.md` §6).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum Match {
@@ -112,7 +112,7 @@ struct AxisClause {
 }
 
 /// Merge-precedence key (ascending = applied earlier = lower precedence), per
-/// `meta/docs/directive-design.md` §2: more axes (`arity`) apply later; among the same axes, broader
+/// `meta/docs/2026-06-29-directive-design.md` §2: more axes (`arity`) apply later; among the same axes, broader
 /// value-sets apply earlier so a narrower fragment wins; `axes`/`values` give a deterministic order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Order {
@@ -185,7 +185,7 @@ impl LoadedFragment {
 /// matrix axis-declaration order (broader disjunctions before narrower ones), then multi-axis
 /// composites, then feature fragments. Apply order is merge precedence, so authors control it by
 /// ordering axes in the matrix. Validates that every fragment axis/value is declared (closed-axis
-/// check) and that composite/disjunction paths are well-formed (`meta/docs/directive-design.md` §2).
+/// check) and that composite/disjunction paths are well-formed (`meta/docs/2026-06-29-directive-design.md` §2).
 pub(crate) fn discover(
     image_dir: &Path,
     matrix: Option<&AxisValues>,

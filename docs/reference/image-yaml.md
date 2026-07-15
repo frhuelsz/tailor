@@ -120,7 +120,7 @@ Apply order is merge precedence (later wins for scalars, extends lists). Fragmen
 (more axes apply later — a composite refines the singles it builds on), then **axis-declaration order**
 (cross-axis precedence follows the matrix), then **breadth** (a broader disjunction applies before a
 narrower single value on the same axis, so the more specific one wins). Run `tailor explain <image> --cell
-<slug>` to print the exact merge order for a cell. See `meta/docs/directive-design.md` §2 for the full
+<slug>` to print the exact merge order for a cell. See `meta/docs/2026-06-29-directive-design.md` §2 for the full
 model.
 
 ## Base sources

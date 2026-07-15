@@ -1,4 +1,4 @@
-//! Per-cell build stamps (`meta/docs/design.md` §9.2, §12). Each artifact has a sidecar JSON at
+//! Per-cell build stamps (`meta/docs/2026-06-22-design.md` §9.2, §12). Each artifact has a sidecar JSON at
 //! `<output-dir>/.tailor/stamps/<cell-slug>.json` recording the canonical fingerprint, so rebuild
 //! decisions compare against the last *built* inputs (immune to a just-refreshed lock).
 

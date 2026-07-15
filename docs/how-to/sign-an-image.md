@@ -6,7 +6,7 @@ tailor can produce **Secure Boot–signed** images by orchestrating Image Custom
 
 > **Status — foundation only.** The `signing:` configuration, profile resolution, and the
 > **fail-fast preflight** are implemented and enforced. The signing *execution* (certificate minting,
-> PE signing, the `inject-files` pass) is a later milestone (`meta/docs/signing.md` §11). Until it
+> PE signing, the `inject-files` pass) is a later milestone (`meta/docs/2026-06-29-signing.md` §11). Until it
 > lands, a signed `tailor build` runs the preflight and then **stops with a clear error** rather than
 > produce a silently-unsigned image. `tailor validate` and `tailor build --dry-run` report signing
 > readiness without failing.

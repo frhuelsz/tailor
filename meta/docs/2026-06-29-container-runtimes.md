@@ -155,7 +155,7 @@ trait and `IcExecutor` are unchanged. `--dry-run` uses a `NoopRuntime` and never
 isn't available or can't be accessed — never start customizing only to fail mid-flight.
 
 tailor runs an **engine preflight** once, before any image is built (the same "fail fast before the
-slow privileged work" pattern as the signing preflight, signing.md §5.1):
+slow privileged work" pattern as the signing preflight, 2026-06-29-signing.md §5.1):
 
 1. Resolve the endpoint (§4).
 2. **Ping** it — a cheap `bollard` `ping()`/`version()` round-trip — and fetch `daemon_info()`.

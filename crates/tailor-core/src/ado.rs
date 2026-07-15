@@ -1,4 +1,4 @@
-//! The Azure DevOps matrix object for `tailor matrix --ado`/`--format ado` (`meta/docs/ado-matrix.md`).
+//! The Azure DevOps matrix object for `tailor matrix --ado`/`--format ado` (`meta/docs/2026-06-29-ado-matrix.md`).
 //! Each selected cell becomes one ADO leg: a sanitised key mapping to scalar-string variables a build
 //! job keys off. tailor only knows about images, so the shape is fixed (slug → image fields) — no
 //! projection config.
@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::Cell;
 
 /// Axis variables are prefixed so they can never collide with a reserved field; flat because ADO
-/// rejects nested matrix values (`meta/docs/ado-matrix.md` §4).
+/// rejects nested matrix values (`meta/docs/2026-06-29-ado-matrix.md` §4).
 const AXIS_VAR_PREFIX: &str = "axis_";
 /// ADO leg names allow only `[A-Za-z0-9_]` and must start with a letter; cap at 100 chars.
 const MAX_LEG_KEY_LEN: usize = 100;
@@ -108,7 +108,7 @@ fn short_hash(value: &str) -> String {
 }
 
 /// Is `name` a valid ADO output variable name (`[A-Za-z_][A-Za-z0-9_]*`)? Keeps
-/// `outputs['emit.<NAME>']` references clean (`meta/docs/ado-matrix.md` §7).
+/// `outputs['emit.<NAME>']` references clean (`meta/docs/2026-06-29-ado-matrix.md` §7).
 pub fn is_valid_var_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars

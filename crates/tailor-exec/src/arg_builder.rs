@@ -29,7 +29,7 @@ const FLAG_LOG_FILE: &str = "--log-file";
 const LOG_FORMAT_JSON: &str = "json";
 const LOG_COLOR_NEVER: &str = "never";
 /// IC's `--log-level` default when the manifest/flags set none: run IC at full `debug` so the
-/// in-memory capture and any on-disk log always have the full story (`meta/docs/logging.md` §5.1).
+/// in-memory capture and any on-disk log always have the full story (`meta/docs/2026-06-29-logging.md` §5.1).
 const DEFAULT_IC_LOG_LEVEL: &str = "debug";
 const FLAG_OUTPUT_IMAGE_FILE: &str = "--output-image-file";
 const FLAG_OUTPUT_IMAGE_FORMAT: &str = "--output-image-format";
@@ -42,7 +42,7 @@ const SUBCOMMAND_CONVERT: &str = "convert";
 const SUBCOMMAND_CUSTOMIZE: &str = "customize";
 const SUBCOMMAND_INJECT_FILES: &str = "inject-files";
 /// The intermediate image format a signed `customize` writes; the final format is produced by the
-/// `inject-files` pass (`meta/docs/signing.md` §5).
+/// `inject-files` pass (`meta/docs/2026-06-29-signing.md` §5).
 const OUTPUT_FORMAT_RAW: &str = "raw";
 
 pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Result<Vec<String>, ExecError> {
@@ -63,7 +63,7 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Result<Vec<Stri
         ));
     }
 
-    // Always run IC structured (`meta/docs/logging.md` §5.1): JSON on stderr, no ANSI, at `debug`
+    // Always run IC structured (`meta/docs/2026-06-29-logging.md` §5.1): JSON on stderr, no ANSI, at `debug`
     // (or the configured level) so the in-memory capture and any on-disk log have the full story.
     args.extend(flag_value(FLAG_LOG_FORMAT, LOG_FORMAT_JSON.to_owned()));
     args.extend(flag_value(FLAG_LOG_COLOR, LOG_COLOR_NEVER.to_owned()));
@@ -136,7 +136,7 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Result<Vec<Stri
 
 /// The `customize` pass of a signed build: identical to a normal customize except it writes a **raw
 /// intermediate** (`<slug>.intermediate.raw`) with no cosi compression — the final format is produced
-/// by the `inject-files` pass (`meta/docs/signing.md` §5). The user's relocated `output.artifacts`
+/// by the `inject-files` pass (`meta/docs/2026-06-29-signing.md` §5). The user's relocated `output.artifacts`
 /// still rides along in the working copy, so IC extracts the boot artifacts + `inject-files.yaml`.
 pub(crate) fn build_signed_customize_args(
     cell: &Cell,
@@ -202,7 +202,7 @@ fn push_tools_dir_arg(args: &mut Vec<String>, context: &ExecutionContext) {
 
 /// The `inject-files` pass of a signed build: re-inject the now-signed artifacts from
 /// `inject-files.yaml` into the raw intermediate and produce the cell's **final** output format
-/// (`meta/docs/signing.md` §5). `cosiCompressionLevel` applies only here.
+/// (`meta/docs/2026-06-29-signing.md` §5). `cosiCompressionLevel` applies only here.
 pub(crate) fn build_inject_files_args(
     cell: &Cell,
     context: &ExecutionContext,
@@ -232,7 +232,7 @@ pub(crate) fn build_inject_files_args(
     Ok(args)
 }
 
-/// IC's structured-logging flags (`meta/docs/logging.md` §5.1), shared by every pass.
+/// IC's structured-logging flags (`meta/docs/2026-06-29-logging.md` §5.1), shared by every pass.
 fn push_log_flags(args: &mut Vec<String>, cell: &Cell, context: &ExecutionContext) {
     args.extend(flag_value(FLAG_LOG_FORMAT, LOG_FORMAT_JSON.to_owned()));
     args.extend(flag_value(FLAG_LOG_COLOR, LOG_COLOR_NEVER.to_owned()));
@@ -269,7 +269,7 @@ pub(crate) fn artifact_path(cell: &Cell, context: &ExecutionContext) -> PathBuf 
 }
 
 /// The host path of the per-cell IC log when on-disk persistence is enabled, else `None`
-/// (`meta/docs/logging.md` §5.5). A `--clones` run suffixes the slug so clones never collide.
+/// (`meta/docs/2026-06-29-logging.md` §5.5). A `--clones` run suffixes the slug so clones never collide.
 pub(crate) fn log_file_path(cell: &Cell, context: &ExecutionContext) -> Option<PathBuf> {
     context.runtime.log_dir.as_ref().map(|dir| {
         let name = match context.clone_index {
@@ -595,7 +595,7 @@ fn docker_prelude(
     Ok(argv)
 }
 
-/// Render a signed cell's three-pass for `--dry-run` (`meta/docs/signing.md` §5): the real
+/// Render a signed cell's three-pass for `--dry-run` (`meta/docs/2026-06-29-signing.md` §5): the real
 /// `customize` → raw-intermediate `docker run`, then a note describing the host sign step and the
 /// `inject-files` → final-format pass. No daemon is contacted.
 pub(crate) fn render_signed_dry_run(
@@ -609,7 +609,7 @@ pub(crate) fn render_signed_dry_run(
         .output_dir
         .join(crate::output_artifacts::ca_cert_name(cell.slug.as_ref()));
     Ok(format!(
-        "# {slug} — signed 3-pass (meta/docs/signing.md §5)\n\
+        "# {slug} — signed 3-pass (meta/docs/2026-06-29-signing.md §5)\n\
          # pass 1/3: customize -> raw intermediate ({intermediate})\n{customize}\n\n\
          # pass 2/3: host-side sign the staged boot artifacts (openssl + sbsign); publish CA -> {ca}\n\
          # pass 3/3: inject-files -> final {fmt} ({final})",

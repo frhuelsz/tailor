@@ -1,4 +1,4 @@
-//! Structured Image Customizer log handling (`meta/docs/logging.md` §5).
+//! Structured Image Customizer log handling (`meta/docs/2026-06-29-logging.md` §5).
 //!
 //! IC runs with `--log-format=json --log-level=debug --log-color=never`, so each stderr line is one
 //! logrus object `{"level":..,"msg":..,"time":..}`. This module turns that stream into something

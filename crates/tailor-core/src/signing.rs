@@ -1,5 +1,5 @@
 //! Signing preflight — the fail-fast capability check run once before any IC build
-//! (`meta/docs/signing.md` §5.1).
+//! (`meta/docs/2026-06-29-signing.md` §5.1).
 //!
 //! It verifies tailor *can* sign (tool/key/credentials present) so a signed build never customizes N
 //! cells only to fail at the signing step and leave half-built, root-owned outputs around. The probe
@@ -7,7 +7,7 @@
 //!
 //! This module is the **foundation** (config + preflight). The signing *execution* — cert minting via
 //! `rcgen`, PE signing via `sbsign`, and the `inject-files` IC pass — is a later milestone
-//! (`meta/docs/signing.md` §11, S1-remainder). Until it lands, `tailor` refuses a signed build rather
+//! (`meta/docs/2026-06-29-signing.md` §11, S1-remainder). Until it lands, `tailor` refuses a signed build rather
 //! than silently emit an unsigned image.
 
 use std::io::Read as _;
@@ -32,7 +32,7 @@ pub struct MissingPrerequisite {
 }
 
 /// The signing feature's error. Preflight aggregates *every* unmet prerequisite so the user fixes
-/// them all in one pass rather than one failed build at a time (`meta/docs/signing.md` §5.1);
+/// them all in one pass rather than one failed build at a time (`meta/docs/2026-06-29-signing.md` §5.1);
 /// execution failures wrap the failing step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignError {
@@ -80,13 +80,13 @@ pub struct SigningRequirement<'a> {
     pub images: Vec<String>,
 }
 
-/// Probe a single profile's prerequisites — cheap, side-effect-free (`meta/docs/signing.md` §5.1).
+/// Probe a single profile's prerequisites — cheap, side-effect-free (`meta/docs/2026-06-29-signing.md` §5.1).
 ///
 /// - `keypair` → the `key` and `cert` files exist, are readable, and look like PEM. Both are checked
 ///   so a single preflight names *every* unmet prerequisite, not just the first.
 /// - `local-test-ca` → always satisfiable (pure-Rust `rcgen` mints keys at sign time).
 /// - `azure-key-vault` → structural config only here; a live credential/handshake probe is a later
-///   milestone (`meta/docs/signing.md` §11, S2).
+///   milestone (`meta/docs/2026-06-29-signing.md` §11, S2).
 ///
 /// Relative `key`/`cert` paths resolve against `base_dir` (the workspace root, where `tailor.yaml`
 /// lives). Returns every unmet prerequisite for this profile (empty ⇒ ready).
@@ -129,7 +129,7 @@ fn looks_like_pem(bytes: &[u8]) -> bool {
         .starts_with("-----BEGIN")
 }
 
-/// Run the signing preflight over every distinct required profile (`meta/docs/signing.md` §5.1).
+/// Run the signing preflight over every distinct required profile (`meta/docs/2026-06-29-signing.md` §5.1).
 ///
 /// On any failure this returns a single [`SignError`] naming **all** unmet prerequisites (across all
 /// profiles, and both files of a `keypair`), so the caller can abort the whole build before

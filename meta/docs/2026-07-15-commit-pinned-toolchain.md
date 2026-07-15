@@ -12,7 +12,7 @@
 > **Layering (tailor ↔ IC ↔ ACL):** producing the IC container is an *IC* build concern; tailor only
 > automates the mechanical clone → compile → assemble → tag pipeline that a user otherwise runs by
 > hand. tailor never reasons about what a given IC commit can or cannot do — the commit is just a
-> pinned, reproducible input (mirroring how `version` is informational, `design.md` §8).
+> pinned, reproducible input (mirroring how `version` is informational, `2026-06-22-design.md` §8).
 
 ## 1. Motivation
 
@@ -100,8 +100,8 @@ an IC developer's edit-compile-run loop).
   that change the output (`strategy`, `baseTag`, `extraPackages`). A `ref:`/`branch:` source resolves
   to a SHA at build and that SHA is written to the lock. The built image's local `Id` is a build
   **stamp**, not a lock entry — it is not re-fetchable, exactly as local `path:` bases are handled
-  (`design.md` §9; `ports.rs` `ResolvedBase::LocalFile`).
-- **Fingerprint.** The toolchain fingerprint component (`design.md` §8) becomes the commit SHA +
+  (`2026-06-22-design.md` §9; `ports.rs` `ResolvedBase::LocalFile`).
+- **Fingerprint.** The toolchain fingerprint component (`2026-06-22-design.md` §8) becomes the commit SHA +
   strategy + baseTag instead of a registry digest, so a commit bump re-triggers dependent cells.
 - **Repro caveat (documented):** a source build pins IC's *source*, not its full dependency closure
   (`tdnf` packages float). For byte-reproducibility, also pin `baseTag` by digest. This is a weaker

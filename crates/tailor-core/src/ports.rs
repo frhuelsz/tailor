@@ -1,5 +1,5 @@
 //! Port traits — the hexagonal boundary `tailor-core` defines and adapters implement
-//! (`meta/docs/architecture.md` §4.2). Traits use return-position `impl Future` (no `async-trait`); the
+//! (`meta/docs/2026-06-22-architecture.md` §4.2). Traits use return-position `impl Future` (no `async-trait`); the
 //! composition root wires concrete adapters as generics, so the traits need not be dyn-compatible.
 
 use std::{
@@ -48,7 +48,7 @@ pub struct ExecutionContext {
     /// The digest-pinned IC `--image` reference for a registry base (`oci:<repo>@sha256:…`), or
     /// `None` for a local-file base (which uses `--image-file`) and for `--dry-run` (no digest
     /// resolved). Threaded from the resolved base so registry builds are reproducible
-    /// (`meta/docs/design.md` §5.2/§6).
+    /// (`meta/docs/2026-06-22-design.md` §5.2/§6).
     pub base_ref: Option<String>,
     /// Tailor-managed IC `--tools-dir` source and host staging paths.
     pub tools_dir: Option<ToolsDirPlan>,
@@ -61,7 +61,7 @@ pub struct ExecutionContext {
     /// Whether the executor should pull the IC image before running it. `false` for local-only
     /// images resolved by pull policy.
     pub pull: bool,
-    /// The resolved signer for this cell, when its image opts into `signing:` (`meta/docs/signing.md`
+    /// The resolved signer for this cell, when its image opts into `signing:` (`meta/docs/2026-06-29-signing.md`
     /// §5/§6). `None` for unsigned cells — the executor then runs the single-pass `customize`. Held as
     /// a `dyn Signer` so per-cell profiles can differ; the executor calls it on a blocking thread.
     pub signer: Option<Arc<dyn Signer>>,
@@ -81,13 +81,13 @@ pub struct ToolsDirPlan {
 }
 
 /// The host-side signing port: sign the boot artifacts IC emits from a `customize` pass, in place,
-/// so IC's `inject-files` pass can re-inject them (`meta/docs/signing.md` §6). Object-safe and
+/// so IC's `inject-files` pass can re-inject them (`meta/docs/2026-06-29-signing.md` §6). Object-safe and
 /// **synchronous** — held as `dyn Signer` in [`ExecutionContext`]; the executor invokes it on a
 /// blocking thread so the async runtime is never blocked on `openssl`/`sbsign`.
 pub trait Signer: Send + Sync + std::fmt::Debug {
     /// Cheap, side-effect-free check that this backend can sign: required host binaries present
     /// (`openssl`, and `sbsign` when PE artifacts are expected) and key material resolvable. Called
-    /// once per build, before any IC run (`meta/docs/signing.md` §5.1).
+    /// once per build, before any IC run (`meta/docs/2026-06-29-signing.md` §5.1).
     fn preflight(&self) -> Result<(), SignError>;
 
     /// Sign every entry in the `inject-files.yaml` IC emitted, in place (`unsignedSource` → `source`),
@@ -95,7 +95,7 @@ pub trait Signer: Send + Sync + std::fmt::Debug {
     fn sign(&self, plan: &SigningPlan) -> Result<SigningResult, SignError>;
 }
 
-/// The inputs a [`Signer`] needs to sign one cell's artifacts (`meta/docs/signing.md` §6).
+/// The inputs a [`Signer`] needs to sign one cell's artifacts (`meta/docs/2026-06-29-signing.md` §6).
 #[derive(Debug, Clone)]
 pub struct SigningPlan {
     /// The `inject-files.yaml` IC emitted alongside the customized image — lists each artifact's
@@ -109,7 +109,7 @@ pub struct SigningPlan {
     pub ca_cert_dest: PathBuf,
 }
 
-/// The outcome of signing one cell (`meta/docs/signing.md` §6).
+/// The outcome of signing one cell (`meta/docs/2026-06-29-signing.md` §6).
 #[derive(Debug, Clone, Default)]
 pub struct SigningResult {
     /// The published CA cert (`local-test-ca` only), for firmware enrollment; `None` for `keypair`.
@@ -127,7 +127,7 @@ pub struct ExecutionResult {
     pub logs: String,
 }
 
-/// Resolved runtime settings for the bollard execution layer (`meta/docs/design.md` §5.1, §7).
+/// Resolved runtime settings for the bollard execution layer (`meta/docs/2026-06-22-design.md` §5.1, §7).
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     /// The container namespace prefix for host-path translation (default `/host`).
@@ -140,12 +140,12 @@ pub struct RuntimeConfig {
     pub mount_dev: bool,
     /// Host filesystem base for IC per-cell scratch (`buildDirBase/<slug>`).
     pub build_dir_base: Option<PathBuf>,
-    /// IC `--log-level` (when unset, the executor defaults IC to `debug` — `meta/docs/logging.md` §5.1).
+    /// IC `--log-level` (when unset, the executor defaults IC to `debug` — `meta/docs/2026-06-29-logging.md` §5.1).
     pub log_level: Option<String>,
     /// Host directory forwarded as IC `--image-cache-dir`.
     pub image_cache_dir: Option<PathBuf>,
     /// Opt-in host directory for per-cell IC debug logs (`--log-dir`/`TAILOR_LOG_DIR`/`runtime.logDir`).
-    /// `None` (the default) means nothing is written to disk (`meta/docs/logging.md` §5.5).
+    /// `None` (the default) means nothing is written to disk (`meta/docs/2026-06-29-logging.md` §5.5).
     pub log_dir: Option<PathBuf>,
     /// Explicit additional paths exposed under the host-root namespace.
     pub extra_paths: Vec<ExtraMount>,
@@ -217,19 +217,19 @@ pub struct ContainerConfig {
     pub binds: Vec<String>,
     pub privileged: bool,
     /// The cell slug, tagged onto every re-emitted IC log event (`cell = <slug>`); empty for
-    /// non-cell containers such as the ownership janitor (`meta/docs/logging.md` §5.3).
+    /// non-cell containers such as the ownership janitor (`meta/docs/2026-06-29-logging.md` §5.3).
     pub cell_slug: String,
     /// What this container's output represents, so re-emitted log lines are attributed to the right
-    /// source — real Image Customizer output vs. tailor's own cleanup janitor (`meta/docs/logging.md` §5.3).
+    /// source — real Image Customizer output vs. tailor's own cleanup janitor (`meta/docs/2026-06-29-logging.md` §5.3).
     pub log_source: LogSource,
     /// Host path of the per-cell on-disk IC log, when persistence is enabled — used only to point at
-    /// it in the failure dump (IC itself writes the file via `--log-file`; `meta/docs/logging.md` §5.4-§5.5).
+    /// it in the failure dump (IC itself writes the file via `--log-file`; `meta/docs/2026-06-29-logging.md` §5.4-§5.5).
     pub log_file: Option<PathBuf>,
 }
 
 /// What a container's re-emitted output stream represents. Governs the `tracing` target (and thus the
 /// live-log prefix) so a line is only attributed to Image Customizer when it is genuinely IC output —
-/// tailor's own cleanup janitor is attributed separately (`meta/docs/logging.md` §5.3).
+/// tailor's own cleanup janitor is attributed separately (`meta/docs/2026-06-29-logging.md` §5.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LogSource {
     /// Image Customizer's own stdout/stderr (logrus JSON).
@@ -246,7 +246,7 @@ pub struct ContainerResult {
     /// The captured container output, joined verbatim (used for non-IC error reporting).
     pub logs: String,
     /// On a non-zero exit, the categorized failure dump (cause + bounded context tail + optional
-    /// on-disk pointer) built from the in-memory capture (`meta/docs/logging.md` §5.4). `None` on success.
+    /// on-disk pointer) built from the in-memory capture (`meta/docs/2026-06-29-logging.md` §5.4). `None` on success.
     pub failure_dump: Option<String>,
 }
 
@@ -293,7 +293,7 @@ pub enum ResolvedBase {
     },
 }
 
-/// Acquire a base-image catalogue slot's file from its remote source (`meta/docs/base-image-catalogue.md`
+/// Acquire a base-image catalogue slot's file from its remote source (`meta/docs/2026-06-29-base-image-catalogue.md`
 /// §5.2/§8). `tailor bases download` drives this; the build itself never pulls — it consumes the slot
 /// file like any `path` base. The fetcher streams the artifact for `linux/<arch>` to `dest`.
 pub trait BaseImageFetcher: Send + Sync {
@@ -317,7 +317,7 @@ pub struct FetchedBase {
 /// Filesystem operations that need special handling (RPM farm, working copy).
 pub trait FilesystemOps: Send + Sync {
     /// Build an **adjacent** reflink/hardlink/copy farm for an `rpmSources` directory, skipping any
-    /// existing `repodata/` (`meta/docs/design.md` §7.8).
+    /// existing `repodata/` (`meta/docs/2026-06-22-design.md` §7.8).
     fn build_rpm_farm(
         &self,
         source: &std::path::Path,

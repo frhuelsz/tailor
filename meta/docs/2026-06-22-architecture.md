@@ -79,9 +79,9 @@ graph TD
 **Why this split (the crate consolidation):**
 
 An earlier draft proposed a 6-crate split (`tailor-manifest`, `tailor-ic`, `tailor-engine`,
-`tailor-resolve`, `tailor-lock`). After studying image-definitions.md (which adds the
+`tailor-resolve`, `tailor-lock`). After studying 2026-06-22-image-definitions.md (which adds the
 axes/matrix/fragment/merge engine) and the marvin architecture, this architecture consolidates to the
-five crates above (design.md §14 now defers here):
+five crates above (2026-06-22-design.md §14 now defers here):
 
 - **`tailor-config`** absorbs both the manifest/tool+image schema and the
   image-definitions compositor. The manifest schema and the image-definition engine share types,
@@ -104,7 +104,7 @@ five crates above (design.md §14 now defers here):
 ### 3.1 `tailor-config` — parse, merge, render, validate
 
 **Responsibility:** everything from authored YAML to a rendered, validated IC config per matrix
-cell. Owns the full image-definitions.md behavior.
+cell. Owns the full 2026-06-22-image-definitions.md behavior.
 
 **Module tree:**
 
@@ -458,7 +458,7 @@ pub enum ResolvedBase {
 /// Filesystem operations that may need special handling (RPM farm, ownership).
 pub trait FilesystemOps: Send + Sync {
     /// Build an **adjacent** reflink/hardlink/copy farm (sibling of the source ⇒ same fs) for an
-    /// `rpmSources` directory, skipping any existing `repodata/`. See design.md §7.8.
+    /// `rpmSources` directory, skipping any existing `repodata/`. See 2026-06-22-design.md §7.8.
     fn build_rpm_farm(
         &self,
         source: &Path,
@@ -507,7 +507,7 @@ pub struct Fragment {
     pub config: serde_yml::Value,       // partial IC config delta
 }
 
-/// Match expression (image-definitions.md §6).
+/// Match expression (2026-06-22-image-definitions.md §6).
 pub enum MatchExpr {
     Eq { axis: AxisName, value: AxisValue },
     Set { axis: AxisName, values: Vec<AxisValue> },
@@ -671,7 +671,7 @@ enum AppError {
 ## 7. Async vs sync boundary
 
 **Principle:** the config/render engine is **pure and sync**. Rendering must be deterministic
-(image-definitions.md §9.3 "rendering is pure/deterministic"); introducing async into the merge
+(2026-06-22-image-definitions.md §9.3 "rendering is pure/deterministic"); introducing async into the merge
 engine would add non-determinism concerns, complicate testing, and serve no purpose — there is no
 I/O in the merge/render path beyond initial file reads.
 
@@ -775,7 +775,7 @@ trait surface; the fake is swap-in.
 
 ### 8.4 Golden/snapshot tests for the renderer
 
-The design commits to checked-in golden files (image-definitions.md §9.3). The test strategy:
+The design commits to checked-in golden files (2026-06-22-image-definitions.md §9.3). The test strategy:
 
 - **`tailor-config` integration tests** load the worked examples
   (`docs/examples/trident-vm-testimage/`), render all cells, and assert byte-equality with the
@@ -821,9 +821,9 @@ tailor/
 ├── README.md
 ├── justfile                      # task runner (build, check, test, validate)
 ├── docs/
-│   ├── design.md
-│   ├── image-definitions.md
-│   ├── architecture.md           # this document
+│   ├── 2026-06-22-design.md
+│   ├── 2026-06-22-image-definitions.md
+│   ├── 2026-06-22-architecture.md           # this document
 │   └── examples/
 │       ├── minimal-single-image/
 │       └── trident-vm-testimage/
@@ -954,7 +954,7 @@ profile = "minimal"
 
 ## 10. Feature → owning crate mapping
 
-| design.md feature | Section | Owning crate | Module(s) |
+| 2026-06-22-design.md feature | Section | Owning crate | Module(s) |
 | --- | --- | --- | --- |
 | Tool config (`tailor.yaml`) parsing | §5.1 | `tailor-config` | `schema/tool_config.rs`, `loader.rs` |
 | Target config parsing | §5.2 | `tailor-config` | `schema/target.rs`, `loader.rs` |
@@ -977,7 +977,7 @@ profile = "minimal"
 | Incremental / caching | §12 | `tailor-core` | `orchestrator.rs`, `lockfile/stamp.rs` |
 | Clean (sudo-free) | §12 | `tailor-exec` | `janitor.rs` (via `Executor::clean`) |
 
-| image-definitions.md feature | Section | Owning crate | Module(s) |
+| 2026-06-22-image-definitions.md feature | Section | Owning crate | Module(s) |
 | --- | --- | --- | --- |
 | Axes / matrix expansion | §5 | `tailor-config` | `axes/` |
 | Fragments + path-encoded match | §6 | `tailor-config` | `schema/fragment.rs`, `loader.rs` |
@@ -1041,7 +1041,7 @@ that was dropped: it baked IC's schema into tailor and meant chasing IC versions
 is via explicit `$replace`/`$remove`, or by owning the whole list in the per-axis file (the common
 case via `$include`). IC validates the merged output itself at runtime; tailor runs no IC-schema
 validation pass. This realizes the principle "tailor is a config merger + IC wrapper; the inputs and
-capabilities of IC are a contract between the user and IC" (design.md §8, §2 non-goal).
+capabilities of IC are a contract between the user and IC" (2026-06-22-design.md §8, §2 non-goal).
 
 ### 11.4 How directives are represented in the type system
 
@@ -1095,7 +1095,7 @@ second multiplier orthogonal to the matrix: the orchestrator stamps a clone inde
 dotfile, RPM-farm dir) so identical copies never collide — mirroring trident's
 `build_clones`/`set_suffix`. `render` ignores `--clones` (the rendered config is identical across
 clones). The image cache requires serialized janitor cleanup after all cache-using cells finish
-(design.md §7.7).
+(2026-06-22-design.md §7.7).
 
 ### 11.7 `tailor render` vs `tailor build` — two entry points into the pipeline
 

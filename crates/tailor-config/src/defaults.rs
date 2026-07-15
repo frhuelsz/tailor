@@ -16,7 +16,7 @@ pub const DEFAULT_IC_CONTAINER: &str = "mcr.microsoft.com/azurelinux/imagecustom
 /// MCR publishes unprefixed tags (e.g. `1.3.0`, `latest`).
 pub const DEFAULT_IC_TAG: &str = "latest";
 
-/// The default ownership-janitor image (`meta/docs/design.md` §7.7) — a minimal OS image with
+/// The default ownership-janitor image (`meta/docs/2026-06-22-design.md` §7.7) — a minimal OS image with
 /// `/bin/chown` and `/bin/rm`, used to normalize IC's root-owned outputs sudo-free when the manifest
 /// sets no `runtime.janitorImage`.
 pub const DEFAULT_JANITOR_CONTAINER: &str = "mcr.microsoft.com/azurelinux/base/core";

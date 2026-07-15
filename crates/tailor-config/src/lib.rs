@@ -1,6 +1,6 @@
 //! `tailor-config` — parse, merge, and render tailor's manifest and image definitions.
 //!
-//! See `meta/docs/architecture.md` §3.1. The content under an image's `config:` key is Image Customizer
+//! See `meta/docs/2026-06-22-architecture.md` §3.1. The content under an image's `config:` key is Image Customizer
 //! configuration and is kept here as an opaque value tree — it is **never** modeled against IC's
 //! schema. The merge engine is generic (deep-merge maps, append lists, `$set`/`$replace`/`$remove`
 //! directives); tailor validates only its own inputs (matrix axes, exactly-one base), leaving IC

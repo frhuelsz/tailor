@@ -26,7 +26,7 @@ impl fmt::Display for Arch {
     }
 }
 
-/// An Image Customizer output format (`--output-image-format`). See `meta/docs/design.md` §10.
+/// An Image Customizer output format (`--output-image-format`). See `meta/docs/2026-06-22-design.md` §10.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutputFormat {
@@ -66,7 +66,7 @@ impl fmt::Display for OutputFormat {
     }
 }
 
-/// The tailor-level IC operation. Default `customize` (`meta/docs/design.md` §7.4).
+/// The tailor-level IC operation. Default `customize` (`meta/docs/2026-06-22-design.md` §7.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Operation {
@@ -76,7 +76,7 @@ pub enum Operation {
 }
 
 /// How tailor manages an IC `output.artifacts` staging directory for a cell with no resolved
-/// `signing:` profile (`meta/docs/output-artifacts-staging.md` §3.3). Only consulted when the cell
+/// `signing:` profile (`meta/docs/2026-06-29-output-artifacts-staging.md` §3.3). Only consulted when the cell
 /// opts into the `output-artifacts` preview feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

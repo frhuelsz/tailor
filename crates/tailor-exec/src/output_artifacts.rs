@@ -1,4 +1,4 @@
-//! `output.artifacts` staging management (`meta/docs/output-artifacts-staging.md`). IC's
+//! `output.artifacts` staging management (`meta/docs/2026-06-29-output-artifacts-staging.md`). IC's
 //! `output.artifacts` feature extracts boot artifacts to a directory it resolves relative to the
 //! config file — i.e. tailor's colocated working copy in the image dir — leaving root-owned droppings
 //! in the source tree. This module gates on the `output-artifacts` preview flag and rewrites the
@@ -23,13 +23,13 @@ const ARTIFACTS_KEY: &str = "artifacts";
 const PATH_KEY: &str = "path";
 /// Prefix of the hidden, tailor-named staging directories (so the crash sweep can recognise its own).
 const STAGE_PREFIX: &str = ".tailor-stage";
-/// Suffix of the enrollable CA cert dropped beside a signed image (`meta/docs/signing.md` §6).
+/// Suffix of the enrollable CA cert dropped beside a signed image (`meta/docs/2026-06-29-signing.md` §6).
 const CA_CERT_SUFFIX: &str = "ca_cert.pem";
 
 static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// The per-cell published CA cert filename, `<slug>.ca_cert.pem` — paired 1:1 with the image so
-/// concurrent tailor instances never clobber a shared cert (`meta/docs/signing.md` §6). Used by the
+/// concurrent tailor instances never clobber a shared cert (`meta/docs/2026-06-29-signing.md` §6). Used by the
 /// executor to place the cert and by `tailor clean` to remove it.
 pub fn ca_cert_name(slug: &str) -> String {
     format!("{slug}.{CA_CERT_SUFFIX}")

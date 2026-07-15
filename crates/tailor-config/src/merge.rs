@@ -1,6 +1,6 @@
 //! Deep-merge of Image Customizer config value trees with tailor's small directive vocabulary.
 //!
-//! Implements the merge semantics of `meta/docs/directive-design.md`: mappings deep-merge
+//! Implements the merge semantics of `meta/docs/2026-06-29-directive-design.md`: mappings deep-merge
 //! (preserving the insertion order the cell slug and goldens depend on), lists **append** by default
 //! — with `$prepend`/`$append`/`$remove` for ordered edits and `$replace` for a whole-list swap — and
 //! scalars **conflict** on a differing value unless overridden with `$set`. A key whose value is the

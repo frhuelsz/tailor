@@ -2,7 +2,7 @@
 
 > **Status:** Stale · _last reviewed 2026-06-29_
 >
-> Much of the compositor exists in `crates/tailor-config/src/fragment.rs`, `matrix.rs`, `render.rs`, `include.rs`, and `merge.rs`, but this older doc has drift: selectors moved out of `matrix:` into sibling `selectors:`, `$select` is reserved rather than available, and path-string `config:` is still rejected. Reconcile this against `matrix-constraints.md` and `directive-design.md` before treating it as reference.
+> Much of the compositor exists in `crates/tailor-config/src/fragment.rs`, `matrix.rs`, `render.rs`, `include.rs`, and `merge.rs`, but this older doc has drift: selectors moved out of `matrix:` into sibling `selectors:`, `$select` is reserved rather than available, and path-string `config:` is still rejected. Reconcile this against `2026-06-29-matrix-constraints.md` and `2026-06-29-directive-design.md` before treating it as reference.
 
 ---
 
@@ -78,7 +78,7 @@ graph TD
 6. **Reproducible & diffable.** Rendering is deterministic; concrete outputs can be snapshotted
    ("golden" files) and CI-diffed, so a change to a shared fragment shows its blast radius.
 7. **Feeds tailor.** Each rendered cell yields a tailor target (root IC config + base image + output
-   + arch), so the existing build/lock/run pipeline ([design.md](./design.md)) consumes it unchanged.
+   + arch), so the existing build/lock/run pipeline ([2026-06-22-design.md](./2026-06-22-design.md)) consumes it unchanged.
 8. **Readable, short authored files.** Authoring must stay *easier to read* than today's full files,
    not harder: small single-purpose fragments, minimal special syntax, no giant dense documents. Any
    density belongs only in *generated* output, reviewed as ordinary flat IC YAML (§9.5).
@@ -136,7 +136,7 @@ flowchart LR
   MX -->|one cell per combo| CMP["compose: pick files whose path matches the cell,<br/>merge in order ($include + merge ops)"]
   CMP --> REND["render concrete IC config<br/>(golden-diffable)"]
   REND --> TGT["tailor target<br/>(base image, output, arch)"]
-  TGT --> BUILD["tailor build (design.md)"]
+  TGT --> BUILD["tailor build (2026-06-22-design.md)"]
 ```
 
 The four mechanisms (§5–§8) compose; the rendering/snapshot/CI story is §9.
@@ -148,7 +148,7 @@ spans a trivial one-image config and a full multi-variant matrix, and you climb 
 at a time without rewrites:
 
 - **Level 0 — no image-definition layer at all.** For a one-off, just point a plain image at
-  an existing IC config and a base ([design.md §5.2](./design.md)) — the image-definition mechanism
+  an existing IC config and a base ([2026-06-22-design.md §5.2](./2026-06-22-design.md)) — the image-definition mechanism
   is *not involved*:
   ```yaml
   # tailor.yaml
@@ -507,7 +507,7 @@ want a shared default that some axes override, the overriding file uses
 
 The base image is **not assumed to come from MCR**. A definition's `base` is exactly tailor's base
 oneOf — `path` (local file), `oci` (any registry), or `azureLinux` (MCR sugar) — see
-[design.md §5.2/§6](./design.md). `base` (and `outputs`) are recognized **tailor target fields**
+[2026-06-22-design.md §5.2/§6](./2026-06-22-design.md). `base` (and `outputs`) are recognized **tailor target fields**
 (distinct from IC's `input`/`output`), so they can be set in `image.yaml` *or* in any per-axis
 fragment file — which is exactly how per-axis bases stay in the file tree rather than in a directive.
 
@@ -615,7 +615,7 @@ images/trident-vm-testimage/
   §6). `by-feature/` is a directory like `by-<axis>/`; features are still image-level flags (§5), not
   matrix axes — the path just expresses "when this flag is on".
 - **Axis values** must match `[A-Za-z0-9.-]+` (so `3.0`, `root-verity`, `amd64` are fine). The `_` is
-  **excluded on purpose**: it is the reserved separator in output **cell-slugs** (design.md §10), so a
+  **excluded on purpose**: it is the reserved separator in output **cell-slugs** (2026-06-22-design.md §10), so a
   value has to be safe both as a path segment (`by-<axis>/<value>.yaml`) *and* as an output-name
   segment — this one charset guarantees both. Values containing `/`, `:`, spaces, `_`, etc. are not
   valid axis values.
@@ -649,7 +649,7 @@ a directory of files the same way.
 
 There are **two distinct outputs**, because of an IC constraint: IC resolves `scripts`,
 `additionalFiles`, overlays, repo files, etc. **relative to the config file's directory**
-(the same rule that forces tailor's colocated working copy in [design.md §7.6](./design.md)). A
+(the same rule that forces tailor's colocated working copy in [2026-06-22-design.md §7.6](./2026-06-22-design.md)). A
 rendered config moved into a separate `.rendered/` dir would resolve `files/…` and `scripts/…` under
 `.rendered/`, breaking the build.
 
@@ -658,7 +658,7 @@ So:
 - **Runnable rendered config (for building).** Written **into the image's own source directory** as
   a per-cell dotfile, e.g. `images/<name>/.tailor-render.<cellSlug>.ic.yaml`, so every relative
   `source`/`path` still resolves against the image's real `files/`/`scripts/` (and is excluded from
-  image auto-discovery and from hashing, exactly like design.md §7.6). This is what the renderer's
+  image auto-discovery and from hashing, exactly like 2026-06-22-design.md §7.6). This is what the renderer's
   **internal** `${rendered}` value points at (not an author-facing parameter) and what tailor `build`
   runs. It is ephemeral (gitignored), not a checked-in artifact.
 - **Golden snapshot (for review).** `tailor render --all` also writes a **normalized** copy to
@@ -667,7 +667,7 @@ So:
 
 The **`<cellSlug>`** here is the same identifier tailor uses for the output artifact, the working
 copy, and the build stamp: `<image-name>` followed by every declared matrix axis value (in matrix
-order) and the output format, joined by `_` (design.md §10) — e.g.
+order) and the output format, joined by `_` (2026-06-22-design.md §10) — e.g.
 `trident-vm-testimage_grub_amd64_4.0_base_cosi`. That uniformity is exactly why axis values exclude
 `_` (§9.1).
 
@@ -872,7 +872,7 @@ the existing `3.0.yaml` is untouched. No file was copied, and no file is long.
   supported IC), or (b) **emit `baseConfigs` layering** for the parts that map cleanly (shared base
   as a base config, cell deltas as the leaf), letting IC do the final merge when the pinned IC
   supports it. Default to (a) for portability; offer (b) as an optimization.
-- **tailor targets**: each rendered cell yields a target exactly as in [design.md §5.2](./design.md)
+- **tailor targets**: each rendered cell yields a target exactly as in [2026-06-22-design.md §5.2](./2026-06-22-design.md)
   — `config` = the composed runnable IC config, `base` = the cell's resolved source
   (path | oci | azureLinux, §8.1), `outputs`/`architectures` from the cell. The whole
   build/lock/run/ownership pipeline is reused unchanged. The image-definition matrix is a
@@ -965,5 +965,5 @@ small Rust program** and feed the output to tailor unchanged. The typed-language
    *drop-ins*; we currently say *definition* + *fragments* + *axes*.)
 7. **Relationship to tailor's cell matrix:** *(resolved)* the user-defined axes are folded into the
    image's own `matrix:`, and each image renders to **cells** (one per axis-tuple × output format) —
-   the concrete unit tailor builds (design.md §4, §10). Image-definitions is the authoring front-end
+   the concrete unit tailor builds (2026-06-22-design.md §4, §10). Image-definitions is the authoring front-end
    the renderer expands into those cells; there is no separate "target schema".

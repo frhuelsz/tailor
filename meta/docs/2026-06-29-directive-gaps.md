@@ -1,8 +1,8 @@
 # Directive gaps after the Trident comparison port
 
-> **Status:** Superseded by `directive-design.md` · _last reviewed 2026-06-29_
+> **Status:** Superseded by `2026-06-29-directive-design.md` · _last reviewed 2026-06-29_
 >
-> The survey's accepted capabilities were consolidated in `directive-design.md` and implemented in `crates/tailor-config/src/merge.rs`, `fragment.rs`, and `render.rs`, with CLI wiring in `crates/tailor/src/run.rs`. Deferred/rejected candidates remain here as rationale, not the current plan.
+> The survey's accepted capabilities were consolidated in `2026-06-29-directive-design.md` and implemented in `crates/tailor-config/src/merge.rs`, `fragment.rs`, and `render.rs`, with CLI wiring in `crates/tailor/src/run.rs`. Deferred/rejected candidates remain here as rationale, not the current plan.
 
 This survey asks whether tailor needs merge/config directives beyond the existing set and the separately
 proposed `$unset` directive. It is intentionally grounded in `comparison/`, where the Trident image YAMLs
@@ -27,8 +27,8 @@ Existing directive/capability inventory:
 | `$remove` | Valid only for lists; removes items that are exactly equal to entries in the directive list. |
 | `$rename` | Recognized by the merger but returns `UnsupportedDirective`; no implemented semantics. |
 | `$include` | Resolved before merge, before interpolation; replaces a mapping value with the parsed file, and splices included lists when used as a list item. |
-| `$select` | **Reserved but unimplemented:** a `SELECT` constant and an error branch exist in `merge.rs` (and a stale comment claims it is "resolved in earlier passes"), but no resolution pass exists — any `$select` errors at merge. Decision in `directive-design.md` §4: keep it reserved, do not implement now. |
-| `$unset` | Final design in [`directive-design.md` §1](./directive-design.md): canonical is the bare value `key: $unset`. Not re-proposed here. |
+| `$select` | **Reserved but unimplemented:** a `SELECT` constant and an error branch exist in `merge.rs` (and a stale comment claims it is "resolved in earlier passes"), but no resolution pass exists — any `$select` errors at merge. Decision in `2026-06-29-directive-design.md` §4: keep it reserved, do not implement now. |
+| `$unset` | Final design in [`2026-06-29-directive-design.md` §1](./2026-06-29-directive-design.md): canonical is the bare value `key: $unset`. Not re-proposed here. |
 
 Core merge rules: maps deep-merge, lists append in fragment order, and differing scalars conflict unless
 the later fragment uses `$set`. Lists are generic YAML sequences: tailor does not merge list elements by
@@ -50,7 +50,7 @@ non-separable `variant × runtime` grid: packages/files/scripts such as `selinux
 accepted supersets.
 
 **Priority:** **High** — this is the biggest real expressiveness gap, but it should be solved as fragment
-selection, not as a merge directive. **Full design: [`directive-design.md` §2](./directive-design.md).**
+selection, not as a merge directive. **Full design: [`2026-06-29-directive-design.md` §2](./2026-06-29-directive-design.md).**
 
 **Syntax + semantics sketch:** Prefer constrained composite fragment paths over inline `match:`. A file in
 `by-boot+verity/uki+root.yaml` applies only when every named axis equals the corresponding value. It is
@@ -102,7 +102,7 @@ fragment.
 
 **Priority:** **High** — ordering is observable for scripts, and `$replace` is too blunt when only one
 cell needs a small positional adjustment. **Committed design: `$prepend` **and** `$append` (both ends) in
-[`directive-design.md` §3](./directive-design.md); anchor inserts (`$insertBefore`/`$insertAfter`) and
+[`2026-06-29-directive-design.md` §3](./2026-06-29-directive-design.md); anchor inserts (`$insertBefore`/`$insertAfter`) and
 numeric indices are deferred.**
 
 **Syntax + semantics sketch:** Add one ordered-list directive, not a full patch language. The smallest useful
@@ -203,7 +203,7 @@ without becoming forbidden `match:` in disguise.
 errors if one reaches merge, so the current state is confusing.
 
 **Recommendation (decided):** Keep `$select` **reserved but unimplemented** — see
-[`directive-design.md` §4](./directive-design.md). Existing `by-<axis>/<value>.yaml` fragments already
+[`2026-06-29-directive-design.md` §4](./2026-06-29-directive-design.md). Existing `by-<axis>/<value>.yaml` fragments already
 select a value by one axis, and composite paths (§1) cover combinations, so the field-site selector is not
 worth building now; the cleanup is to give it a clear "reserved, not implemented" error and fix the stale
 "resolved in earlier passes" comment. The narrow single-axis spec, kept for if/when it is ever built:
@@ -262,7 +262,7 @@ flowchart TB
   R -->|container| A["(atomic — no method axis)"]
 ```
 
-**Priority:** **Low (as a feature) / already-answered (in practice).** `meta/docs/matrix-constraints.md`
+**Priority:** **Low (as a feature) / already-answered (in practice).** `meta/docs/2026-06-29-matrix-constraints.md`
 §7.2 already takes a deliberate stance on exactly this shape: "when one axis value forces every other axis
 to a single value, that is usually a sign of a *different kind of thing*, better kept as its own image."
 By that philosophy the container installer is a different artifact (a container host that runs a
@@ -280,18 +280,18 @@ corner shape that "separate image" cannot express.
 
 ## Prioritized recommendations
 
-The first two are now committed designs in [`directive-design.md`](./directive-design.md); the rest record
+The first two are now committed designs in [`2026-06-29-directive-design.md`](./2026-06-29-directive-design.md); the rest record
 where the line was drawn.
 
-1. **Composite fragment paths for axis conjunctions** (`by-a+b/x+y.yaml`) — **designed** ([§2](./directive-design.md)).
+1. **Composite fragment paths for axis conjunctions** (`by-a+b/x+y.yaml`) — **designed** ([§2](./2026-06-29-directive-design.md)).
    The most important `boot × verity` and `variant × runtime` pain, solved without user-facing `match:`.
-2. **A minimal ordered-list pair, `$prepend` + `$append`** — **designed** ([§3](./directive-design.md)).
+2. **A minimal ordered-list pair, `$prepend` + `$append`** — **designed** ([§3](./2026-06-29-directive-design.md)).
    `$prepend` alone is insufficient: once the field becomes a directive-mapping the implicit bare-list
    append is gone, so touching both ends in one fragment needs `$append`. Anchor inserts
    (`$insertBefore`/`$insertAfter`) and numeric indices stay deferred.
 3. **Interpolated `$include` paths** — a pipeline improvement, kept secondary to explicit fragment
    placement; revisit after composite paths.
-4. **`$select` — keep reserved, do not implement** ([§4](./directive-design.md)). `by-<axis>` fragments and
+4. **`$select` — keep reserved, do not implement** ([§4](./2026-06-29-directive-design.md)). `by-<axis>` fragments and
    composite paths already cover it; just give it a clear "reserved" error. Do not let it grow into `match:`.
 5. **Do not add `$default`, `$rename`, `$mergeKey`, or ragged/dependent axes now.** They add surface area
    without enough comparison-backed payoff; `$unset` is the right structural-removal complement to the

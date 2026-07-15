@@ -17,7 +17,7 @@ pub enum WorkingCopyError {
 ///
 /// tailor passes the user's config through unchanged — it does not inject `previewFeatures` or any
 /// other IC field. The working copy exists only so IC resolves relative `files/`/`scripts/` paths
-/// against the image's real directory (`meta/docs/design.md` §7.6), not to edit the config.
+/// against the image's real directory (`meta/docs/2026-06-22-design.md` §7.6), not to edit the config.
 pub fn render_working_copy(ic_config: &Value) -> Result<String, WorkingCopyError> {
     serde_yaml_ng::to_string(ic_config).map_err(WorkingCopyError::from)
 }

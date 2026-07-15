@@ -33,7 +33,7 @@ impl AxisTuple {
 }
 
 /// The full output basename for a cell: `<image>_<axis values, in order>_<format>`
-/// (`meta/docs/design.md` §10).
+/// (`meta/docs/2026-06-22-design.md` §10).
 pub fn cell_slug(image_name: &str, tuple: &AxisTuple, format: OutputFormat) -> String {
     let coordinate = tuple.coordinate();
     format!("{image_name}_{coordinate}_{format}")

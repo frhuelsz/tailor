@@ -1,5 +1,5 @@
 //! Domain model: the resolved image (`Target`), a single build unit (`Cell`), the build plan, and
-//! the canonical per-cell `Fingerprint` (`meta/docs/architecture.md` §4.1).
+//! the canonical per-cell `Fingerprint` (`meta/docs/2026-06-22-architecture.md` §4.1).
 
 use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 
@@ -20,9 +20,9 @@ pub struct Target {
     pub default_outputs: Vec<OutputSpec>,
     /// Resolved `output.artifacts` staging policy (per-image override, else workspace default, else
     /// `managed`) — consulted only for cells that opt into the `output-artifacts` preview feature
-    /// (`meta/docs/output-artifacts-staging.md` §3).
+    /// (`meta/docs/2026-06-29-output-artifacts-staging.md` §3).
     pub output_artifacts: OutputArtifactsPolicy,
-    /// The workspace root, the base-dir for catalogue slot paths (`meta/docs/base-image-catalogue.md` §3).
+    /// The workspace root, the base-dir for catalogue slot paths (`meta/docs/2026-06-29-base-image-catalogue.md` §3).
     pub root: PathBuf,
     /// The `tailor.yaml` base-image catalogue, against which `base: { ref: … }` is resolved.
     pub base_images: BaseImageCatalogue,
@@ -48,7 +48,7 @@ pub struct Cell {
     pub arch: Arch,
     /// The single output this cell builds.
     pub output: OutputSpec,
-    /// The unique slug: `<image>_<axis values, matrix order>_<format>` (`meta/docs/design.md` §10).
+    /// The unique slug: `<image>_<axis values, matrix order>_<format>` (`meta/docs/2026-06-22-design.md` §10).
     pub slug: CellSlug,
     /// The merged, interpolated Image Customizer config for this cell.
     pub ic_config: Value,
@@ -56,7 +56,7 @@ pub struct Cell {
     /// downstream sees a `path` base; [`Cell::base_image`] keeps the slot name for the matrix output.
     pub base: BaseSource,
     /// The `baseImages` slot name this cell resolved from, when its base is a catalogue reference
-    /// (`meta/docs/base-image-catalogue.md` §6.2); `None` for `path`/`oci`/`azureLinux` bases.
+    /// (`meta/docs/2026-06-29-base-image-catalogue.md` §6.2); `None` for `path`/`oci`/`azureLinux` bases.
     pub base_image: Option<String>,
     /// Local RPM sources passed to IC as `--rpm-source`.
     pub rpm_sources: Vec<PathBuf>,
@@ -87,7 +87,7 @@ impl AsRef<str> for CellSlug {
     }
 }
 
-/// The canonical per-cell fingerprint: a SHA-256 over every build-affecting input (`meta/docs/design.md`
+/// The canonical per-cell fingerprint: a SHA-256 over every build-affecting input (`meta/docs/2026-06-22-design.md`
 /// §9.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fingerprint(pub [u8; 32]);

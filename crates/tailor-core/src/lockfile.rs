@@ -1,5 +1,5 @@
 //! The lockfile (`tailor.lock`) — a flat, deduplicated set of resolved registry references to
-//! immutable digests (`meta/docs/design.md` §9.1). It pins only re-fetchable inputs: toolchain/janitor
+//! immutable digests (`meta/docs/2026-06-22-design.md` §9.1). It pins only re-fetchable inputs: toolchain/janitor
 //! container digests and registry (`oci`/`azureLinux`) base digests. Local inputs live in build
 //! stamps, never here.
 

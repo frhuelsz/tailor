@@ -47,7 +47,7 @@ disk by the time IC runs. The named base images are a fixed enum: `baremetal`, `
 tailor already has two registry base kinds (`crates/tailor-config/src/schema.rs` `BaseSource::Oci` /
 `BaseSource::AzureLinux`, resolved in `crates/tailor-resolve/src/{oci,azure_linux}.rs`). But they hand
 the registry reference to **Image Customizer**, which downloads it *at build time* via the
-`input-image-oci` **preview feature** (`meta/docs/design.md` §6). That is exactly what the pipeline
+`input-image-oci` **preview feature** (`meta/docs/2026-06-22-design.md` §6). That is exactly what the pipeline
 cannot do:
 
 - The pipeline's base images come from the **ADO feed, not a registry** tailor can pull — so a
@@ -137,7 +137,7 @@ Entry shape:
 | --- | --- | --- |
 | `name` | yes | Unique slot name used by `base: { ref: <name> }`. |
 | `path` | yes | The slot file: build input **and** `download` output. Workspace-root-relative (like signing key/cert paths, `crates/tailor-core` preflight), absolutised to the workspace root. |
-| `arch` | no | The base image's architecture (`amd64` \| `arm64`) — the **same vocabulary** as the `arch` axis / `architectures`, not a `linux/...` platform string. Drives the pull platform (`linux/<arch>`) and **reconciles** with the referencing cell's arch ([`arch-and-platform.md`](./arch-and-platform.md) §3). Absent ⇒ the cell's arch decides. |
+| `arch` | no | The base image's architecture (`amd64` \| `arm64`) — the **same vocabulary** as the `arch` axis / `architectures`, not a `linux/...` platform string. Drives the pull platform (`linux/<arch>`) and **reconciles** with the referencing cell's arch ([`2026-06-29-arch-and-platform.md`](./2026-06-29-arch-and-platform.md) §3). Absent ⇒ the cell's arch decides. |
 | `source` | no | A remote source `download` can pull from — `oci: { uri }` or `azureLinux: { version, variant }` — pulled for `linux/<arch>`. Absent ⇒ the slot must be pre-placed; `download` skips it. |
 
 Block-style YAML throughout (no inline flow maps), per the workspace convention.
@@ -165,7 +165,7 @@ The direct `path` base stays valid — a catalogue is opt-in, and one-off local 
 Catalogue slots are **arch-specific by name** (mirroring Trident's `baremetal` vs `core_arm64`); a
 multi-arch image picks the right slot with a `by-arch/<arch>.yaml` fragment (the same way it would
 `$set` a per-arch `base.path` today), and the slot's `arch` reconciles with the cell's
-([`arch-and-platform.md`](./arch-and-platform.md) §3).
+([`2026-06-29-arch-and-platform.md`](./2026-06-29-arch-and-platform.md) §3).
 
 > **Why a key, not a bare string.** `base: baremetal` would be ambiguous with a relative path that
 > happens to have no slashes. An explicit `image:` key keeps `BaseSource` an unambiguous `oneOf`. A
@@ -208,7 +208,7 @@ A slot declares its **`arch`** (`amd64` \| `arm64`) — the same vocabulary as t
 `architectures`, not a `linux/...` platform string. `download` pulls the source for
 `linux/<arch>`, and at build time the slot's arch **reconciles** with the referencing cell's arch:
 they must agree, or either fills the other in, and a conflict is an error — the matrix in
-[`arch-and-platform.md`](./arch-and-platform.md) §3. This is why slots are arch-specific by name
+[`2026-06-29-arch-and-platform.md`](./2026-06-29-arch-and-platform.md) §3. This is why slots are arch-specific by name
 (e.g. `core_arm64` declares `arch: arm64`).
 
 ### 5.2 Acquisition mechanism
@@ -238,7 +238,7 @@ layer** for the resolved platform and write it to the slot `path`
 
 > **Rejected alternative — shell out to `oras`** (what the builder does). It would add a runtime
 > binary dependency to every dev box and pipeline agent, against tailor's static-single-binary goal
-> (`meta/docs/design.md`). Reusing `oci_client` keeps tailor self-contained.
+> (`meta/docs/2026-06-22-design.md`). Reusing `oci_client` keeps tailor self-contained.
 
 ### 5.3 Idempotency & provenance (lock)
 
@@ -258,7 +258,7 @@ keeps the build reproducible (it pins the file's hash) while making the file's o
 
 ## 6. Resolution & build integration
 
-`base: { ref: <name> }` slots into the existing per-cell resolution (`meta/docs/design.md` §6,
+`base: { ref: <name> }` slots into the existing per-cell resolution (`meta/docs/2026-06-22-design.md` §6,
 `crates/tailor-resolve`):
 
 ```mermaid
@@ -319,7 +319,7 @@ When a cell's base resolves to a catalogue slot, that cell's `tailor matrix` rec
 It is **derived per cell** — a `by-arch/` fragment may reference a different slot per arch — so it is
 **not** a new matrix axis and does **not** change the slug; it only makes the cell→base-image
 dependency explicit and machine-readable. `tailor bases verify` and the pipeline enumerate `tailor
-matrix --format json` (or its ADO form, `tailor matrix --ado`, [`ado-matrix.md`](./ado-matrix.md)) to
+matrix --format json` (or its ADO form, `tailor matrix --ado`, [`2026-06-29-ado-matrix.md`](./2026-06-29-ado-matrix.md)) to
 learn exactly which base images the selected cells need, so they download or verify **only those**. A
 `path` / `oci` / `azureLinux` base leaves `baseImage` absent.
 
@@ -336,7 +336,7 @@ The split is the whole point:
 
 The pipeline keeps its existing feed download placing files at the slot paths; it adds an optional
 `tailor bases verify` gate and otherwise changes nothing. It can enumerate `tailor matrix` — as JSON,
-or as an ADO matrix variable via `tailor matrix --ado` ([`ado-matrix.md`](./ado-matrix.md)) — to drive
+or as an ADO matrix variable via `tailor matrix --ado` ([`2026-06-29-ado-matrix.md`](./2026-06-29-ado-matrix.md)) — to drive
 one build job per cell and learn which base images each needs. The `trident2` workspace gains
 `baseImages:` entries pointing at the repo-root `artifacts/` files the pipeline already produces, and
 the image definitions switch from `base: { path: ../../../artifacts/... }` to `base: { ref: ... }`.
@@ -345,7 +345,7 @@ the image definitions switch from `base: { path: ../../../artifacts/... }` to `b
 
 ## 8. Architecture / layering
 
-Consistent with the hexagonal layout (`meta/docs/architecture.md`):
+Consistent with the hexagonal layout (`meta/docs/2026-06-22-architecture.md`):
 
 - **Acquisition (I/O)** lives in the `tailor-resolve` adapter, next to the existing OCI digest
   resolution — a new `download`/`pull` function over `oci_client`. If a port is warranted, add a
@@ -359,7 +359,7 @@ Consistent with the hexagonal layout (`meta/docs/architecture.md`):
   `crates/tailor-config/src/schema.rs` (each slot: `arch`, `path`, optional `source`); the new
   `BaseSource::Ref { reference: String }` variant joins the untagged enum, and the matrix renderer adds
   the resolved `baseImage` field per cell (§6.2).
-- **Arch reconciliation** (slot `arch` × cell arch, [`arch-and-platform.md`](./arch-and-platform.md) §3)
+- **Arch reconciliation** (slot `arch` × cell arch, [`2026-06-29-arch-and-platform.md`](./2026-06-29-arch-and-platform.md) §3)
   happens during per-cell resolution in `tailor-resolve` / `tailor-core`, before the file is hashed.
 
 ---

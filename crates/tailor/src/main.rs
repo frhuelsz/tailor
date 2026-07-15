@@ -42,7 +42,7 @@ async fn main() -> ExitCode {
     }
 }
 
-/// A compact timer for the live `tracing` view (`meta/docs/logging.md` §5.6). It reads the same
+/// A compact timer for the live `tracing` view (`meta/docs/2026-06-29-logging.md` §5.6). It reads the same
 /// process-global mode and zero point as cargo-style status lines so both streams agree.
 struct CompactTime;
 

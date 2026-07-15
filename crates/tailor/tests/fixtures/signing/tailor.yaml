@@ -7,7 +7,7 @@ toolchains:
       container: registry.example/imagecustomizer
       tag: "1.0.0"
 
-# Signing profiles (meta/docs/signing.md §4). Purpose-built test fixtures, not real keys.
+# Signing profiles (meta/docs/2026-06-29-signing.md §4). Purpose-built test fixtures, not real keys.
 signing:
   default: test-ca
   profiles:

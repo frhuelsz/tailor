@@ -1,5 +1,5 @@
 //! `tailor-sign` — host-side signing backends for the [`Signer`] port
-//! (`meta/docs/signing.md` §6).
+//! (`meta/docs/2026-06-29-signing.md` §6).
 //!
 //! External **host** tools only, no bundled crypto: `openssl` mints the per-cell CA + code-signing
 //! leaf and signs verity-hash artifacts (detached CMS/DER), and `sbsign` signs PE/Authenticode boot
@@ -24,10 +24,10 @@ const OPENSSL: &str = "openssl";
 /// The `sbsign` binary — PE/Authenticode signing.
 const SBSIGN: &str = "sbsign";
 /// Validity of the minted local test CA and leaf. Long enough that CI never trips over expiry; this
-/// is explicitly **not** a production trust root (`meta/docs/signing.md` §6).
+/// is explicitly **not** a production trust root (`meta/docs/2026-06-29-signing.md` §6).
 const CERT_VALIDITY_DAYS: &str = "3650";
 
-/// Build the [`Signer`] for a resolved signing profile (`meta/docs/signing.md` §6). Relative
+/// Build the [`Signer`] for a resolved signing profile (`meta/docs/2026-06-29-signing.md` §6). Relative
 /// `keypair` `key`/`cert` paths resolve against `base_dir` (the workspace root). The returned signer's
 /// [`Signer::preflight`] reports any unmet prerequisite — including an unimplemented backend — so the
 /// fail-fast gate needs no special-casing.
@@ -65,7 +65,7 @@ fn resolve(base_dir: &Path, path: Option<&Path>) -> PathBuf {
     base_dir.join(path.unwrap_or(Path::new("")))
 }
 
-/// Where the signing key/cert come from (`meta/docs/signing.md` §6).
+/// Where the signing key/cert come from (`meta/docs/2026-06-29-signing.md` §6).
 #[derive(Debug, Clone)]
 enum KeySource {
     /// Mint a self-signed CA (once per signer) + a code-signing leaf (per cell) with `openssl`.
@@ -77,7 +77,7 @@ enum KeySource {
 }
 
 /// The minted local test CA, kept alive for the signer's lifetime so its per-cell leaves chain to one
-/// trust root (`meta/docs/signing.md` §7). The temp dir wipes the CA private key on drop.
+/// trust root (`meta/docs/2026-06-29-signing.md` §7). The temp dir wipes the CA private key on drop.
 #[derive(Debug)]
 struct Ca {
     _dir: TempDir,
@@ -105,7 +105,7 @@ impl Signer for HostSigner {
             });
         };
 
-        // Both tools are checked up front (fail-fast, `meta/docs/signing.md` §5.1): `openssl` mints and
+        // Both tools are checked up front (fail-fast, `meta/docs/2026-06-29-signing.md` §5.1): `openssl` mints and
         // signs verity-hash, `sbsign` signs PE artifacts. We cannot yet know which artifact types IC
         // will emit, so require both whenever a profile signs — a missing tool fails at build start
         // rather than minutes into a customize.
@@ -421,7 +421,7 @@ fn sign_pe(file: &Path, key: &Path, cert: &Path) -> Result<(), SignError> {
 /// artifact in place — mirroring Trident's `sign.py`.
 ///
 /// NOTE: the exact placement of the detached signature relative to the hash artifact is IC-version
-/// dependent (`meta/docs/signing.md` §10, open question) — validate against a real `inject-files` run.
+/// dependent (`meta/docs/2026-06-29-signing.md` §10, open question) — validate against a real `inject-files` run.
 fn sign_verity(file: &Path, key: &Path, cert: &Path) -> Result<(), SignError> {
     let sig = with_suffix(file, ".sig");
     run(

@@ -2,7 +2,7 @@
 //!
 //! Port error types (`ExecError`, `ResolveError`) live here, not in the adapter crates, so that the
 //! port traits in `ports` can name them without `tailor-core` depending on its own adapters
-//! (`meta/docs/architecture.md` §6). Adapters map their internal failures into these.
+//! (`meta/docs/2026-06-22-architecture.md` §6). Adapters map their internal failures into these.
 
 use std::path::PathBuf;
 

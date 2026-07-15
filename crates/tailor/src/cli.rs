@@ -1,4 +1,4 @@
-//! The clap command-line surface (`meta/docs/design.md` §11).
+//! The clap command-line surface (`meta/docs/2026-06-22-design.md` §11).
 
 use std::{fmt, path::PathBuf};
 

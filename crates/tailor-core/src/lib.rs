@@ -1,5 +1,5 @@
 //! `tailor-core` — domain model, port traits, lockfile, build stamps, and the build orchestrator
-//! (`meta/docs/architecture.md` §3.2). The hexagonal core: it defines the ports that `tailor-resolve`
+//! (`meta/docs/2026-06-22-architecture.md` §3.2). The hexagonal core: it defines the ports that `tailor-resolve`
 //! and `tailor-exec` implement, and owns build orchestration. It does **not** model Image
 //! Customizer's config schema or version capabilities — those are the user↔IC contract.
 
