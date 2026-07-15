@@ -230,7 +230,7 @@ impl HostSigner {
                 cert,
             });
         }
-        let ca = guard.as_ref().expect("CA minted above");
+        let ca = guard.as_ref().expect("invariant: CA minted above");
         Ok((ca.key.clone(), ca.cert.clone()))
     }
 }
