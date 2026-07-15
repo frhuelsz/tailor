@@ -10,8 +10,7 @@
 //! (`meta/docs/2026-06-29-signing.md` §11, S1-remainder). Until it lands, `tailor` refuses a signed build rather
 //! than silently emit an unsigned image.
 
-use std::io::Read as _;
-use std::path::Path;
+use std::{io::Read as _, path::Path};
 
 use tailor_config::{SigningBackend, SigningProfile};
 

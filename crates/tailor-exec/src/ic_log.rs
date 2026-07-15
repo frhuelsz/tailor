@@ -9,8 +9,7 @@
 //! an always-on in-memory capture, and — keyed off the **non-zero exit code** — renders a
 //! categorized, bounded failure dump from that capture.
 
-use std::fmt::Write as _;
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
 use tailor_core::LogSource;
 use tracing::{debug, error, info, trace, warn};
