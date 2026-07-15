@@ -210,9 +210,12 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             }
             result
         };
-        // The per-cell tools-dir copy is disposable scratch on `buildDirBase`; when IC crashes it can
-        // still carry the chroot's `proc`/`sys`/`dev` mounts, so its `rm` may hit `EBUSY`. Subordinate
-        // that cleanup to the IC failure so the real cause is the headline (ACL shakeout #2).
+        // Reclaim the per-cell tools-dir copy (disposable scratch on `buildDirBase`). The janitor
+        // binds the copy's PARENT and removes it as a child, so a successful build's cleanup no
+        // longer hits `EBUSY` on the copy's own mountpoint (see janitor::remove_paths). The
+        // subordination below still matters if IC genuinely crashed mid-chroot and left real
+        // `proc`/`sys`/`dev` mounts under the copy — then a cleanup error must not bury the IC
+        // failure (ACL shakeout #2).
         let ic_failed = ic_run_failed(&result);
         if let Some(copy) = &prepared_tools_dir.rw_copy {
             self.reclaim_subordinate(
@@ -432,10 +435,11 @@ impl<R: ContainerRuntime> IcExecutor<R> {
     }
 
     /// Reclaim a janitor-managed scratch path, subordinating the cleanup to a failed IC run: when
-    /// `ic_failed`, a cleanup error (e.g. `EBUSY` on a tools-dir whose chroot mounts IC left behind
-    /// on its crash) is logged and swallowed so the real IC failure stays the headline (ACL shakeout
-    /// #2); the leftover is swept on the next run. When IC succeeded, a cleanup failure is a genuine
-    /// error and propagates.
+    /// `ic_failed`, a cleanup error (e.g. `EBUSY` from real `proc`/`sys`/`dev` mounts IC left behind
+    /// when it crashed mid-chroot) is logged and swallowed so the real IC failure stays the headline
+    /// (ACL shakeout #2); the leftover is swept on the next run. When IC succeeded, a cleanup failure
+    /// is a genuine error and propagates — the janitor's own self-bind `EBUSY` no longer occurs on
+    /// the success path (see `janitor::remove_paths`).
     async fn reclaim_subordinate(
         &self,
         paths: &[PathBuf],
@@ -880,16 +884,21 @@ mod tests {
 
     #[tokio::test]
     async fn reclaim_subordinate_swallows_cleanup_error_when_ic_failed_but_propagates_otherwise() {
+        // A tempdir outside the workspace, with a child to remove — so the janitor binds the safe
+        // parent (the tempdir) and the FailingJanitor's non-zero exit (not a guard rejection) is what
+        // the subordination logic sees.
         let dir = tempfile::Builder::new()
             .prefix("tailor-reclaim-")
-            .tempdir_in(std::env::current_dir().unwrap())
+            .tempdir()
             .unwrap();
+        let target = dir.path().join("scratch");
+        std::fs::create_dir(&target).unwrap();
         let executor = IcExecutor::new(FailingJanitor);
         let config = RuntimeConfig {
             janitor_image: "janitor@sha256:abc".to_owned(),
             ..RuntimeConfig::default()
         };
-        let paths = [dir.path().to_path_buf()];
+        let paths = [target];
 
         // IC already failed → the janitor EBUSY is swallowed so the IC error stays the headline.
         executor

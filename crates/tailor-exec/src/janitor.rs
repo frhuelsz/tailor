@@ -5,6 +5,8 @@ use tokio_util::sync::CancellationToken;
 
 use tailor_core::{ContainerConfig, ContainerRuntime, ExecError, LogSource, RuntimeConfig};
 
+use crate::guard;
+
 const CHOWN_BINARY: &str = "/bin/chown";
 const RM_BINARY: &str = "/bin/rm";
 const NAME_PREFIX: &str = "tailor-janitor";
@@ -49,7 +51,10 @@ pub(crate) async fn chown_paths<R: ContainerRuntime>(
         "--".to_owned(),
     ];
     args.extend(existing.iter().map(|path| path_arg(path)));
-    run_janitor(runtime, config, args, &existing, cancel).await
+    // chown never unlinks, so identity-binding each target is harmless (the target need not be
+    // removable, only writable in place).
+    let binds = existing.iter().map(|path| identity_bind(path)).collect();
+    run_janitor(runtime, config, args, binds, cancel).await
 }
 
 pub(crate) async fn remove_paths<R: ContainerRuntime>(
@@ -64,14 +69,36 @@ pub(crate) async fn remove_paths<R: ContainerRuntime>(
     }
     let mut args = vec![RM_BINARY.to_owned(), "-rf".to_owned(), "--".to_owned()];
     args.extend(existing.iter().map(|path| path_arg(path)));
-    run_janitor(runtime, config, args, &existing, cancel).await
+    // Bind each target's PARENT, not the target itself. If we identity-bound the target, it would be
+    // an active mountpoint inside the janitor container: `rm -rf` clears its contents but cannot
+    // `rmdir` a busy mountpoint, so the top directory survives and rm exits non-zero (EBUSY) — the
+    // recurring "cannot remove '<dir>': Device or resource busy" that failed every successful build.
+    // With the parent bound, the target is an ordinary child directory that rm removes top-and-all.
+    let binds = removal_binds(&existing)?;
+    run_janitor(runtime, config, args, binds, cancel).await
+}
+
+/// Bind sources for a removal: each distinct target **parent**, guarded so the janitor never binds
+/// `/`, an ancestor of the working directory, or another unsafe directory. The target itself is then
+/// an ordinary child under its bound parent (see [`remove_paths`]).
+fn removal_binds(paths: &[PathBuf]) -> Result<Vec<String>, ExecError> {
+    let mut parents = std::collections::BTreeSet::new();
+    for path in paths {
+        let parent = path.parent().ok_or_else(|| ExecError::UnsafeDir {
+            path: path.clone(),
+            reason: "path has no parent directory to bind for removal".to_owned(),
+        })?;
+        guard::ensure_safe_removal_parent(parent)?;
+        parents.insert(parent.to_path_buf());
+    }
+    Ok(parents.iter().map(|parent| identity_bind(parent)).collect())
 }
 
 async fn run_janitor<R: ContainerRuntime>(
     runtime: &R,
     runtime_config: &RuntimeConfig,
     args: Vec<String>,
-    paths: &[PathBuf],
+    binds: Vec<String>,
     cancel: CancellationToken,
 ) -> Result<(), ExecError> {
     if runtime_config.janitor_image.is_empty() {
@@ -89,7 +116,7 @@ async fn run_janitor<R: ContainerRuntime>(
                 platform: host_platform().to_owned(),
                 name: format!("{NAME_PREFIX}-{}", std::process::id()),
                 args,
-                binds: paths.iter().map(|path| identity_bind(path)).collect(),
+                binds,
                 privileged: false,
                 cell_slug: String::new(),
                 log_source: LogSource::Janitor,
@@ -136,5 +163,39 @@ mod tests {
         assert_eq!(platform, "linux/arm64");
         #[cfg(target_arch = "x86_64")]
         assert_eq!(platform, "linux/amd64");
+    }
+
+    #[test]
+    fn removal_binds_bind_the_parent_not_the_target() {
+        // Regression: a removal must bind the target's PARENT, so the target is an ordinary child
+        // (not a mountpoint) that `rm -rf` can remove top-and-all. Binding the target itself made it
+        // a busy mountpoint whose `rmdir` returned EBUSY on every successful build.
+        let target = PathBuf::from("/data/tbuild/myimage_arm64_vhd-fixed/tools-dir");
+        let parent = "/data/tbuild/myimage_arm64_vhd-fixed";
+
+        let binds = removal_binds(std::slice::from_ref(&target)).unwrap();
+
+        assert_eq!(binds, vec![format!("{parent}:{parent}")]);
+        assert!(
+            !binds.iter().any(|bind| bind.contains("tools-dir")),
+            "must not bind the target itself, got {binds:?}"
+        );
+    }
+
+    #[test]
+    fn removal_binds_dedup_a_shared_parent() {
+        let a = PathBuf::from("/out/gizmo_amd64_cosi.cosi");
+        let b = PathBuf::from("/out/gizmo_amd64_cosi.ca_cert.pem");
+
+        let binds = removal_binds(&[a, b]).unwrap();
+
+        assert_eq!(binds, vec!["/out:/out".to_owned()]);
+    }
+
+    #[test]
+    fn removal_binds_reject_a_target_whose_parent_is_root() {
+        // Parent of `/foo` is `/`; the janitor must never bind the filesystem root.
+        let err = removal_binds(&[PathBuf::from("/foo")]).unwrap_err();
+        assert!(matches!(err, ExecError::UnsafeDir { .. }), "got {err:?}");
     }
 }

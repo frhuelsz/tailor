@@ -16,6 +16,23 @@ pub(crate) fn ensure_safe_rw_target(path: &Path) -> Result<(), ExecError> {
     ensure_safe_dir(path, false)
 }
 
+/// Guard a directory the janitor will bind read-write in order to remove a **named child** under it
+/// (`janitor::remove_paths`). Unlike [`ensure_safe_rw_target`], this does not reject a parent that
+/// contains the working directory: only the named child is deleted, so binding e.g. the workspace or
+/// image directory is fine, and running `tailor` from inside such a directory must still clean up.
+/// The one catastrophe is binding the filesystem root (re-exposing the whole host to a `rm -rf`), so
+/// that is the only rejection.
+pub(crate) fn ensure_safe_removal_parent(path: &Path) -> Result<(), ExecError> {
+    let normalized = normalize_absolute_lexical(path)?;
+    if normalized == Path::new(ROOT_PATH) {
+        return Err(unsafe_dir(
+            normalized,
+            "refusing to bind the filesystem root to remove a child".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_safe_dir(path: &Path, require_separate_device: bool) -> Result<(), ExecError> {
     let normalized = normalize_absolute_lexical(path)?;
     let root = Path::new(ROOT_PATH);
@@ -146,6 +163,18 @@ mod tests {
         let err = ensure_safe_rw_target(&cwd).unwrap_err();
 
         assert!(matches!(err, ExecError::UnsafeDir { .. }));
+    }
+
+    #[test]
+    fn removal_parent_rejects_root_but_allows_a_cwd_containing_dir() {
+        // The removal-parent guard is narrower than `ensure_safe_rw_target`: only the filesystem
+        // root is refused. A directory that contains the cwd (e.g. running `tailor` from inside an
+        // image dir whose staging is reclaimed) must be allowed, since only a named child is deleted.
+        let root_err = ensure_safe_removal_parent(Path::new(ROOT_PATH)).unwrap_err();
+        assert!(matches!(root_err, ExecError::UnsafeDir { .. }));
+
+        let cwd = std::env::current_dir().unwrap();
+        ensure_safe_removal_parent(&cwd).unwrap();
     }
 
     #[test]
