@@ -100,21 +100,6 @@ Model it on `cargo fmt --check` / `gofmt -l`:
 This makes the generated files trustworthy: reviewers diff `rendered/` to see the real blast radius of
 a config change, and the pipeline builds exactly what was reviewed.
 
-## 6. The non-tailor build contract & feature-gating (the hard limits)
-
-A bare `docker` + IC flow **cannot** reproduce everything tailor does at build time. Each such
-capability needs either an emitted prep step or an explicit gate:
-
-| tailor build-time work | Non-tailor flow can do it? | Eject strategy |
-| --- | --- | --- |
-| Merge config + assemble IC args | n/a (that's what we render) | ✅ rendered config + script |
-| Local `path:` base, `.repo` rpm-sources | ✅ static files in repo | ✅ bound read-only |
-| **tools-dir** (export a container fs → `--tools-dir`) | ❌ needs tailor's container export | emit a **prep script** (`docker create` + `export`) or require a pre-materialized dir |
-| **RPM dir sources** (createrepo/reflink farm) | ❌ needs tailor's metadata farm | emit a `createrepo_c` prep step, or require `.repo`-only sources |
-| **OCI / azureLinux base pull** (digest-pinned) | ⚠️ `docker pull`/`oras` by the lock digest | emit a pull-by-digest prep step |
-| **Signing** (three-pass `customize`→sign→`inject-files`) | ❌ complex openssl/sbsign orchestration | **out of scope for v1**; gate signed cells out with a warning |
-| Ownership janitor / cleanup | ⚠️ non-tailor flow owns its own scratch | documented; script `rm`s only its own `/build` |
-
 ## 6. The non-tailor build contract & the hard limits
 
 A bare `docker` + IC flow **cannot** reproduce everything tailor does at build time. Rather than
@@ -187,17 +172,6 @@ build — or eject refused to produce it.
 2. Should the ejectability check be its own read-only verb too (e.g. `tailor eject --check-only` /
    part of `tailor validate`), so CI can assert "everything is still ejectable" independently of a
    full render?
-3. Should `manifest.json` be the pipeline's entry point (it iterates the manifest), or is
-   `build-all.sh` + per-cell scripts enough?
-4. Mount layout: fixed (`/work`,`/build`,`/out`) vs configurable — and how to guarantee in-config
-   relative paths resolve under it (§4 caveat).
-
-## Open questions
-
-1. Output dir: a new committed `rendered/` at the workspace root, or promote the existing per-image
-   `.rendered/` (un-hide it) to carry scripts too?
-2. Prep scripts for tools-dir/OCI/RPM in v1, or start with **static-only ejectable cells** and add
-   prep emitters later?
 3. Should `manifest.json` be the pipeline's entry point (it iterates the manifest), or is
    `build-all.sh` + per-cell scripts enough?
 4. Mount layout: fixed (`/work`,`/build`,`/out`) vs configurable — and how to guarantee in-config
