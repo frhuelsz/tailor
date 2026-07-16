@@ -2,138 +2,138 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/installation/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/architecture/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/architectures/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/base-images/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/concepts/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/design-rationale/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/explanation/merge-model/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/add-an-axis/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/add-an-image/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/build-a-portable-binary/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/build-with-an-azure-linux-base/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/change-an-output-format/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/cross-arch-building/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/override-a-base-per-axis/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/pin-the-ic-version/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/select-a-container-engine/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/select-and-build-one-cell/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/share-config-with-include/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/sign-an-image/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/use-a-base-image-catalogue/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/use-a-local-ic-image/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/use-a-tools-dir/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/reference/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/reference/cli/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/reference/directives/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/reference/image-yaml/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/reference/output-formats/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/reference/tailor-yaml/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/tutorials/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/tutorials/getting-started/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/tutorials/your-first-matrix/</loc>
-         <lastmod>2026-07-15</lastmod>
+         <lastmod>2026-07-16</lastmod>
     </url>
 </urlset>
