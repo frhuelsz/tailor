@@ -115,12 +115,33 @@ capability needs either an emitted prep step or an explicit gate:
 | **Signing** (three-pass `customize`→sign→`inject-files`) | ❌ complex openssl/sbsign orchestration | **out of scope for v1**; gate signed cells out with a warning |
 | Ownership janitor / cleanup | ⚠️ non-tailor flow owns its own scratch | documented; script `rm`s only its own `/build` |
 
-**Gating rule:** a cell is **ejectable** iff all its inputs are static/local (config + local base +
-`.repo` sources, no signing). Cells needing tools-dir / RPM-dir / OCI base / signing are either
-(a) emitted **with a companion prep script** that performs the tailor-managed step in plain
-docker/oras, or (b) **skipped with a warning** naming the blocking capability. v1 targets (a) for
-tools-dir/OCI/RPM and (b) for signing; the manifest records each cell's ejectability and required
-prep.
+## 6. The non-tailor build contract & the hard limits
+
+A bare `docker` + IC flow **cannot** reproduce everything tailor does at build time. Rather than
+emit half-faithful prep scripts for those steps, **eject refuses them**: an image (cell) that
+requires any tailor-managed build-time capability is a **hard error**, so the committed artifacts are
+never a partial or subtly-wrong build.
+
+| tailor build-time work | In a bare `docker` + IC flow? | Eject behavior |
+| --- | --- | --- |
+| Merge config + assemble IC args | n/a (that's what we render) | ✅ rendered config + script |
+| Local `path:` base, `.repo` rpm-sources | ✅ static files in repo | ✅ bound read-only |
+| **tools-dir** (export a container fs → `--tools-dir`) | ❌ needs tailor's container export | ⛔ **error** |
+| **RPM dir sources** (createrepo/reflink farm) | ❌ needs tailor's metadata farm | ⛔ **error** (use a `.repo` source instead) |
+| **OCI / azureLinux base pull** (digest-pinned) | ❌ not reproduced by eject | ⛔ **error** (use a local `path:` base) |
+| **Signing** (three-pass `customize`→sign→`inject-files`) | ❌ complex openssl/sbsign orchestration | ⛔ **error** |
+| Ownership janitor / cleanup | ⚠️ non-tailor flow owns its own scratch | documented; script `rm`s only its own `/build` |
+
+**Ejectability rule:** a cell is **ejectable** iff *all* its inputs are static/local — a local
+`path:` base, `.repo` rpm-sources, no tools-dir, no signing. If **any** selected image/cell requires
+a non-ejectable capability, **`tailor eject` fails fast at the start with a clear error** that names
+the image, the cell, and the specific blocking capability (e.g. `image "myimage" cell
+"myimage_arm64_vhd" is not ejectable: uses a tools-dir source; eject supports only local bases and
+.repo rpm-sources`). No partial output is written, and (like the arch/dependency preflights) the
+error is raised **before** any rendering work.
+
+This keeps the contract unambiguous: everything in `rendered/` is a complete, faithful, tailor-free
+build — or eject refused to produce it.
 
 ## 7. Config surface & CLI
 
@@ -130,8 +151,7 @@ prep.
   goldens.)
 - **`tailor.yaml`:** an optional `eject:` block — `dir:` (output dir, default `rendered/`),
   `mountRoot:`/`buildMount:`/`outMount:` (container mount points, defaults `/work`,`/build`,`/out`),
-  `scriptShell:` (`bash`), and `prep: auto | skip` (whether to emit prep scripts for
-  tools-dir/OCI/RPM or gate those cells out).
+  and `scriptShell:` (`bash`). No prep/skip knobs — non-ejectable cells are always an error (§6).
 
 ## 8. Code touch-points
 
@@ -146,17 +166,31 @@ prep.
 
 ## 9. Risks / non-goals
 
-- **Capability gap is real (§6).** The honest story is "eject covers static cells fully; tailor-
-  managed steps need emitted prep scripts or are gated." Overselling a fully-faithful non-tailor
-  build would mislead.
+- **Restricted scope, stated up front (§6).** eject covers only fully-static cells; any image needing
+  tools-dir, RPM-dir sources, an OCI/azureLinux base, or signing is a **hard error**. This is a
+  deliberate limitation that keeps the ejected build faithful — but it means some workspaces cannot
+  be ejected as-authored and must switch to local `path:` bases / `.repo` sources first.
 - **Two sources of truth risk.** Mitigated *only* by the §5 drift check being mandatory in CI; without
   it, committed renders rot. This must ship together with the check, not after.
 - **In-config path resolution (§4 caveat)** is the top correctness risk — verify against IC before
   committing to a mount layout.
-- **Non-goal:** ejecting a signing pipeline in v1. **Non-goal:** making ejected scripts a supported
-  substitute for tailor's safety guards (they run plain docker; the operator owns that blast radius).
+- **Non-goal:** prep scripts or partial ejects for tailor-managed steps — those are refused, not
+  approximated. **Non-goal:** making ejected scripts a supported substitute for tailor's safety
+  guards (they run plain docker; the operator owns that blast radius).
 - **Non-goal:** round-tripping (editing rendered files back into configs). Rendered files are
   strictly generated, one-way, "do not edit."
+
+## Open questions
+
+1. Output dir: a new committed `rendered/` at the workspace root, or promote the existing per-image
+   `.rendered/` (un-hide it) to carry scripts too?
+2. Should the ejectability check be its own read-only verb too (e.g. `tailor eject --check-only` /
+   part of `tailor validate`), so CI can assert "everything is still ejectable" independently of a
+   full render?
+3. Should `manifest.json` be the pipeline's entry point (it iterates the manifest), or is
+   `build-all.sh` + per-cell scripts enough?
+4. Mount layout: fixed (`/work`,`/build`,`/out`) vs configurable — and how to guarantee in-config
+   relative paths resolve under it (§4 caveat).
 
 ## Open questions
 
