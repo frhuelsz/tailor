@@ -95,12 +95,15 @@ has no reusable IC-invocation step to target.
 - Eject (`2026-07-16-render-ahead-eject.md`) is **artifact format §3.3**. This doc adds formats §3.1
   (native-DSL compile, recommended) and §3.2 (structured plan) and the *where-tailor-runs* + *trust*
   framing.
-- The **ejectability hard-error rule** (`…eject` §6) applies to **every** format: the signed pipeline
-  can only consume cells whose inputs are fully static/local (local `path:` base, `.repo` rpm-sources,
-  no tools-dir, no signing). Any cell needing a tailor-managed build-time step (tools-dir export,
-  RPM-dir createrepo farm, OCI/azureLinux base pull, signing) is a **hard error at generation time in
-  PR CI** — because the signed pipeline cannot reproduce that step, and no unreviewed tool may run
-  there to do it. This must be surfaced as a fail-fast, not a silent partial artifact.
+- The **ejectability rule** (`…eject` §6) applies to **every** format: the signed pipeline can only
+  consume cells whose inputs are fully static/local (local `path:` base, `.repo` rpm-sources, no
+  tools-dir, no signing). In **strict** mode, any cell needing a tailor-managed build-time step
+  (tools-dir export, RPM-dir createrepo farm, OCI/azureLinux base pull, signing) is a **hard error at
+  generation time in PR CI**. In **limited** mode (`…eject` §6.2), such cells instead emit a padded
+  skeleton (loud placeholder env vars + a `manualSteps` manifest) so the pipeline supplies the
+  tailor-managed steps with its own reviewed code — e.g. for signing, eject emits only the initial
+  `customize` pass and the pipeline owns sign + `inject-files`. Either way, nothing tailor-managed is
+  silently approximated.
 - The **IC image pin** comes from a committed `tailor.lock` digest, so the pipeline runs the exact
   reviewed IC.
 
