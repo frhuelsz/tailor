@@ -444,6 +444,8 @@
       
         
       
+        
+      
     
     
       
@@ -725,6 +727,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/export-configs-for-a-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Export configs for a pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/use-a-tools-dir/" class="md-nav__link">
         
   
@@ -972,6 +995,15 @@
   <a href="#base-image-catalogue" class="md-nav__link">
     <span class="md-ellipsis">
       Base-image catalogue
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export" class="md-nav__link">
+    <span class="md-ellipsis">
+      Export
     </span>
   </a>
   
@@ -1320,6 +1352,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#export" class="md-nav__link">
+    <span class="md-ellipsis">
+      Export
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       Image discovery
@@ -1474,6 +1515,24 @@
 <td>output list</td>
 <td>no</td>
 <td>Inherited by images without <code>outputs</code>.</td>
+</tr>
+<tr>
+<td><code>export.outputDir</code></td>
+<td>path</td>
+<td>cond</td>
+<td>Committed directory for <code>tailor export</code> output (one <code>&lt;slug&gt;.yaml</code> per cell), relative to the workspace root. Required to run <code>tailor export</code> argument-free. See <a href="#export">Export</a>.</td>
+</tr>
+<tr>
+<td><code>export.scope</code></td>
+<td>enum</td>
+<td>no</td>
+<td>What <code>tailor export</code> emits. Defaults to <code>configsOnly</code> (the only value today); omit it.</td>
+</tr>
+<tr>
+<td><code>export.images</code></td>
+<td>list of strings</td>
+<td>no</td>
+<td>Restrict <code>tailor export</code> to a subset of images. Default: all images.</td>
 </tr>
 <tr>
 <td><code>baseImages</code></td>
@@ -1641,24 +1700,65 @@ so the path lives once here instead of being repeated (with brittle <code>../</c
 </table>
 <p>Fill slots with <a href="../cli/"><code>tailor bases download</code></a> and assert presence with <code>tailor bases verify</code>. See
 <a href="../../how-to/use-a-base-image-catalogue/">Use a base-image catalogue</a> and <a href="../../explanation/base-images/">Base images</a>.</p>
+<h2 id="export">Export<a class="headerlink" href="#export" title="Permanent link">&para;</a></h2>
+<p>The <code>export:</code> block configures <a href="../cli/"><code>tailor export</code></a>, which renders each cell's merged Image
+Customizer config to a committed directory so a pipeline can build the images without tailor.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">export</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">outputDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rendered</span><span class="w">      </span><span class="c1"># committed output dir, relative to the workspace root</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="c1"># scope: configsOnly     # optional; defaults to configsOnly (the only scope today)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="c1"># images: [gadget]       # optional; default = all images</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Req</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>outputDir</code></td>
+<td>path</td>
+<td>yes</td>
+<td>Committed directory receiving one <code>&lt;slug&gt;.yaml</code> per cell. Relative to the workspace root.</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td>enum</td>
+<td>no</td>
+<td>What to emit; defaults to <code>configsOnly</code>. An enum so future scopes can be added without a breaking change — omit it today.</td>
+</tr>
+<tr>
+<td><code>images</code></td>
+<td>list of strings</td>
+<td>no</td>
+<td>Restrict to a subset of images. Default: all.</td>
+</tr>
+</tbody>
+</table>
+<p>With this block present, <code>tailor export</code> and <code>tailor export --check</code> run with no arguments — the
+<code>--check</code> form is a drift gate for a pre-commit hook or CI (it fails on any changed, missing, or stale
+file). See <a href="../../how-to/export-configs-for-a-pipeline/">Export configs for a pipeline</a>.</p>
 <h2 id="image-discovery">Image discovery<a class="headerlink" href="#image-discovery" title="Permanent link">&para;</a></h2>
 <p>With no <code>images:</code> key, tailor discovers every <code>*/image.yaml</code> at depth 1 from the workspace root.</p>
 <p>To curate explicitly:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">images</span><span class="p">:</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">members</span><span class="p">:</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;*&quot;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tools</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="nt">exclude</span><span class="p">:</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scratch</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">  </span><span class="nt">inline</span><span class="p">:</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tiny</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">      </span><span class="nt">base</span><span class="p">:</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./bases/tiny.img</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">      </span><span class="nt">outputs</span><span class="p">:</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">        </span><span class="nt">os</span><span class="p">:</span>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">          </span><span class="nt">hostname</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tiny</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">images</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">members</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;*&quot;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tools</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">exclude</span><span class="p">:</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scratch</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">inline</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tiny</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">      </span><span class="nt">base</span><span class="p">:</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">        </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./bases/tiny.img</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">      </span><span class="nt">outputs</span><span class="p">:</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">      </span><span class="nt">config</span><span class="p">:</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">        </span><span class="nt">os</span><span class="p">:</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">          </span><span class="nt">hostname</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tiny</span>
 </code></pre></div>
 <p>Relative paths in <code>tailor.yaml</code> resolve against the workspace root. Relative paths in an <code>image.yaml</code> resolve against that image directory.</p>
 

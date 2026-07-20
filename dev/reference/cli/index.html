@@ -444,6 +444,8 @@
       
         
       
+        
+      
     
     
       
@@ -709,6 +711,27 @@
   
   <span class="md-ellipsis">
     Use a locally-built IC image
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-configs-for-a-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Export configs for a pipeline
   </span>
   
 
@@ -1023,6 +1046,15 @@
   <a href="#tailor-render-images" class="md-nav__link">
     <span class="md-ellipsis">
       tailor render [images...]
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tailor-export-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      tailor export [images...]
     </span>
   </a>
   
@@ -1518,6 +1550,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tailor-export-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      tailor export [images...]
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tailor-lock" class="md-nav__link">
     <span class="md-ellipsis">
       tailor lock
@@ -1713,6 +1754,10 @@
 <td>Output directory. Default: <code>&lt;workspace&gt;/artifacts</code>.</td>
 </tr>
 <tr>
+<td><code>--build-dir-base PATH</code></td>
+<td>Override <code>runtime.buildDirBase</code>: place each cell's build scratch under this directory (which must not be <code>/</code> or on the same filesystem as <code>/</code>). Lets CI point scratch at a pool-specific filesystem without editing the committed <code>tailor.yaml</code>.</td>
+</tr>
+<tr>
 <td><code>--dry-run</code></td>
 <td>Render each selected container/IC invocation without running it.</td>
 </tr>
@@ -1755,6 +1800,47 @@ config. Accepts <code>-s/--select</code> and <code>--cell</code>; read-only and 
 <p>List images and toolchains.</p>
 <h2 id="tailor-render-images"><code>tailor render [images...]</code><a class="headerlink" href="#tailor-render-images" title="Permanent link">&para;</a></h2>
 <p>Write golden snapshots for selected cells. Accepts <code>-s/--select</code> and <code>--cell</code>.</p>
+<h2 id="tailor-export-images"><code>tailor export [images...]</code><a class="headerlink" href="#tailor-export-images" title="Permanent link">&para;</a></h2>
+<p>Render each selected cell's merged Image Customizer config to a committed directory (one
+<code>&lt;slug&gt;.yaml</code> per cell), so a pipeline can build the images <strong>without tailor</strong>. Offline and pure —
+no base/toolchain resolution, no Docker.</p>
+<p>Configure it once in <code>tailor.yaml</code> so the command is argument-free (ideal for a pre-commit hook or CI
+gate):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">export</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">outputDir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rendered</span><span class="w">      </span><span class="c1"># committed output dir (relative to the workspace root)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="c1"># scope: configsOnly     # optional; defaults to configsOnly (the only scope today)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1"># images: [gadget]       # optional; default = all images</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--check</code></td>
+<td>Verify the committed exports match freshly rendered configs; exit non-zero on any changed, missing, or extra (stale) file. Writes nothing.</td>
+</tr>
+<tr>
+<td><code>--output-dir DIR</code></td>
+<td>Output directory. Default: <code>export.outputDir</code> from <code>tailor.yaml</code>.</td>
+</tr>
+<tr>
+<td><code>-s</code>, <code>--select AXIS=VALUE</code></td>
+<td>Constrain matrix axes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--cell SLUG</code></td>
+<td>Select exact cells by slug. Repeatable.</td>
+</tr>
+</tbody>
+</table>
+<p><code>tailor export</code> writes each <code>&lt;slug&gt;.yaml</code> and prunes any stale <code>*.yaml</code> in the output directory that no
+selected cell produces. Only static cells are exportable — the config YAML itself carries no
+tools-dir, base, rpm-source, or signing details (those are Image Customizer invocation arguments the
+consuming pipeline supplies).</p>
 <h2 id="tailor-lock"><code>tailor lock</code><a class="headerlink" href="#tailor-lock" title="Permanent link">&para;</a></h2>
 <p>Resolve registry inputs and write <code>tailor.lock</code> without building.</p>
 <h2 id="tailor-update"><code>tailor update</code><a class="headerlink" href="#tailor-update" title="Permanent link">&para;</a></h2>
