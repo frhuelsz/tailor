@@ -1,11 +1,11 @@
-# tailor — near-term: declarative configs-only eject + `eject --check`
+# tailor — near-term: declarative configs-only export + `export --check`
 
 > **Status:** Proposed · _2026-07-20_
 >
-> A focused, buildable subset of the eject design (`2026-07-16-render-ahead-eject.md`) for the
+> A focused, buildable subset of the export design (`2026-07-16-render-ahead-export.md`) for the
 > immediate need: **emit the merged IC config YAML per cell** into a committed directory, and a
-> **`tailor eject --check`** drift gate. The eject target is **declared in `tailor.yaml`**, so
-> `tailor eject` and `tailor eject --check` take **no arguments** — the check becomes a trivial,
+> **`tailor export --check`** drift gate. The export target is **declared in `tailor.yaml`**, so
+> `tailor export` and `tailor export --check` take **no arguments** — the check becomes a trivial,
 > zero-config command for a pre-commit hook and CI. Everything else in the parent docs (standalone
 > build scripts, manifest, `--limited`, native-DSL emitters) is **out of scope here** and deferred.
 
@@ -14,7 +14,7 @@
 The signed pipeline cannot run tailor (`2026-07-17-pipeline-handoff-strategy.md`), but it *can*
 consume committed, reviewed YAML. The merged IC config is the highest-value, most portable artifact,
 and — because the tailor-managed capabilities (tools-dir, base, rpm-sources, signing) live in the IC
-**invocation flags, not the `config:` tree** — a configs-only eject is **always fully ejectable**: no
+**invocation flags, not the `config:` tree** — a configs-only export is **always fully exportable**: no
 strict/limited gating, no invocation portability problems. The pipeline owns the invocation and just
 reads the per-cell config YAML. This is the smallest thing that unblocks the pipeline today.
 
@@ -23,19 +23,19 @@ reads the per-cell config YAML. This is the smallest thing that unblocks the pip
 **In:**
 
 - Render every selected cell's merged IC config to a **committed** directory.
-- `tailor eject` (write) and `tailor eject --check` (verify, no writes, non-zero on drift).
-- A declarative **`eject:` block in `tailor.yaml`** that both commands read, so `--check` needs no
+- `tailor export` (write) and `tailor export --check` (verify, no writes, non-zero on drift).
+- A declarative **`export:` block in `tailor.yaml`** that both commands read, so `--check` needs no
   flags.
 
 **Out (deferred to the parent docs):** standalone `build.sh` scripts, `manifest.json`, `build-all.sh`,
 `--limited` mode, native-DSL/matrix emitters, IC image pinning inside the artifact.
 
-## 3. Declarative eject config (`tailor.yaml`)
+## 3. Declarative export config (`tailor.yaml`)
 
-A new optional top-level block. Its presence is what makes `eject`/`eject --check` argument-free:
+A new optional top-level block. Its presence is what makes `export`/`export --check` argument-free:
 
 ```yaml
-eject:
+export:
   outputDir: rendered      # committed output dir, relative to the workspace root (the only required field)
   # scope: configsOnly     # OPTIONAL — defaults to configsOnly; state it only if a non-default scope exists
   # images: [myimage]        # optional; default = all images in the workspace
@@ -46,12 +46,12 @@ eject:
   consumes. Absolutized against the workspace root.
 - **`scope`** — **optional, defaults to `configsOnly`**. It is an enum so a future non-default scope
   (e.g. `scripts`, parent doc §3.2) can be added without a breaking change, but it should be *omitted*
-  today: `eject: { outputDir: rendered }` fully implies `scope: configsOnly`.
+  today: `export: { outputDir: rendered }` fully implies `scope: configsOnly`.
 - **`images`** — restrict to a subset; omitted ⇒ all images. (Cell selection stays "all cells of each
   listed image"; matrix selectors can be added later if needed.)
 
-If the `eject:` block is absent, `tailor eject` still works with CLI args (image list + `--output-dir`),
-but `tailor eject --check` in CI is expected to rely on the block so it is a bare command.
+If the `export:` block is absent, `tailor export` still works with CLI args (image list + `--output-dir`),
+but `tailor export --check` in CI is expected to rely on the block so it is a bare command.
 
 ## 4. Output layout
 
@@ -64,21 +64,21 @@ but `tailor eject --check` in CI is expected to rely on the block so it is a bar
 already encodes the image name and is **globally unique across the workspace** — no per-image subdir is
 needed, and the filename matches the existing golden (`write_golden`, `render.rs` → `{slug}.yaml`).
 
-## 5. `tailor eject` (write)
+## 5. `tailor export` (write)
 
-1. Load the workspace, resolve `eject.images` (default all), expand each image's matrix to cells.
+1. Load the workspace, resolve `export.images` (default all), expand each image's matrix to cells.
 2. Render each cell's IC config (pure, offline — no base/toolchain resolution, no Docker).
 3. Write `<outputDir>/<slug>.yaml`.
 4. **Prune stale files:** remove any `*.yaml` under `<outputDir>` that no cell in this run produces (so
-   a removed cell/axis does not leave an orphaned committed file). Only files matching the eject naming
+   a removed cell/axis does not leave an orphaned committed file). Only files matching the export naming
    pattern are pruned — never unrelated content under `<outputDir>`.
 
 Deterministic: stable cell order, stable YAML key order, LF newlines, no timestamps or absolute paths,
 so re-running with unchanged configs is a no-op and the committed diff is minimal.
 
-## 6. `tailor eject --check` (drift gate)
+## 6. `tailor export --check` (drift gate)
 
-The trivial CI/pre-commit command. With the `eject:` block present it takes **no arguments**:
+The trivial CI/pre-commit command. With the `export:` block present it takes **no arguments**:
 
 1. Render the same set **to a temp dir** (never touches `<outputDir>`).
 2. Compare against the committed `<outputDir>` **byte-for-byte**, detecting three kinds of drift:
@@ -89,9 +89,9 @@ The trivial CI/pre-commit command. With the `eject:` block present it takes **no
 
 Usage:
 
-- **Pre-commit hook:** `tailor eject && git add <outputDir>` (regenerate) or `tailor eject --check`
+- **Pre-commit hook:** `tailor export && git add <outputDir>` (regenerate) or `tailor export --check`
   (block the commit on drift). tailor can scaffold the hook via `tailor init`.
-- **CI gate:** `tailor eject --check` fails the PR if `<dir>` is stale — the safety net for anyone who
+- **CI gate:** `tailor export --check` fails the PR if `<dir>` is stale — the safety net for anyone who
   bypasses the hook. This is the mechanism that lets the pipeline trust the committed YAML
   (`2026-07-17` §2).
 
@@ -106,25 +106,25 @@ the required mount root for consumers. (Same caveat as `2026-07-16` §4, narrowe
 
 ## 8. Code touch-points
 
-- `tailor-config` — an `Eject { output_dir, scope: EjectScope, images }` struct on the workspace
-  config; `scope` **defaults to `EjectScope::ConfigsOnly`** (serde default, so it may be omitted);
+- `tailor-config` — an `Export { output_dir, scope: ExportScope, images }` struct on the workspace
+  config; `scope` **defaults to `ExportScope::ConfigsOnly`** (serde default, so it may be omitted);
   validation (unknown images rejected; `output_dir` absolutized vs workspace root).
-- `tailor` CLI — an `eject` verb with `--check` (and optional `--output-dir`/image args as a fallback
-  when no `eject:` block). Reuse `render_image`; add temp-render + byte-diff for `--check`; add the
+- `tailor` CLI — an `export` verb with `--check` (and optional `--output-dir`/image args as a fallback
+  when no `export:` block). Reuse `render_image`; add temp-render + byte-diff for `--check`; add the
   stale-file prune for the write path.
 - Reuse unchanged: matrix expansion, fragment merge, param interpolation, golden serialization.
 - **No new crate, no executor/runtime changes** — this is entirely offline config rendering.
 
 ## 9. Phasing
 
-- **This doc (near-term):** `eject:` block, `tailor eject`, `tailor eject --check`, configs-only
+- **This doc (near-term):** `export:` block, `tailor export`, `tailor export --check`, configs-only
   (default scope), prune, drift on changed/missing/extra.
 - **Later (parent docs):** `scope: scripts` (standalone build scripts + manifest), `--limited`,
   native-DSL/matrix hand-off, IC image pinning in the artifact.
 
 ## Open questions
 
-1. Should `eject --check` be folded into `tailor validate` (which already renders every cell) as an
+1. Should `export --check` be folded into `tailor validate` (which already renders every cell) as an
    extra assertion, so one CI command covers both? Or kept separate for a clear failure signal?
    (Lean: separate, for an unambiguous drift signal.)
 

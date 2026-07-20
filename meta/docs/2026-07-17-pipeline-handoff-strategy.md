@@ -9,8 +9,8 @@
 > the official pipeline consumes **only artifacts committed to the repo and approved through normal
 > PR review** — their trust derives from a human reviewing the committed *output*, not from tailor's
 > provenance. This doc frames tailor as a **build-input generator** whose output is reviewed like
-> source, and ranks the artifact formats it can emit. It generalizes the eject proposal
-> (`2026-07-16-render-ahead-eject.md`), which is one such format.
+> source, and ranks the artifact formats it can emit. It generalizes the export proposal
+> (`2026-07-16-render-ahead-export.md`), which is one such format.
 >
 > **Transitional by design.** This constraint is expected to relax if/when tailor gains an official
 > trust chain; the strategy is deliberately a **bridge** (see §7), not a permanent architecture that
@@ -45,8 +45,8 @@ why this works while tailor is still unofficial.
    were not hand-edited or left stale.
 
 Without (1) the pipeline runs unreviewed content; without (2) the committed artifacts rot. Both are
-mandatory and must ship together. This is the same drift-check described for eject
-(`2026-07-16-render-ahead-eject.md` §5), applied to whatever artifact format is chosen below.
+mandatory and must ship together. This is the same drift-check described for export
+(`2026-07-16-render-ahead-export.md` §5), applied to whatever artifact format is chosen below.
 
 ## 3. Artifact-format spectrum (what to commit), ranked
 
@@ -70,14 +70,14 @@ which the pipeline owners already review.
 
 tailor commits a machine-readable **`plan.json`**: per cell → IC image digest, the full arg vector,
 mounts, and config path (`build --dry-run` + `matrix --json` are ~80% of this, minus the absolute-path
-portability fix from the eject doc §4). The signed pipeline has a small **generic runner in its own
+portability fix from the export doc §4). The signed pipeline has a small **generic runner in its own
 stack** (bash/python) — reviewed once — that iterates the plan and runs IC. Data is reviewed per
 change; the runner rarely changes. Good when the pipeline prefers a data-driven loop over generated
 DSL.
 
-### 3.3 Standalone eject scripts — see the companion doc
+### 3.3 Standalone export scripts — see the companion doc
 
-tailor commits standalone per-cell build scripts (`2026-07-16-render-ahead-eject.md`). Most
+tailor commits standalone per-cell build scripts (`2026-07-16-render-ahead-export.md`). Most
 self-contained, but introduces a **new script surface** to review and maintain instead of reusing the
 pipeline's approved machinery — so it's the least preferred under this constraint unless the pipeline
 has no reusable IC-invocation step to target.
@@ -90,18 +90,18 @@ has no reusable IC-invocation step to target.
   **same reviewed PR**. This is where the "faithful & fresh" guarantee is produced.
 - **Signed release pipeline:** consumes the committed artifacts only. tailor is never present.
 
-## 5. Relationship to the eject proposal
+## 5. Relationship to the export proposal
 
-- Eject (`2026-07-16-render-ahead-eject.md`) is **artifact format §3.3**. This doc adds formats §3.1
+- Export (`2026-07-16-render-ahead-export.md`) is **artifact format §3.3**. This doc adds formats §3.1
   (native-DSL compile, recommended) and §3.2 (structured plan) and the *where-tailor-runs* + *trust*
   framing.
-- The **ejectability rule** (`…eject` §6) applies to **every** format: the signed pipeline can only
+- The **exportability rule** (`…export` §6) applies to **every** format: the signed pipeline can only
   consume cells whose inputs are fully static/local (local `path:` base, `.repo` rpm-sources, no
   tools-dir, no signing). In **strict** mode, any cell needing a tailor-managed build-time step
   (tools-dir export, RPM-dir createrepo farm, OCI/azureLinux base pull, signing) is a **hard error at
-  generation time in PR CI**. In **limited** mode (`…eject` §6.2), such cells instead emit a padded
+  generation time in PR CI**. In **limited** mode (`…export` §6.2), such cells instead emit a padded
   skeleton (loud placeholder env vars + a `manualSteps` manifest) so the pipeline supplies the
-  tailor-managed steps with its own reviewed code — e.g. for signing, eject emits only the initial
+  tailor-managed steps with its own reviewed code — e.g. for signing, export emits only the initial
   `customize` pass and the pipeline owns sign + `inject-files`. Either way, nothing tailor-managed is
   silently approximated.
 - The **IC image pin** comes from a committed `tailor.lock` digest, so the pipeline runs the exact
