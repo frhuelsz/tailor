@@ -38,6 +38,9 @@ defaults:
 | `signing.default` | string | no | Signing profile used when an image says `signing: true`. See [Sign an image](../how-to/sign-an-image.md). |
 | `signing.profiles` | map of `{backend, …}` | no | Named signing profiles. `backend` is `local-test-ca`, `keypair` (needs `key`+`cert`), or `azure-key-vault` (needs `vault`+`certificate`). |
 | `defaults.outputs` | output list | no | Inherited by images without `outputs`. |
+| `export.outputDir` | path | cond | Committed directory for `tailor export` output (one `<slug>.yaml` per cell), relative to the workspace root. Required to run `tailor export` argument-free. See [Export](#export). |
+| `export.scope` | enum | no | What `tailor export` emits. Defaults to `configsOnly` (the only value today); omit it. |
+| `export.images` | list of strings | no | Restrict `tailor export` to a subset of images. Default: all images. |
 | `baseImages` | list of `{name, path, arch?, source?}` | no | Base-image catalogue: named slots an image references with `base: { ref: <name> }`. Each `name` must be unique. See [base-image catalogue](#base-image-catalogue). |
 | `images` | object | no | Omit to auto-discover every immediate `*/image.yaml`. |
 
@@ -156,6 +159,28 @@ baseImages:
 
 Fill slots with [`tailor bases download`](cli.md) and assert presence with `tailor bases verify`. See
 [Use a base-image catalogue](../how-to/use-a-base-image-catalogue.md) and [Base images](../explanation/base-images.md).
+
+## Export
+
+The `export:` block configures [`tailor export`](cli.md), which renders each cell's merged Image
+Customizer config to a committed directory so a pipeline can build the images without tailor.
+
+```yaml
+export:
+  outputDir: rendered      # committed output dir, relative to the workspace root
+  # scope: configsOnly     # optional; defaults to configsOnly (the only scope today)
+  # images: [gadget]       # optional; default = all images
+```
+
+| Field | Type | Req | Meaning |
+| --- | --- | --- | --- |
+| `outputDir` | path | yes | Committed directory receiving one `<slug>.yaml` per cell. Relative to the workspace root. |
+| `scope` | enum | no | What to emit; defaults to `configsOnly`. An enum so future scopes can be added without a breaking change — omit it today. |
+| `images` | list of strings | no | Restrict to a subset of images. Default: all. |
+
+With this block present, `tailor export` and `tailor export --check` run with no arguments — the
+`--check` form is a drift gate for a pre-commit hook or CI (it fails on any changed, missing, or stale
+file). See [Export configs for a pipeline](../how-to/export-configs-for-a-pipeline.md).
 
 ## Image discovery
 

@@ -78,6 +78,7 @@ nav:
       - Share config with $include: how-to/share-config-with-include.md
       - Pin the Image Customizer version: how-to/pin-the-ic-version.md
       - Use a locally-built IC image: how-to/use-a-local-ic-image.md
+      - Export configs for a pipeline: how-to/export-configs-for-a-pipeline.md
       - Use a tools dir for sealed images: how-to/use-a-tools-dir.md
       - Select a container engine: how-to/select-a-container-engine.md
       - Sign an image: how-to/sign-an-image.md

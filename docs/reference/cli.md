@@ -45,6 +45,7 @@ Resolve and run Image Customizer for selected images. Default: all images.
 | `--force` | Ignore incremental up-to-date checks. |
 | `--arch ARCH` | Restrict build to architecture(s). Repeatable. |
 | `--output-dir PATH` | Output directory. Default: `<workspace>/artifacts`. |
+| `--build-dir-base PATH` | Override `runtime.buildDirBase`: place each cell's build scratch under this directory (which must not be `/` or on the same filesystem as `/`). Lets CI point scratch at a pool-specific filesystem without editing the committed `tailor.yaml`. |
 | `--dry-run` | Render each selected container/IC invocation without running it. |
 | `--jobs N` | Reserved; currently sequential. |
 | `--clones N` | Build N identical clones of each cell. Default: `1`. |
@@ -94,6 +95,34 @@ List images and toolchains.
 ## `tailor render [images...]`
 
 Write golden snapshots for selected cells. Accepts `-s/--select` and `--cell`.
+
+## `tailor export [images...]`
+
+Render each selected cell's merged Image Customizer config to a committed directory (one
+`<slug>.yaml` per cell), so a pipeline can build the images **without tailor**. Offline and pure —
+no base/toolchain resolution, no Docker.
+
+Configure it once in `tailor.yaml` so the command is argument-free (ideal for a pre-commit hook or CI
+gate):
+
+```yaml
+export:
+  outputDir: rendered      # committed output dir (relative to the workspace root)
+  # scope: configsOnly     # optional; defaults to configsOnly (the only scope today)
+  # images: [gadget]       # optional; default = all images
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--check` | Verify the committed exports match freshly rendered configs; exit non-zero on any changed, missing, or extra (stale) file. Writes nothing. |
+| `--output-dir DIR` | Output directory. Default: `export.outputDir` from `tailor.yaml`. |
+| `-s`, `--select AXIS=VALUE` | Constrain matrix axes. Repeatable. |
+| `--cell SLUG` | Select exact cells by slug. Repeatable. |
+
+`tailor export` writes each `<slug>.yaml` and prunes any stale `*.yaml` in the output directory that no
+selected cell produces. Only static cells are exportable — the config YAML itself carries no
+tools-dir, base, rpm-source, or signing details (those are Image Customizer invocation arguments the
+consuming pipeline supplies).
 
 ## `tailor lock`
 

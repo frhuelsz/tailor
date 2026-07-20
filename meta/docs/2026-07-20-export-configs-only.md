@@ -1,6 +1,6 @@
 # tailor — near-term: declarative configs-only export + `export --check`
 
-> **Status:** Proposed · _2026-07-20_
+> **Status:** Implemented (`tailor export` / `export --check`, configs-only) · _2026-07-20_
 >
 > A focused, buildable subset of the export design (`2026-07-16-render-ahead-export.md`) for the
 > immediate need: **emit the merged IC config YAML per cell** into a committed directory, and a
