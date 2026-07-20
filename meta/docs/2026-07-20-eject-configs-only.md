@@ -36,40 +36,42 @@ A new optional top-level block. Its presence is what makes `eject`/`eject --chec
 
 ```yaml
 eject:
-  dir: rendered            # committed output dir, relative to the workspace root
-  scope: configsOnly       # only value for now; `scripts` reserved for later (parent doc §3.2)
-  images: [myimage, minimal] # optional; default = all images in the workspace
+  outputDir: rendered      # committed output dir, relative to the workspace root (the only required field)
+  # scope: configsOnly     # OPTIONAL — defaults to configsOnly; state it only if a non-default scope exists
+  # images: [myimage]        # optional; default = all images in the workspace
 ```
 
-- **`dir`** — the committed output root. Distinct from today's per-image `.rendered/` diagnostic
-  goldens; this is the reviewed artifact the pipeline consumes. Absolutized against the workspace root.
-- **`scope`** — `configsOnly` now (an enum so `scripts` can be added without a breaking change).
+- **`outputDir`** — the committed output root, and the only field normally needed. Distinct from
+  today's per-image `.rendered/` diagnostic goldens; this is the reviewed artifact the pipeline
+  consumes. Absolutized against the workspace root.
+- **`scope`** — **optional, defaults to `configsOnly`**. It is an enum so a future non-default scope
+  (e.g. `scripts`, parent doc §3.2) can be added without a breaking change, but it should be *omitted*
+  today: `eject: { outputDir: rendered }` fully implies `scope: configsOnly`.
 - **`images`** — restrict to a subset; omitted ⇒ all images. (Cell selection stays "all cells of each
   listed image"; matrix selectors can be added later if needed.)
 
-If the `eject:` block is absent, `tailor eject` still works with CLI args (image list + `--dir`), but
-`tailor eject --check` in CI is expected to rely on the block so it is a bare command.
+If the `eject:` block is absent, `tailor eject` still works with CLI args (image list + `--output-dir`),
+but `tailor eject --check` in CI is expected to rely on the block so it is a bare command.
 
 ## 4. Output layout
 
 ```
-<dir>/
-  <image>/
-    <slug>.ic.yaml     # merged IC config for that cell (deterministic golden)
+<outputDir>/
+  <slug>.yaml     # merged IC config for one cell
 ```
 
-One file per cell, keyed by the same slug the matrix already emits. Reuses the existing golden
-serialization (`write_golden` / `render_image`, `render.rs`) — just targeting `eject.dir` instead of
-`<image_dir>/.rendered/`.
+**Flat, one `<slug>.yaml` per cell.** The slug is `cell_slug(image, axes, format)` (`matrix.rs`), so it
+already encodes the image name and is **globally unique across the workspace** — no per-image subdir is
+needed, and the filename matches the existing golden (`write_golden`, `render.rs` → `{slug}.yaml`).
 
 ## 5. `tailor eject` (write)
 
 1. Load the workspace, resolve `eject.images` (default all), expand each image's matrix to cells.
 2. Render each cell's IC config (pure, offline — no base/toolchain resolution, no Docker).
-3. Write `<dir>/<image>/<slug>.ic.yaml`.
-4. **Prune stale files:** remove any `*.ic.yaml` under `<dir>` that no cell in this run produces (so a
-   removed cell/axis does not leave an orphaned committed file). Only files matching the eject naming
-   pattern are pruned — never unrelated content under `<dir>`.
+3. Write `<outputDir>/<slug>.yaml`.
+4. **Prune stale files:** remove any `*.yaml` under `<outputDir>` that no cell in this run produces (so
+   a removed cell/axis does not leave an orphaned committed file). Only files matching the eject naming
+   pattern are pruned — never unrelated content under `<outputDir>`.
 
 Deterministic: stable cell order, stable YAML key order, LF newlines, no timestamps or absolute paths,
 so re-running with unchanged configs is a no-op and the committed diff is minimal.
@@ -78,17 +80,17 @@ so re-running with unchanged configs is a no-op and the committed diff is minima
 
 The trivial CI/pre-commit command. With the `eject:` block present it takes **no arguments**:
 
-1. Render the same set **to a temp dir** (never touches `<dir>`).
-2. Compare against the committed `<dir>` **byte-for-byte**, detecting three kinds of drift:
+1. Render the same set **to a temp dir** (never touches `<outputDir>`).
+2. Compare against the committed `<outputDir>` **byte-for-byte**, detecting three kinds of drift:
    - **changed** — a committed file differs from freshly rendered;
    - **missing** — a cell renders but no committed file exists;
-   - **extra** — a committed `*.ic.yaml` exists that no cell produces (stale).
+   - **extra** — a committed `*.yaml` exists that no cell produces (stale).
 3. On any drift: print the offending paths and **exit non-zero**. On none: exit 0, silent.
 
 Usage:
 
-- **Pre-commit hook:** `tailor eject && git add <dir>` (regenerate) or `tailor eject --check` (block
-  the commit on drift). tailor can scaffold the hook via `tailor init`.
+- **Pre-commit hook:** `tailor eject && git add <outputDir>` (regenerate) or `tailor eject --check`
+  (block the commit on drift). tailor can scaffold the hook via `tailor init`.
 - **CI gate:** `tailor eject --check` fails the PR if `<dir>` is stale — the safety net for anyone who
   bypasses the hook. This is the mechanism that lets the pipeline trust the committed YAML
   (`2026-07-17` §2).
@@ -104,27 +106,32 @@ the required mount root for consumers. (Same caveat as `2026-07-16` §4, narrowe
 
 ## 8. Code touch-points
 
-- `tailor-config` — an `Eject { dir, scope: EjectScope, images }` struct on the workspace config;
-  `EjectScope::ConfigsOnly`; validation (unknown images rejected; `dir` absolutized vs workspace root).
-- `tailor` CLI — an `eject` verb with `--check` (and optional `--dir`/image args as a fallback when no
-  `eject:` block). Reuse `render_image`; add temp-render + byte-diff for `--check`; add the stale-file
-  prune for the write path.
+- `tailor-config` — an `Eject { output_dir, scope: EjectScope, images }` struct on the workspace
+  config; `scope` **defaults to `EjectScope::ConfigsOnly`** (serde default, so it may be omitted);
+  validation (unknown images rejected; `output_dir` absolutized vs workspace root).
+- `tailor` CLI — an `eject` verb with `--check` (and optional `--output-dir`/image args as a fallback
+  when no `eject:` block). Reuse `render_image`; add temp-render + byte-diff for `--check`; add the
+  stale-file prune for the write path.
 - Reuse unchanged: matrix expansion, fragment merge, param interpolation, golden serialization.
 - **No new crate, no executor/runtime changes** — this is entirely offline config rendering.
 
 ## 9. Phasing
 
-- **This doc (near-term):** `eject:` block, `tailor eject`, `tailor eject --check`, configs-only,
-  prune, drift on changed/missing/extra.
+- **This doc (near-term):** `eject:` block, `tailor eject`, `tailor eject --check`, configs-only
+  (default scope), prune, drift on changed/missing/extra.
 - **Later (parent docs):** `scope: scripts` (standalone build scripts + manifest), `--limited`,
   native-DSL/matrix hand-off, IC image pinning in the artifact.
 
 ## Open questions
 
-1. Output dir: a new committed `rendered/` (this doc), or formalize the existing per-image
-   `.rendered/` as the eject target? (Lean: a single top-level `eject.dir` — one place for the pipeline
-   to consume.)
-2. Should `eject --check` be folded into `tailor validate` (which already renders every cell) as an
+1. Should `eject --check` be folded into `tailor validate` (which already renders every cell) as an
    extra assertion, so one CI command covers both? Or kept separate for a clear failure signal?
-3. File suffix: `.ic.yaml` vs `.yaml` — does the pipeline care? (Lean: `.ic.yaml` to signal "this is an
-   IC config," and to make the prune pattern unambiguous.)
+   (Lean: separate, for an unambiguous drift signal.)
+
+## Resolved
+
+- **Output dir:** a single top-level committed `outputDir` (default `rendered/`), distinct from the
+  per-image `.rendered/` diagnostic goldens — one place for the pipeline to consume.
+- **Layout / filename:** flat `<outputDir>/<slug>.yaml` — the slug already encodes image+axes+format
+  (globally unique) and matches the existing golden filename.
+- **`scope`:** optional, defaults to `configsOnly`; omitted in practice.
