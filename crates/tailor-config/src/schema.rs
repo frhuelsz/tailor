@@ -35,6 +35,37 @@ pub struct ToolConfig {
     /// Named base-image slots referenced by `base: { ref: <name> }` (`meta/docs/2026-06-29-base-image-catalogue.md` §3).
     #[serde(default)]
     pub base_images: Option<BaseImageCatalogue>,
+    /// Declarative render-ahead of committed IC config YAMLs for a non-tailor pipeline
+    /// (`meta/docs/2026-07-20-export-configs-only.md`). Its presence makes `tailor export` /
+    /// `tailor export --check` argument-free.
+    #[serde(default)]
+    pub export: Option<ExportConfig>,
+}
+
+/// `export:` — declarative render-ahead of committed IC config YAMLs
+/// (`meta/docs/2026-07-20-export-configs-only.md`). `tailor export` renders every selected cell's
+/// merged IC config to `<outputDir>/<slug>.yaml`; `tailor export --check` fails on drift.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportConfig {
+    /// Committed output directory (relative to the workspace root): one `<slug>.yaml` per cell.
+    pub output_dir: PathBuf,
+    /// What to emit; defaults to configs-only (the only scope today).
+    #[serde(default)]
+    pub scope: ExportScope,
+    /// Restrict to a subset of images; empty ⇒ all images in the workspace.
+    #[serde(default)]
+    pub images: Vec<String>,
+}
+
+/// What `tailor export` emits. Only `configsOnly` exists today; an enum so future scopes (standalone
+/// build scripts, a manifest) can be added without a breaking config change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportScope {
+    /// Only the merged IC config YAML per cell.
+    #[default]
+    ConfigsOnly,
 }
 
 impl ToolConfig {

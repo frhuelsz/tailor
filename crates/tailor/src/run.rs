@@ -29,8 +29,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::{
-        AddCommand, BasesCommand, BuildArgs, Cli, Command, InitArgs, InitTemplate, MatrixFormat,
-        TimestampMode,
+        AddCommand, BasesCommand, BuildArgs, Cli, Command, ExportArgs, InitArgs, InitTemplate,
+        MatrixFormat, TimestampMode,
     },
     error::AppError,
     scaffold,
@@ -122,6 +122,7 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             validate(&workspace, &args.images, &selector(&args.select, &[])?)
         }
         Command::Render(args) => render(&workspace, &args.images, &selector(&args.select, &[])?),
+        Command::Export(args) => export(&workspace, &args),
         Command::Explain {
             image,
             select,
@@ -282,6 +283,155 @@ fn render(workspace: &Workspace, names: &[String], selector: &Selector) -> Resul
         }
     }
     Ok(())
+}
+
+const EXPORT_YAML_EXT: &str = "yaml";
+
+/// `tailor export` — render every selected cell's merged IC config to `<outputDir>/<slug>.yaml` for a
+/// non-tailor pipeline to consume, or (`--check`) verify the committed exports are up to date.
+/// Offline and pure: no base/toolchain resolution, no Docker (`meta/docs/2026-07-20-export-configs-only.md`).
+fn export(workspace: &Workspace, args: &ExportArgs) -> Result<(), AppError> {
+    let config = workspace.tool.as_ref().and_then(|tool| tool.export.as_ref());
+    let output_dir = args
+        .output_dir
+        .clone()
+        .or_else(|| config.map(|export| export.output_dir.clone()))
+        .ok_or_else(|| {
+            AppError::Message(
+                "no export output directory: set `export.outputDir` in tailor.yaml or pass --output-dir"
+                    .to_owned(),
+            )
+        })?;
+    let output_dir = tailor_config::absolutize(&output_dir, &workspace.root);
+
+    let names = if args.images.is_empty() {
+        config.map_or_else(Vec::new, |export| export.images.clone())
+    } else {
+        args.images.clone()
+    };
+    let selector = selector(&args.select, &[])?;
+
+    let mut produced: BTreeMap<String, String> = BTreeMap::new();
+    for target in build_targets(workspace, &names)? {
+        for cell in cells_selected(&target, &selector)? {
+            let yaml = serde_yaml_ng::to_string(&cell.ic_config).map_err(|source| {
+                AppError::Message(format!(
+                    "failed to serialize IC config for cell `{}`: {source}",
+                    cell.slug.as_ref()
+                ))
+            })?;
+            produced.insert(cell.slug.as_ref().to_owned(), yaml);
+        }
+    }
+    if produced.is_empty() {
+        return Err(AppError::Message(
+            "export matched no cells for the selected images".to_owned(),
+        ));
+    }
+
+    if args.check {
+        check_export(&output_dir, &produced)
+    } else {
+        write_export(&output_dir, &produced)
+    }
+}
+
+/// Write each `<slug>.yaml` and prune any top-level `*.yaml` in the output dir that no selected cell
+/// produces, so a removed cell/axis never leaves an orphaned committed file.
+fn write_export(output_dir: &Path, produced: &BTreeMap<String, String>) -> Result<(), AppError> {
+    fs::create_dir_all(output_dir).map_err(|source| {
+        AppError::Message(format!(
+            "failed to create export dir {}: {source}",
+            output_dir.display()
+        ))
+    })?;
+    for (slug, yaml) in produced {
+        let path = output_dir.join(format!("{slug}.{EXPORT_YAML_EXT}"));
+        fs::write(&path, yaml)
+            .map_err(|source| AppError::Message(format!("failed to write {}: {source}", path.display())))?;
+        println!("exported {}", path.display());
+    }
+    for path in stale_exports(output_dir, produced)? {
+        fs::remove_file(&path)
+            .map_err(|source| AppError::Message(format!("failed to prune {}: {source}", path.display())))?;
+        println!("pruned {}", path.display());
+    }
+    Ok(())
+}
+
+/// Verify the committed exports match `produced`: fail on any changed, missing, or extra (stale)
+/// `<slug>.yaml`. Renders nothing to disk.
+fn check_export(output_dir: &Path, produced: &BTreeMap<String, String>) -> Result<(), AppError> {
+    let mut drift: Vec<String> = Vec::new();
+    for (slug, yaml) in produced {
+        let path = output_dir.join(format!("{slug}.{EXPORT_YAML_EXT}"));
+        match fs::read_to_string(&path) {
+            Ok(existing) if &existing == yaml => {}
+            Ok(_) => drift.push(format!("changed: {}", path.display())),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                drift.push(format!("missing: {}", path.display()));
+            }
+            Err(source) => {
+                return Err(AppError::Message(format!(
+                    "failed to read {}: {source}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    for path in stale_exports(output_dir, produced)? {
+        drift.push(format!("extra:   {}", path.display()));
+    }
+    if drift.is_empty() {
+        println!("export up to date ({} cell(s))", produced.len());
+        return Ok(());
+    }
+    drift.sort();
+    Err(AppError::Message(format!(
+        "export is out of date ({} difference(s)); run `tailor export`:\n  {}",
+        drift.len(),
+        drift.join("\n  ")
+    )))
+}
+
+/// Top-level `*.yaml` files under `output_dir` whose slug is not in `produced` (orphaned exports).
+fn stale_exports(
+    output_dir: &Path,
+    produced: &BTreeMap<String, String>,
+) -> Result<Vec<PathBuf>, AppError> {
+    let entries = match fs::read_dir(output_dir) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(AppError::Message(format!(
+                "failed to read export dir {}: {source}",
+                output_dir.display()
+            )));
+        }
+    };
+    let mut stale = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|source| {
+                AppError::Message(format!(
+                    "failed to read export dir {}: {source}",
+                    output_dir.display()
+                ))
+            })?
+            .path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some(EXPORT_YAML_EXT) {
+            continue;
+        }
+        let is_produced = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| produced.contains_key(stem));
+        if !is_produced {
+            stale.push(path);
+        }
+    }
+    stale.sort();
+    Ok(stale)
 }
 
 /// Print the merge order (the ordered fragment files) for each selected cell, so the precedence model
@@ -891,6 +1041,7 @@ async fn build(
     let mut tool = tool_config(workspace);
     resolve_image_cache_dir(&mut tool, &workspace.root);
     apply_log_overrides(&mut tool, logging, &workspace.root)?;
+    apply_build_dir_base_override(&mut tool, args.build_dir_base.as_deref())?;
     let targets = build_targets(workspace, &args.images)?;
     let selection = selector(&args.select, &args.arch)?;
     let output_dir = tailor_config::absolutize(
@@ -1286,7 +1437,26 @@ fn apply_log_overrides(
     Ok(())
 }
 
-// ───────────────────────────── signing (meta/docs/2026-06-29-signing.md) ─────────────────────────────
+/// Apply the `tailor build --build-dir-base` override: set `runtime.buildDirBase` from the flag,
+/// absolutized against the CWD (matching the other CLI dir overrides). Lets CI point per-cell build
+/// scratch at a pool-specific filesystem without mutating the committed `tailor.yaml`. The
+/// fail-closed build-dir guard still runs on the effective dir at execution (`arg_builder`), so an
+/// unsafe path (`/` or on the same filesystem as `/`) is rejected regardless of source.
+fn apply_build_dir_base_override(
+    tool: &mut ToolConfig,
+    flag: Option<&Path>,
+) -> Result<(), AppError> {
+    let Some(base) = flag else {
+        return Ok(());
+    };
+    let cwd =
+        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    tool.runtime
+        .get_or_insert_with(tailor_config::Runtime::default)
+        .build_dir_base = Some(tailor_config::absolutize(base, &cwd));
+    Ok(())
+}
+
 
 /// Gather the distinct signing profiles the selected images require, tracking which images need
 /// each (`meta/docs/2026-06-29-signing.md` §5.1). Resolution also validates each referenced profile.

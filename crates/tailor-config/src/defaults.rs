@@ -54,6 +54,7 @@ pub fn default_tool_config() -> ToolConfig {
         signing: None,
         images: None,
         base_images: None,
+        export: None,
     }
 }
 

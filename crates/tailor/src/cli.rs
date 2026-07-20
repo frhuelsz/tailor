@@ -132,6 +132,8 @@ pub(crate) enum Command {
     Build(BuildArgs),
     /// Render the final IC config per cell, writing golden snapshots.
     Render(ImagesArgs),
+    /// Export committed IC config YAMLs for a non-tailor pipeline; `--check` fails on drift.
+    Export(ExportArgs),
     /// List images (and toolchains).
     List,
     /// Show resolved information for one image.
@@ -252,6 +254,25 @@ pub(crate) struct ImagesArgs {
     pub(crate) select: SelectArgs,
 }
 
+/// Args for `tailor export`. With an `export:` block in `tailor.yaml`, all fields are optional, so
+/// `tailor export` and `tailor export --check` run with no arguments (ideal for a pre-commit/CI gate).
+#[derive(Debug, Args)]
+pub(crate) struct ExportArgs {
+    /// Image names to export (default: the `export.images` config, else all images).
+    pub(crate) images: Vec<String>,
+
+    /// Verify the committed exports match freshly rendered configs; exit non-zero on drift. No writes.
+    #[arg(long)]
+    pub(crate) check: bool,
+
+    /// Output directory (default: `export.outputDir` from `tailor.yaml`); relative to the workspace root.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) output_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub(crate) select: SelectArgs,
+}
+
 /// Reusable cell-selection flags. Pin some axes for a slice, all axes for one
 /// cell, or name exact cells by slug. Axis values are `[A-Za-z0-9.-]+`, so `,` and `=` are safe
 /// delimiters.
@@ -321,6 +342,12 @@ pub(crate) struct BuildArgs {
     /// Where to write artifacts (default: `<workspace>/artifacts`).
     #[arg(long)]
     pub(crate) output_dir: Option<PathBuf>,
+
+    /// Override `runtime.buildDirBase`: place each cell's build scratch under this directory (which
+    /// must not be `/` or on the same filesystem as `/`). Lets CI point scratch at a pool-specific
+    /// filesystem without editing the committed `tailor.yaml`.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) build_dir_base: Option<PathBuf>,
 
     /// Render every selected cell's container invocation without running it.
     #[arg(long)]
