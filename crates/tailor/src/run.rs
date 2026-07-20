@@ -291,7 +291,10 @@ const EXPORT_YAML_EXT: &str = "yaml";
 /// non-tailor pipeline to consume, or (`--check`) verify the committed exports are up to date.
 /// Offline and pure: no base/toolchain resolution, no Docker (`meta/docs/2026-07-20-export-configs-only.md`).
 fn export(workspace: &Workspace, args: &ExportArgs) -> Result<(), AppError> {
-    let config = workspace.tool.as_ref().and_then(|tool| tool.export.as_ref());
+    let config = workspace
+        .tool
+        .as_ref()
+        .and_then(|tool| tool.export.as_ref());
     let output_dir = args
         .output_dir
         .clone()
@@ -347,13 +350,15 @@ fn write_export(output_dir: &Path, produced: &BTreeMap<String, String>) -> Resul
     })?;
     for (slug, yaml) in produced {
         let path = output_dir.join(format!("{slug}.{EXPORT_YAML_EXT}"));
-        fs::write(&path, yaml)
-            .map_err(|source| AppError::Message(format!("failed to write {}: {source}", path.display())))?;
+        fs::write(&path, yaml).map_err(|source| {
+            AppError::Message(format!("failed to write {}: {source}", path.display()))
+        })?;
         println!("exported {}", path.display());
     }
     for path in stale_exports(output_dir, produced)? {
-        fs::remove_file(&path)
-            .map_err(|source| AppError::Message(format!("failed to prune {}: {source}", path.display())))?;
+        fs::remove_file(&path).map_err(|source| {
+            AppError::Message(format!("failed to prune {}: {source}", path.display()))
+        })?;
         println!("pruned {}", path.display());
     }
     Ok(())
@@ -1457,7 +1462,6 @@ fn apply_build_dir_base_override(
     Ok(())
 }
 
-
 /// Gather the distinct signing profiles the selected images require, tracking which images need
 /// each (`meta/docs/2026-06-29-signing.md` §5.1). Resolution also validates each referenced profile.
 fn signing_requirements<'a>(
@@ -2531,6 +2535,38 @@ toolsDirSources:
         let log_dir = tool.runtime.and_then(|r| r.log_dir).expect("log dir set");
         let expected = std::env::current_dir().unwrap().join("mylogs");
         assert_eq!(log_dir, expected);
+    }
+
+    #[test]
+    fn build_dir_base_override_absent_leaves_runtime_untouched() {
+        let mut tool = default_tool_config();
+        apply_build_dir_base_override(&mut tool, None).unwrap();
+        assert!(tool.runtime.is_none(), "no flag → runtime not created");
+    }
+
+    #[test]
+    fn build_dir_base_override_sets_an_absolute_path() {
+        let mut tool = default_tool_config();
+        apply_build_dir_base_override(&mut tool, Some(Path::new("/mnt/pool/scratch"))).unwrap();
+        assert_eq!(
+            tool.runtime
+                .and_then(|runtime| runtime.build_dir_base)
+                .as_deref(),
+            Some(Path::new("/mnt/pool/scratch"))
+        );
+    }
+
+    #[test]
+    fn build_dir_base_override_absolutizes_a_relative_flag_against_cwd() {
+        let mut tool = default_tool_config();
+        apply_build_dir_base_override(&mut tool, Some(Path::new("pool-scratch"))).unwrap();
+        let expected = std::env::current_dir().unwrap().join("pool-scratch");
+        assert_eq!(
+            tool.runtime
+                .and_then(|runtime| runtime.build_dir_base)
+                .as_deref(),
+            Some(expected.as_path())
+        );
     }
 
     #[test]
