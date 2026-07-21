@@ -56,7 +56,11 @@ signing:
   default: acl-ephemeral
   profiles:
     acl-ephemeral:
-      backend: ephemeralEsp          # NEW: mount ESP + sbsign in place, throwaway cert
+      backend: espSbsign             # NEW: mount ESP + sbsign in place (post-customize)
+      key: ephemeral                 # ephemeral (throwaway, default, multi-run image parity)
+      #   OR a persistent bring-your-own key for a durable signature:
+      # key:
+      #   keypair: { key: <path/ref>, cert: <path/ref> }
       # espArtifacts:                # optional; defaults to the ACL ESP layout below
       #   - "EFI/Linux/*.efi"        # UKI(s)
       #   - "acl/uki-addons/*.efi"   # UKI addons
@@ -69,37 +73,54 @@ signing:
 signing: acl-ephemeral
 ```
 
-- **`backend: ephemeralEsp`** selects the mount-and-sbsign path (distinct from tailor's existing
-  IC-`inject-files` signer).
+- **`backend: espSbsign`** selects the mount-and-sbsign path (distinct from tailor's existing
+  IC-`inject-files` signer). The *method* (mount ESP + `sbsign`) is the same regardless of key source.
+- **`key`** is the **key source**, orthogonal to the method:
+  - **`ephemeral`** (default) — generate a throwaway self-signed RSA-2048 codeSigning cert, sign,
+    **discard the private key**, publish only the public cert. This is exactly what multi-run image does: the
+    build-time signature is **testability-only** and is replaced downstream by a stable cert chain at
+    publish, so the key is deliberately thrown away.
+  - **`keypair`** — a **persistent bring-your-own** key + cert, for a **durable** signature when there
+    is **no downstream re-sign** (e.g. a standalone signed image that must be trusted as-is). Reuses
+    tailor's existing `keypair` key handling. *Ships after `ephemeral`; the config door is open.*
 - **`espArtifacts`** is a glob list resolved **against the ESP root**; defaults to the ACL layout.
   **Shim (`EFI/BOOT/BOOT*.EFI`) is always excluded.**
 - **`publishCaCert`** defaults to the per-cell `<output_dir>/<slug>.ca_cert.pem` (tailor's existing
-  cert-publish convention).
+  cert-publish convention). With `keypair`, "publish the cert" means publishing the BYO public cert.
 
 ### 3.2 Execution flow
 
-After tailor's normal customize produces the per-cell output image, a **sign stage** runs a
-**single privileged helper container** (§4) that performs the whole multi-run image sequence atomically:
+tailor forces the customize pass to emit **raw** for a signed cell (`--output-image-format raw`), so
+the ESP is directly loop-mountable with **no pre-conversion**. A **sign stage** runs a **single
+privileged helper container** (§4) that signs the raw in place; a **single** format conversion then
+produces each declared disk-image output:
 
 ```
-customize (existing) → <slug>.<fmt>
+customize (existing; output forced to RAW when signing) → <slug>.raw
         │
-        ▼   sign stage (new, backend=ephemeralEsp)
-  [ helper container, --privileged, /dev ]
-    1. qemu-img convert <slug>.<fmt> → raw   (skip if already raw)
-    2. losetup --find --partscan; locate the vfat ESP by FSTYPE
-    3. openssl req -x509 -newkey rsa:2048 -noenc … (ephemeral codeSigning cert)
-    4. for each espArtifacts match (minus shim): sbsign --key --cert --output <in place>
-    5. umount + losetup -d
-    6. qemu-img convert raw → <slug>.<fmt>   (preserve the requested subformat, e.g. fixed VPC)
-    7. emit the PUBLIC cert to <output_dir>/<slug>.ca_cert.pem   (private key never leaves the container)
+        ▼   sign stage (backend=espSbsign)   [ helper container, --privileged, /dev ]
+    1. losetup --find --partscan <slug>.raw; locate the vfat ESP by FSTYPE
+    2. key source:
+         ephemeral → openssl req -x509 -newkey rsa:2048 -noenc …   (generated in-container)
+         keypair   → use the bring-your-own key + cert
+    3. for each espArtifacts match (minus shim): sbsign --key --cert --output <in place>
+    4. umount + losetup -d
+    5. publish the PUBLIC cert → <output_dir>/<slug>.ca_cert.pem
+       (with `ephemeral`, the private key never leaves the container and is discarded)
+        │
+        ▼   format stage
+    6. qemu-img convert <slug>.raw → each declared disk output
+       (e.g. vhd-fixed: -O vpc -o subformat=fixed,force_size; no-op if the output IS raw)
         │
         ▼
-  janitor normalizes ownership (existing) → signed <slug>.<fmt> + <slug>.ca_cert.pem
+  janitor normalizes ownership (existing) → signed <slug>.<fmt>(s) + <slug>.ca_cert.pem
 ```
 
-The **ephemeral key is generated and used entirely inside the container and never written to the
-output** — only the public cert is emitted. This mirrors multi-run image and keeps no key material around.
+**Why raw-first:** `losetup` needs a raw image anyway (a fixed-VHD footer / dynamic-VHD layout is not
+directly loop-mountable), so emitting raw from IC removes the redundant `format → raw → format`
+round-trip multi-run image does — one conversion instead of two, which matters on a ~30 GB image. It also means
+signing happens **once** on the raw and every declared disk output is a straight `qemu-img convert` of
+the **same signed bytes** — byte-identical signed content across output formats.
 
 ### 3.3 The helper container (sudo-free)
 
@@ -124,9 +145,10 @@ Fail fast, before the (slow) customize:
 
 - **Reuse:** the `Signer` port, tailor's openssl cert-generation and cert-publish convention, the
   privileged-container + janitor ownership machinery, and the per-cell/output plumbing.
-- **New:** the `ephemeralEsp` backend (mount ESP + in-place sbsign + format round-trip) and the
-  `signerImage` config. This backend does **not** use IC passes at all — it post-processes the final
-  image, which is the key structural difference from the existing three-pass (inject-files) signer.
+- **New:** the `espSbsign` backend (raw-first: force raw from IC, mount ESP, in-place sbsign, then a
+  single format conversion) and the `signerImage` config. This backend does **not** use IC passes at
+  all — it post-processes the final image, which is the key structural difference from the existing
+  three-pass (inject-files) signer.
 
 ## 4. Validation plan (myimage)
 
@@ -144,6 +166,16 @@ in `2026-07-21-multi-run-image-production.md`.
 
 ## 6. Open questions (to confirm before implementing)
 
+**Resolved (this round):**
+
+- **Raw-first (note #1):** tailor forces IC to emit **raw** for a signed cell, signs it, then a
+  **single** `qemu-img convert` produces each declared disk output — no redundant round-trip (§3.2).
+- **Throwaway key (note #2):** `key: ephemeral` (throwaway) is faithful to multi-run image and is the step-1
+  default; a `keypair` (BYO persistent key) source is provided for the durable-signature case where
+  there is no downstream re-sign (§3.1).
+
+**Still open:**
+
 1. **Helper container:** layer `sbsign` onto the IC base as the default `signerImage`, or ship/point
    at a dedicated minimal signer image? (Lean: configurable, default = IC base + `sbsign`.)
 2. **Artifact-set default:** hard-code the ACL ESP layout as the default `espArtifacts` (with
@@ -154,6 +186,6 @@ in `2026-07-21-multi-run-image-production.md`.
 4. **Cert reuse across a matrix/clones:** one ephemeral cert per cell (simple, matches "leaf per
    cell"), or one per build shared across cells? (Lean: per cell — no cross-cell coupling, mirrors
    multi-run image's per-image ephemeral cert.)
-5. **Relationship to the existing (unbuilt-in-executor) inject-files signer:** keep both backends, or
-   is `ephemeralEsp` the only signing path we actually need for the multi-run image lineage? (For multi-run image parity,
-   `ephemeralEsp` is the required one.)
+5. **Ship `keypair` in step 1 or defer it?** The backend is identical; only the key source differs.
+   Ship `ephemeral` first (multi-run image parity) and add `keypair` immediately after, or build both together?
+   (Lean: `ephemeral` first, `keypair` fast-follow — unless myimage needs a durable signature now.)
