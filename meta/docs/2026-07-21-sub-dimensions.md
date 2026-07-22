@@ -188,9 +188,54 @@ doesn't match (consistent with today's `section_matches`).
 ### 4.5 Merge precedence
 
 Per cell, apply base → parent-value fragment (`by-type/kata.yaml`) → sub-value fragment
-(`by-runtime/qemu.yaml` or `by-type/kata/qemu.yaml`) → other axes' fragments → composites, later
-wins. The parent-then-sub ordering means a variant can override the common-kata layer, which is the
-intuitive precedence.
+(`by-type/kata/by-runtime/qemu.yaml`) → other axes' fragments → composites, later wins. The
+parent-then-sub ordering means a variant can override the common-kata layer, which is the intuitive
+precedence.
+
+### 4.6 Composition & disjunction under nesting
+
+The two advanced fragment mechanisms — **disjunction** (`by-A/v1+v2.yaml`, OR within an axis) and
+**composition/conjunction** (`by-A+B/v1+v2.yaml`, across axes) — both still work, but the first thing
+to notice is that **nesting subsumes most of what they were used for.** Both exist to express
+conjunction/grouping without a fragment explosion; nesting already expresses hierarchical conjunction
+*by path* (`by-type/kata/by-runtime/qemu.yaml` **is** "kata AND runtime=qemu"), and gives
+"common to all kata" as the parent fragment `by-type/kata.yaml` — which is exactly the
+`kata-qemu+kata-openvmm.yaml` disjunction pain that motivated this. So inside a nested subtree you
+rarely reach for either.
+
+**Disjunction — fully supported, at every level.** The `+`-in-stem rule is unchanged in any `by-<axis>/`
+directory, nested or not:
+
+- `by-type/kata/by-runtime/qemu+clh.yaml` — kata AND (runtime = qemu OR clh): a fragment for a
+  *subset* of a sub-axis's values.
+- `by-type/container+kata.yaml` — type ∈ {container, kata}. A **branch value in a disjunction covers
+  its whole subtree** (every kata sub-cell matches), which is an intuitive, useful property.
+
+**Composition — supported, with one strained case:**
+
+- *Two top-level axes* (neither nested): unchanged — `by-arch+type/arm64+kata.yaml` at the root
+  (`type=kata` matches all kata sub-cells). ✅
+- *Two sub-axes under the same parent*: lives under that parent by the same recursive rule —
+  `by-type/kata/by-runtime+debug/qemu+on.yaml`. ✅
+- *A top-level axis × a nested sub-axis* (e.g. `arch` × `runtime`): the awkward one — `arch` is at the
+  root but `runtime` exists only under `kata`. Rule: the composite lives at the **deepest nested
+  location among its axes**, naming all of them — `by-type/kata/by-arch+runtime/arm64+qemu.yaml`. It
+  reads slightly oddly (arch isn't "part of" kata) and is rare, so **define it but treat it as
+  advanced / likely defer**: most "arm64 AND qemu" needs are already met by the `by-arch` fragment and
+  the runtime fragment both applying via merge; only a true *intersection-only* fragment needs the
+  composite.
+
+**The one hard requirement that makes all of this work:** the composite/disjunction matcher must treat
+*"the cell doesn't have this named axis"* as **no-match**, never an error. A root
+`by-arch+runtime/…` names `runtime`, which `container` cells lack — it must simply skip them. This is
+the *same* tolerance that lets conditional axes exist at all, so it's one consistent rule, not a
+special case.
+
+**My take:** keep both, but **lead with nesting**. Nesting is the right tool for the "b exists only
+under a" shape and removes the composite/disjunction boilerplate there; composites stay for genuinely
+independent top-level axes that need joint logic; disjunction stays orthogonal and works everywhere.
+Ship order: disjunction (free), same-parent sub-axis composites (natural), and the "no-match on
+missing axis" matcher rule; **defer top-level×nested composites** until a real case appears.
 
 ## 5. Why this is better than the two alternatives
 
@@ -227,12 +272,10 @@ tree schema, tree expansion, and the nested fragment path.
   without their fragments colliding — the path disambiguates. Still **disallow a sub-axis name that
   collides with a top-level axis** (keeps selectors/slug unambiguous).
 - **Depth.** Allow arbitrary recursion (Paco's requirement); lint/warn only if depth gets unwieldy.
-- **Interaction with features / composites / disjunctions.** A sub-axis is a normal axis for those
-  mechanisms: a disjunction `by-type/kata/by-runtime/qemu+clh.yaml` should work; composites that mix a
-  top-level and a nested axis need a decided home (likely under the nested parent, e.g.
-  `by-type/kata/by-arch+runtime/arm64+qemu.yaml`) — but the nesting usually removes the *need* for
-  composites, so this can be deferred/discouraged. Confirm the composite validator treats a cell that
-  *lacks* a named axis as "no match", not an error.
+- **Composition & disjunction:** both compose with nesting — see §4.6 (disjunction works at every
+  level; same-parent-sub-axis composites are natural; top-level×nested composites are the one strained
+  case, deferred). The load-bearing rule is that the matcher treats a *missing* named axis as
+  no-match, not an error.
 - **Slug determinism (§4.3).** Emit values by **depth-first declared-axis order**, parent value
   immediately before its nested axis's value; stable across runs. Accept variable width; slugs are
   opaque IDs.
