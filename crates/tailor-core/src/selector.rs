@@ -104,6 +104,7 @@ mod tests {
         let definition = ImageDefinition {
             name: "img".to_owned(),
             toolchain: None,
+            skip: false,
             matrix: Some(IndexMap::new()),
             selectors: None,
             outputs: None,

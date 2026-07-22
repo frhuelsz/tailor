@@ -5,6 +5,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `name` | string | yes | Image id used by CLI and slugs. Use `[A-Za-z0-9.-]+`; `_` is reserved as the slug separator. |
+| `skip` | bool | no | Default `false`. When `true`, the image is excluded from **bulk** selection — any command run with no image named (`build`, `matrix`, `slugs`, `validate`, `render`, `export`, `clean`, …), so a pipeline that runs those over all images never picks it up. Build it by naming it explicitly (`tailor build <name>`); `tailor list` marks it `(skip)`. Useful for an experimental config that isn't ready to build in CI. |
 | `toolchain` | string or `{name, container, version?, tag?, pull?}` | no | Workspace toolchain name or inline standalone toolchain. Defaults to workspace default or built-in `latest`; `pull` defaults to `missing`. |
 | `toolsDir` | `{source}` | no | Tailor-managed IC `--tools-dir`. `source` is a `toolsDirSources` name or inline `{container, tag?, pull?}`. Always bound writable as a per-cell copy under `runtime.buildDirBase`, which it therefore requires. |
 | `matrix` | ordered map `axis: [values]` | no | User-defined axes; their cartesian product is the candidate cells. Omit for one cell. Declaration order controls slug order and fragment precedence — order axes widest → most-specific (so `arch` is first). |

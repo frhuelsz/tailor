@@ -484,6 +484,12 @@ pub struct ImageDefinition {
     pub name: String,
     #[serde(default)]
     pub toolchain: Option<ToolchainRef>,
+    /// Exclude this image from **bulk** selection — any command run with no image named
+    /// (`build`, `matrix`, `slugs`, `validate`, `render`, `export`, `clean`, …). Lets an
+    /// experimental config live in the tree without the pipeline (which runs those verbs on *all*
+    /// images) picking it up. Build it by naming it explicitly (`tailor build <name>`).
+    #[serde(default)]
+    pub skip: bool,
     #[serde(default)]
     pub tools_dir: Option<ToolsDir>,
     #[serde(default)]

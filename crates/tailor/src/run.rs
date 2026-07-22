@@ -192,7 +192,12 @@ fn list(workspace: &Workspace) {
         let cells = image.definition.matrix.as_ref().map_or(1, |m| {
             expand(m, image.definition.selectors.as_ref()).map_or(0, |c| c.len())
         });
-        println!("  {:<28} {cells} cell(s)", image.definition.name);
+        let marker = if image.definition.skip {
+            "  (skip)"
+        } else {
+            ""
+        };
+        println!("  {:<28} {cells} cell(s){marker}", image.definition.name);
     }
     if let Some(tool) = &workspace.tool {
         println!("\nToolchains (default: {}):", tool.toolchains.default);
@@ -1662,7 +1667,13 @@ fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Targ
 
     let mut targets = Vec::new();
     for image in &workspace.images {
-        if !names.is_empty() && !names.iter().any(|n| n == &image.definition.name) {
+        let explicitly_named = names.iter().any(|n| n == &image.definition.name);
+        if !names.is_empty() && !explicitly_named {
+            continue;
+        }
+        // A `skip: true` image is excluded from bulk selection (no image named) so the pipeline never
+        // grabs it; naming it explicitly overrides the skip so it can still be built/iterated locally.
+        if image.definition.skip && !explicitly_named {
             continue;
         }
         targets.push(Arc::new(Target {
