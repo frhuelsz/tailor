@@ -91,50 +91,89 @@ nested matrix and prefixes every sub-cell with `(type = value)`. Then cross the 
 the other top-level axes. `container` contributes 1 cell; `kata` contributes 2 (or 2×2 with two
 sub-axes).
 
-### 4.2 Cells, slug, and the key insight
+### 4.2 Fragment layout — recursive nested (`by-<axis>/<value>/by-<subaxis>/<subvalue>.yaml`)
 
-A cell is still an ordered list of `(axis, value)` pairs — but **different cells carry different axis
-sets** (`container` cells lack `runtime`). tailor's cell model (`AxisTuple` = `Vec<(axis, value)>`)
-**already supports this** — the slug just joins the values it has:
+The layout **mirrors the dimension tree**, applying the same `by-<axis>/<value>` rule at every level.
+One rule, recursive, arbitrary depth:
 
-```
-myimage_container_vhd
-myimage_kata_qemu_vhd
-myimage_kata_openvmm_vhd
-```
+> For a value `V` of axis `A` at any nesting level:
+> - **`by-A/V.yaml`** is `V`'s fragment — it applies to **every cell under `V`** (the "common" layer);
+> - **`by-A/V/`** is the directory holding `V`'s **nested dimensions**, each declared exactly the same
+>   way: `by-B/W.yaml` (+ `by-B/W/` for deeper nesting).
 
-The sub-value follows its parent value in slug order (parent first, then nested-axis order).
-
-### 4.3 Fragment layout — mostly already works
-
-Because a `by-<axis>/<value>.yaml` fragment applies **iff the cell has that axis=value**, the
-existing mechanism already does the right thing for conditional axes:
-
-- `by-type/container.yaml` — container only.
-- `by-type/kata.yaml` — **common to every kata cell** (applies whenever `type=kata`, regardless of
-  the sub-value). ← this is the "common between the katas" the flat approach struggled with, now a
-  plain parent-value fragment.
-- `by-runtime/qemu.yaml`, `by-runtime/openvmm.yaml` — variant-specific. They only match cells that
-  *have* a `runtime` axis (i.e. kata cells), so they never touch `container`.
-
-Adding a new kata variant is then **local**: add it to the `runtime:` list and drop a
-`by-runtime/<new>.yaml`. `by-type/kata.yaml` keeps applying automatically. No composite filename to
-grow, nothing to remember.
-
-**Optional scoped layout.** For readability (and to disambiguate a sub-axis name reused under
-different parents), also allow a **nested fragment path** that ties the sub-value to its parent:
+For the example:
 
 ```
 by-type/
-  container.yaml
-  kata.yaml            # common to all kata
+  container.yaml                       # type=container
+  kata.yaml                            # common to ALL kata (type=kata, any runtime)
   kata/
-    qemu.yaml          # = by-type where type=kata AND runtime=qemu
-    openvmm.yaml
+    by-runtime/
+      qemu.yaml                        # type=kata AND runtime=qemu
+      openvmm.yaml                     # type=kata AND runtime=openvmm
 ```
 
-`by-type/kata/<sub>.yaml` reads as "kata's qemu variant" and scopes the fragment under its parent.
-Both forms can coexist; the nested form is sugar over "the cell has `type=kata` and `runtime=qemu`".
+A leaf's full path spells the whole predicate: `by-type/kata/by-runtime/qemu.yaml` = "type=kata AND
+runtime=qemu". Deeper nesting continues the same way, e.g.
+`by-type/kata/by-runtime/qemu/by-debug/on.yaml`. Independent **top-level** axes stay at the root
+(`by-arch/arm64.yaml`); only **nested** axes live under their parent value's directory — so `runtime`
+never appears at the root and never touches `container`.
+
+This is why sub-dimensions read well and stay maintainable:
+
+- **"common to all kata"** is just `by-type/kata.yaml` — the parent value's own fragment.
+- **adding a variant** is local: add it to the `runtime:` list and drop
+  `by-type/kata/by-runtime/<new>.yaml`; `by-type/kata.yaml` keeps applying automatically. No composite
+  filename to grow, no exclude to maintain.
+- **arbitrary breadth and depth**: any value can open any number of nested axes, each nested to any
+  depth, all with the one `by-<axis>/<value>[/…]` rule.
+
+Backward-compatible: an image with no sub-dimensions is exactly today's flat `by-<axis>/<value>.yaml`
+layout (a top-level value simply has no nested directory).
+
+### 4.3 Slugs — what they look like now
+
+Slugs are the thing to get right. The rule is the **minimal, backward-compatible** extension of
+today's "join the cell's axis values with `_`": walk the cell's axis **tree depth-first in declared
+order** and join **every present value** with `_`, including the parent value of each nested axis.
+
+For `matrix: { type: [container, kata:{runtime:[qemu,openvmm]}] }` (image `myimage`, format `vhd`):
+
+```
+myimage_container_vhd                    # type=container            → 1 value
+myimage_kata_qemu_vhd                    # type=kata, runtime=qemu   → 2 values (parent + sub)
+myimage_kata_openvmm_vhd                 # type=kata, runtime=openvmm
+```
+
+With a top-level `arch` axis declared first, and deeper nesting:
+
+```
+myimage_arm64_container_vhd
+myimage_arm64_kata_qemu_vhd
+myimage_arm64_kata_qemu_on_vhd           # …_kata_qemu_debug=on, if kata→runtime→debug is nested
+```
+
+Properties and the honest caveats:
+
+- **Unique & filesystem-safe.** Two cells never collide, because their value paths differ. `container`
+  vs `kata_qemu` are distinct; the fixed tree means no ambiguity *within an image*.
+- **The parent value is always included** (`kata_qemu`, never a bare `qemu`), so a sub-value keeps its
+  context and can't collide with a same-named sub-value under a different parent.
+- **Variable width — the thing to accept.** `container` cells have fewer `_`-components than `kata`
+  cells. Slugs were already **positional-by-matrix-order and meant to be opaque IDs**; with
+  conditional axes they are no longer fixed-width, so **do not parse slugs positionally**. Anything
+  that needs "which value is which axis" should read the structured `axes` from `tailor matrix --json`
+  (which carries the full `(axis,value)` map per cell), not split the slug. This is the one real
+  behavior change to socialize.
+
+**Alternative if fixed-width-per-top-level-axis matters** (not recommended): collapse each nested path
+into a **single compound token per top-level axis** using a nesting separator, e.g.
+`myimage_arm64_kata-qemu_vhd` / `myimage_arm64_container_vhd` — one token per top-level axis regardless of
+depth, so positional parsing survives. The catch: `-` (and `.`) are legal *value* characters today, so
+a compound token `kata-qemu` is ambiguous with a flat value literally named `kata-qemu`. It would need
+a reserved nesting separator not allowed in values. Given slugs are opaque IDs and structured data
+lives in `matrix --json`, the plain `_`-join (variable width) is cleaner; flag the compound-token
+option only if a downstream consumer truly requires fixed columns.
 
 ### 4.4 Selectors
 
@@ -158,7 +197,7 @@ intuitive precedence.
 | | Flat 3-value + disjunction file | Two independent axes + excludes | **Sub-dimension** |
 | --- | --- | --- | --- |
 | "common to all kata" | `by-type/kata-qemu+kata-openvmm.yaml` (grows, must be remembered) | `by-type/kata.yaml` ✅ | `by-type/kata.yaml` ✅ |
-| add a new kata variant | edit the composite filename + the axis | add value + **update excludes** | add value + one `by-runtime/<v>.yaml` ✅ |
+| add a new kata variant | edit the composite filename + the axis | add value + **update excludes** | add value + one `by-type/kata/by-runtime/<v>.yaml` ✅ |
 | container has no variant | implicit | must **exclude** `runtime` from container | structural ✅ (no runtime axis) |
 | phantom cells | none | `container × qemu/openvmm` unless excluded | none ✅ |
 | expresses the real shape | no | no | **yes** |
@@ -173,25 +212,30 @@ present, and selectors match on presence. The concentrated changes are:
   today `AxisValues = IndexMap<String, Vec<String>>` with string values.
 - **Expansion:** `expand`/`cartesian` walk the tree (leaf → 1, branch → nested product) before
   crossing with the other axes.
-- **Validation:** nested-axis name uniqueness rules (§7), selector validation across conditional
-  axes.
-- **(Optional) nested fragment path** `by-<parent>/<value>/<sub>.yaml` in `fragment::discover`.
+- **Fragment discovery:** teach `fragment::discover` the **recursive nested path**
+  `by-<axis>/<value>/by-<subaxis>/<subvalue>[/…].yaml` (§4.2) — the chosen layout.
+- **Validation:** nested-axis naming rules (§7), selector validation across conditional axes.
 
-Slug, selectors, and the core fragment apply-rule likely need **little or no change**.
+Slug (a plain `_`-join of the cell's present values, §4.3), selectors, and the core fragment
+apply-rule (`axis=value` present ⇒ applies) likely need **little or no change** — the new work is the
+tree schema, tree expansion, and the nested fragment path.
 
 ## 7. Edge cases & rules to decide
 
-- **Sub-axis name scope.** Is `runtime` global (one `by-runtime/`, shared if two parents both use
-  `runtime`) or strictly scoped to its parent? Recommend: names are **declared per parent** but live
-  in the same cell namespace; if you want isolation, use the nested `by-type/kata/<sub>.yaml` form or
-  a unique sub-axis name. Disallow a sub-axis name that collides with a top-level axis.
-- **Depth.** Allow recursion but lint against depth > 1.
+- **Sub-axis names are scoped by path.** With the nested layout (§4.2), a sub-axis fragment lives at
+  `by-<parent>/<value>/by-<subaxis>/…`, so two different parents may each have a `runtime` sub-axis
+  without their fragments colliding — the path disambiguates. Still **disallow a sub-axis name that
+  collides with a top-level axis** (keeps selectors/slug unambiguous).
+- **Depth.** Allow arbitrary recursion (Paco's requirement); lint/warn only if depth gets unwieldy.
 - **Interaction with features / composites / disjunctions.** A sub-axis is a normal axis for those
-  mechanisms: `by-runtime/qemu+clh.yaml` (disjunction) and `by-arch+runtime/arm64+qemu.yaml`
-  (composite across a top-level and a sub-axis) should work — confirm the composite validator handles
-  a cell that *lacks* one of the named axes (it must simply not match, not error).
-- **Matrix order / slug determinism.** Fix the sub-value's slug position (immediately after its
-  parent) and the nested-axis order (declared order) so slugs stay stable.
+  mechanisms: a disjunction `by-type/kata/by-runtime/qemu+clh.yaml` should work; composites that mix a
+  top-level and a nested axis need a decided home (likely under the nested parent, e.g.
+  `by-type/kata/by-arch+runtime/arm64+qemu.yaml`) — but the nesting usually removes the *need* for
+  composites, so this can be deferred/discouraged. Confirm the composite validator treats a cell that
+  *lacks* a named axis as "no match", not an error.
+- **Slug determinism (§4.3).** Emit values by **depth-first declared-axis order**, parent value
+  immediately before its nested axis's value; stable across runs. Accept variable width; slugs are
+  opaque IDs.
 - **Empty / selection.** Selecting only a sub-axis value that no selected parent provides → empty
   (existing `EmptySelection` error).
 
@@ -199,12 +243,17 @@ Slug, selectors, and the core fragment apply-rule likely need **little or no cha
 
 1. Config spelling: confirm the value-with-nested-axis list form (§3) over the qualified-key
    alternative.
-2. Sub-value fragment home: flat `by-<subaxis>/<value>.yaml` (reuses existing mechanism, zero new
-   rules) vs the scoped nested `by-<parent>/<value>/<sub>.yaml` (more readable) — support both, or
-   pick one?
-3. Sub-axis naming: require globally-unique axis names (simplest, avoids the scope question), or
-   allow reuse with the nested form for disambiguation?
+2. **Slugs (the main worry, §4.3):** accept the plain `_`-join with **variable width** (recommended —
+   opaque IDs, structured data via `matrix --json`), or adopt a fixed-width **compound-token** scheme
+   per top-level axis (needs a reserved nesting separator, since `-`/`.` are legal value chars)?
+3. Sub-axis naming: rely on **path scoping** (nested layout) so a name may recur under different
+   parents, or still require globally-unique sub-axis names for simplicity?
 4. How far to generalize now: single-level sub-dimensions only (covers the kata case), or the full
-   recursive tree from day one?
+   arbitrary-breadth/arbitrary-depth tree from day one (Paco leans full)?
 5. Does anything downstream assume a *fixed* axis set across an image's cells (reporting, `matrix`
-   output schema, ADO matrix legs)? Audit those for per-cell varying axes.
+   output schema, ADO matrix legs, the export/rendered slug filenames)? Audit those for per-cell
+   varying axes — this is where variable-width slugs could bite.
+
+**Resolved this round:** fragment layout = recursive nested `by-<axis>/<value>/by-<subaxis>/<subvalue>.yaml`
+(arbitrary breadth + depth); slugs = plain `_`-join of the cell's present values (parent before sub,
+variable width, opaque).
