@@ -1037,6 +1037,51 @@ async fn build_lock(
 
 // ───────────────────────────── execution verbs (Docker) ─────────────────────────────
 
+/// A cancellation token wired to Ctrl+C / `SIGTERM`. The **first** signal cancels the token so the
+/// in-flight container is stopped and removed (rather than orphaned in the daemon); a **second**
+/// signal falls back to an immediate exit as an escape hatch if teardown hangs. Without this the
+/// process would just die on Ctrl+C and leave the IC container running.
+fn cancel_on_signal() -> CancellationToken {
+    let token = CancellationToken::new();
+    let signal_token = token.clone();
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        eprintln!(
+            "\ninterrupt received — stopping the container and cleaning up (press Ctrl+C again to force quit)"
+        );
+        signal_token.cancel();
+        // A second signal means "I don't want to wait for cleanup" — exit now (128 + SIGINT).
+        wait_for_shutdown_signal().await;
+        std::process::exit(130);
+    });
+    token
+}
+
+/// Resolve when the process receives an interactive interrupt (Ctrl+C) or a termination request
+/// (`SIGTERM` on Unix). Installing tokio's handler also overrides the default disposition, so the
+/// first signal is delivered here instead of killing the process outright.
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 async fn build(
     workspace: &Workspace,
     args: BuildArgs,
@@ -1097,6 +1142,11 @@ async fn build(
     // Fail fast on every signing prerequisite — including the `openssl`/`sbsign` binaries — before any
     // (slow, privileged) IC run (meta/docs/2026-06-29-signing.md §5.1).
     preflight_signers(&signers)?;
+
+    // Wire Ctrl+C / SIGTERM to a cancellation token so an interrupted build tears down its running
+    // container instead of orphaning it in the daemon (the container runtime removes the container on
+    // cancel — `container/runtime.rs`).
+    let cancel = cancel_on_signal();
 
     // A real build contacts the engine: resolve it and fail fast now if it is missing or
     // unreachable (`meta/docs/2026-06-29-container-runtimes.md` §4-§5).
@@ -1168,7 +1218,7 @@ async fn build(
                 &workspace.root,
                 &output_dir,
                 &options,
-                CancellationToken::new(),
+                cancel.clone(),
                 &mut on_progress,
                 &signer_for,
             )
