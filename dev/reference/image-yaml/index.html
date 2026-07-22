@@ -1424,6 +1424,12 @@
 <td>Image id used by CLI and slugs. Use <code>[A-Za-z0-9.-]+</code>; <code>_</code> is reserved as the slug separator.</td>
 </tr>
 <tr>
+<td><code>skip</code></td>
+<td>bool</td>
+<td>no</td>
+<td>Default <code>false</code>. When <code>true</code>, the image is excluded from <strong>bulk</strong> selection — any command run with no image named (<code>build</code>, <code>matrix</code>, <code>slugs</code>, <code>validate</code>, <code>render</code>, <code>export</code>, <code>clean</code>, …), so a pipeline that runs those over all images never picks it up. Build it by naming it explicitly (<code>tailor build &lt;name&gt;</code>); <code>tailor list</code> marks it <code>(skip)</code>. Useful for an experimental config that isn't ready to build in CI.</td>
+</tr>
+<tr>
 <td><code>toolchain</code></td>
 <td>string or <code>{name, container, version?, tag?, pull?}</code></td>
 <td>no</td>
