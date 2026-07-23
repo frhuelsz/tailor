@@ -115,15 +115,16 @@ is three.**
   — install packages, drop keys, rewrite repo files, seed state. Today tailor exports the container
   fs untouched; this adds a declarative "prepare the tools-dir" hook. (Could also be expressed as
   "the tools-dir is itself produced by an inner build step.")
-- **Gap 3 — mount-based ephemeral signing.** Add a signing backend/stage that, after the final
-  customize, **loop-mounts the output image's ESP and `sbsign`s a declared artifact set** (UKI +
-  addons + boot loader), generating an ephemeral cert and publishing it — the multi-run image-faithful path,
-  distinct from the existing IC-`inject-files` signer. Reuse tailor's fail-closed dir guards; to keep
-  the host sudo-free, **delegate the loop-mount + sbsign to a privileged container** (the same
-  pattern as the janitor), rather than mounting on the host. Cert profile mirrors ACL's
-  (self-signed RSA-2048 codeSigning, key discarded) — close to tailor's existing `local-test-ca`.
+- **Gap 3 — Secure Boot signing.** Add a signing stage after the final customize. The **preferred**
+  mechanism is **IC-native deferred signing** — `output-artifacts` → sign → `inject-files` — driven by
+  **external-signer** (ephemeral for dev, remote-service for production), which is exactly tailor's original
+  three-pass model (`2026-06-29-signing.md`) and what the current myimage SKU work uses; it signs the
+  UKI + shim + bootloader **and the dm-verity root hash**, on any IC-built image, with no image
+  mounting. See `2026-07-22-signing-step1-ic-native.md` for the scoped first step. (The older
+  ACL-scripts path — loop-mount the ESP and `sbsign` in place — remains a fallback for environments
+  where IC's `output-artifacts` isn't available, but is no longer the recommended integration.)
 
-These compose cleanly: a signed multi-run image build is `prepared-tools-dir → run1 → run2 → mount-ESP-sign`,
+These compose cleanly: a signed multi-run image build is `prepared-tools-dir → run1 → run2 → sign`,
 all declared, all IC-driven.
 
 ## 6. What stays outside tailor (full-lifecycle context)
