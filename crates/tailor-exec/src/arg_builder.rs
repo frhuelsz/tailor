@@ -1148,6 +1148,8 @@ mod tests {
             base_image: None,
             rpm_sources: vec![PathBuf::from("/rpms/one")],
             tools_dir: None,
+            skip: false,
+            skip_pins: Vec::new(),
         }
     }
 

@@ -65,3 +65,60 @@ fn list_marks_a_skip_image() {
         .success()
         .stdout(predicate::str::contains("exp").and(predicate::str::contains("(skip)")));
 }
+
+// ───────────────────────────── fragment/value-level skip ─────────────────────────────
+
+/// A 4-cell matrix workspace whose `variant=full` fragment is marked `skip: true`.
+fn workspace_with_fragment_skip() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    tailor_in(tmp.path())
+        .args(["init", "gadget", "advanced"])
+        .assert()
+        .success();
+    let frag = tmp.path().join("gadget/by-variant/full.yaml");
+    let orig = fs::read_to_string(&frag).unwrap();
+    fs::write(&frag, format!("skip: true\n{orig}")).unwrap();
+    tmp
+}
+
+#[test]
+fn fragment_skip_drops_matching_cells_in_bulk() {
+    let ws = workspace_with_fragment_skip();
+    tailor_in(ws.path()).arg("slugs").assert().success().stdout(
+        predicate::str::contains("gadget_minimal_").and(predicate::str::contains("full").not()),
+    );
+}
+
+#[test]
+fn pinning_the_skip_value_keeps_the_cells() {
+    let ws = workspace_with_fragment_skip();
+    tailor_in(ws.path())
+        .args(["slugs", "-s", "variant=full"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gadget_full_"));
+}
+
+#[test]
+fn a_non_pinning_selector_does_not_resurrect_skip_cells() {
+    // `-s arch=amd64` matches the skipped cells but does not pin `variant=full`, so they stay dropped.
+    let ws = workspace_with_fragment_skip();
+    tailor_in(ws.path())
+        .args(["slugs", "-s", "arch=amd64"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("gadget_minimal_amd64")
+                .and(predicate::str::contains("full").not()),
+        );
+}
+
+#[test]
+fn naming_a_skip_cell_keeps_it() {
+    let ws = workspace_with_fragment_skip();
+    tailor_in(ws.path())
+        .args(["slugs", "--cell", "gadget_full_amd64_cosi"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gadget_full_amd64_cosi"));
+}

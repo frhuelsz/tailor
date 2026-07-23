@@ -78,6 +78,22 @@ impl Selector {
                 .is_some_and(|actual| values.iter().any(|v| v == actual))
         })
     }
+
+    /// Whether this selector **specifically requests** a `skip`ped cell, so it should be kept despite
+    /// its `skip` (`meta/docs/2026-07-22-fragment-skip.md`): either it names the cell by slug
+    /// (`--cell`), or it pins (via `-s`) one of the cell's `skip_pins` `(axis, value)` coordinates. A
+    /// selector that merely *matches* the cell without pinning a skip coordinate (e.g. `-s arch=…`)
+    /// does **not** count.
+    pub fn requests_skip_cell(&self, cell: &Cell) -> bool {
+        if self.slugs.iter().any(|slug| slug == cell.slug.as_ref()) {
+            return true;
+        }
+        cell.skip_pins.iter().any(|(axis, value)| {
+            self.axes
+                .get(axis)
+                .is_some_and(|values| values.iter().any(|v| v == value))
+        })
+    }
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
@@ -150,6 +166,8 @@ mod tests {
             base_image: None,
             rpm_sources: vec![],
             tools_dir: None,
+            skip: false,
+            skip_pins: Vec::new(),
         }
     }
 

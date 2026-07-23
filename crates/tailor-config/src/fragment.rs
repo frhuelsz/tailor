@@ -36,6 +36,11 @@ pub(crate) struct Fragment {
     pub(crate) params: IndexMap<String, ParamValue>,
     #[serde(default)]
     pub(crate) rpm_sources: Vec<PathBuf>,
+    /// Drop cells this fragment applies to from bulk selection unless the run pins the fragment's
+    /// value or names the cell (`meta/docs/2026-07-22-fragment-skip.md`). Mergeable last-wins; a
+    /// more-specific fragment may set `false` to un-skip.
+    #[serde(default)]
+    pub(crate) skip: Option<bool>,
     #[serde(default)]
     pub(crate) config: Option<Value>,
 }
@@ -158,6 +163,24 @@ impl LoadedFragment {
                 .match_expr
                 .as_ref()
                 .is_none_or(|m| m.evaluate(axes, features))
+    }
+
+    /// The `(axis, value)` equality coordinates of this fragment's path predicate — the coordinates a
+    /// `-s` selector must pin to "specifically request" a `skip`ped cell this fragment applies to
+    /// (`meta/docs/2026-07-22-fragment-skip.md`). Feature/`match`-only fragments yield none.
+    pub(crate) fn pins(&self) -> Vec<(String, String)> {
+        match &self.predicate {
+            Predicate::Conjunction(clauses) => clauses
+                .iter()
+                .flat_map(|clause| {
+                    clause
+                        .values
+                        .iter()
+                        .map(|value| (clause.axis.clone(), value.clone()))
+                })
+                .collect(),
+            Predicate::Always | Predicate::Feature { .. } => Vec::new(),
+        }
     }
 
     /// A human-readable description of why this fragment applies (for `tailor explain`).

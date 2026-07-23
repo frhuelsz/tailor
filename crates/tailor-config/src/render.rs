@@ -62,6 +62,13 @@ pub struct RenderedCell {
     pub outputs: Vec<OutputSpec>,
     /// Local RPM sources (directories or `.repo` files) passed to IC as `--rpm-source`.
     pub rpm_sources: Vec<PathBuf>,
+    /// Resolved `skip` for this cell (merged from fragment `skip:` fields, last-wins). When `true`,
+    /// the cell is dropped from bulk selection unless specifically requested
+    /// (`meta/docs/2026-07-22-fragment-skip.md`).
+    pub skip: bool,
+    /// The `(axis, value)` coordinates that a `-s` selector must pin to keep this cell despite `skip`
+    /// (the predicate of the fragment that set `skip: true`); empty when not skipped.
+    pub skip_pins: Vec<(String, String)>,
 }
 
 /// Render every cell of an image. `$include` paths resolve relative to `image_dir`.
@@ -187,12 +194,26 @@ fn render_cell(
         .flat_map(|f| f.doc.rpm_sources.clone())
         .collect();
 
+    // Resolve `skip` last-wins over the matched fragments (base → most-specific). When the winning
+    // value is `true`, remember that fragment's predicate coordinates as the pins that can override
+    // the skip via `-s` (`meta/docs/2026-07-22-fragment-skip.md`).
+    let mut skip = false;
+    let mut skip_pins: Vec<(String, String)> = Vec::new();
+    for fragment in &matched {
+        if let Some(flag) = fragment.doc.skip {
+            skip = flag;
+            skip_pins = if flag { fragment.pins() } else { Vec::new() };
+        }
+    }
+
     Ok(RenderedCell {
         tuple,
         ic_config,
         base,
         outputs,
         rpm_sources,
+        skip,
+        skip_pins,
     })
 }
 

@@ -62,6 +62,13 @@ pub struct Cell {
     pub rpm_sources: Vec<PathBuf>,
     /// Resolved IC tools-dir source, when this image requests tailor-managed `--tools-dir`.
     pub tools_dir: Option<CellToolsDir>,
+    /// When `true`, this cell is dropped from bulk selection unless specifically requested — the run
+    /// names it (`--cell`) or pins a member of [`skip_pins`](Cell::skip_pins) via `-s`
+    /// (`meta/docs/2026-07-22-fragment-skip.md`).
+    pub skip: bool,
+    /// The `(axis, value)` coordinates a `-s` selector must pin to keep this cell despite `skip`;
+    /// empty when not skipped (or skipped image-wide, which is handled during image selection).
+    pub skip_pins: Vec<(String, String)>,
 }
 
 /// A cell's tools-dir source after resolving an image-level named reference or inline source.

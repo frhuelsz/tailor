@@ -478,6 +478,8 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
                     base_image: base_image.clone(),
                     rpm_sources: rc.rpm_sources.clone(),
                     tools_dir,
+                    skip: rc.skip,
+                    skip_pins: rc.skip_pins.clone(),
                 });
             }
         }
@@ -587,7 +589,7 @@ fn platform_arch(platform: &str) -> Option<Arch> {
 pub fn cells_selected(target: &Arc<Target>, selector: &Selector) -> Result<Vec<Cell>, CoreError> {
     let all = cells(target)?;
     if selector.is_empty() {
-        return Ok(all);
+        return Ok(drop_skipped(all, selector));
     }
     let declared: BTreeSet<&str> = all
         .iter()
@@ -604,16 +606,30 @@ pub fn cells_selected(target: &Arc<Target>, selector: &Selector) -> Result<Vec<C
             });
         }
     }
-    let selected: Vec<Cell> = all
+    let matched: Vec<Cell> = all
         .into_iter()
         .filter(|cell| selector.matches(cell))
         .collect();
-    if selected.is_empty() {
+    // A non-empty selector that matches nothing is a typo (e.g. a bad CI matrix) — surface it before
+    // the skip filter, so "no cells" always means "your selection is wrong", not "all were skipped".
+    if matched.is_empty() {
         return Err(CoreError::NoCellsSelected {
             image: target.name().to_owned(),
         });
     }
-    Ok(selected)
+    Ok(drop_skipped(matched, selector))
+}
+
+/// Drop cells with a fragment-level `skip` (non-empty `skip_pins`) unless the selector specifically
+/// requests them (`meta/docs/2026-07-22-fragment-skip.md`). Image-wide `skip` carries no pins and is
+/// handled during image selection, so it is never dropped here.
+fn drop_skipped(cells: Vec<Cell>, selector: &Selector) -> Vec<Cell> {
+    cells
+        .into_iter()
+        .filter(|cell| {
+            !(cell.skip && !cell.skip_pins.is_empty() && !selector.requests_skip_cell(cell))
+        })
+        .collect()
 }
 
 fn slug_for(
