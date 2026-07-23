@@ -169,6 +169,15 @@ extract directives for the dedicated extract pass. (The final image is produced 
 pass over the user's real customized image, unchanged.) This is the one intentional principle change,
 called out so reviewers see it.
 
+**Collision case (user also hand-authored `output.artifacts`):** because tailor generates a **dedicated
+extract config** for the extract pass (rather than editing the user's config in place), the user's own
+`output.artifacts`, if any, does not apply to the extract pass — tailor's generated directives are
+authoritative there. To avoid silent surprise, the recommended behavior is: if the user's `config:`
+already contains an `output.artifacts` block on a **signed** cell, tailor **errors** with a clear
+message ("remove `output.artifacts`; tailor authors it for signed builds") rather than silently
+overriding or attempting a merge. (Merging is rejected — reconciling two artifact-item sets is exactly
+the config-modeling tailor avoids.)
+
 ## 7. remote-service seam (next milestone, not step 1)
 
 `method: remote-service` reuses the same `External-signerSigner`, differing only in the `sign-config.yaml`
@@ -188,11 +197,21 @@ Ship after the ephemeral e2e is green.
 
 ## 8. Invariants & environment floor
 
-- **IC version floor:** `output-artifacts` + `inject-files` need **IC ≥ 0.14**. The signing extract
-  pass does no package ops, so it needs only that floor (the managed/prepared tools-dir preview, newer,
-  is relevant to the wider multi-run image build — `2026-07-21-multi-run-image-production.md` — not to signing). The
-  e2e consumes the IC binary from the build pipeline's drop; **verify that drop meets the floor**
-  (owner: `peer-session` with the `ic` agent).
+- **IC version floor + toolchain provenance.** `output-artifacts` + `inject-files` need **IC ≥ 0.14**;
+  the signing extract pass does no package ops, so it needs only that floor. **Important (myimage):** the
+  myimage SKU configs use ACL-specific IC surface — an `acl:` config block and related preview features
+  (ACL repartitioning / verity re-init / OEM-id) — which **stock IC rejects**. So the toolchain
+  container must be built from the **custom IC branch that carries that ACL support**, *not* the
+  generic internal-registry IC drop. This reframes the floor question into a **single-binary risk**: the *same*
+  custom IC branch that adds ACL repartitioning must **also** carry `output-artifacts` + `inject-files`
+  (≥ 0.14), because one binary must both **repartition and sign**. If the ACL branch predates 0.14 or
+  lacks those preview features, build-IC and sign-IC diverge — a real design risk to resolve up front
+  (open item #2).
+- **Signer identity in the fingerprint.** Per `2026-06-29-signing.md` §8, the signer identity feeds the
+  per-cell fingerprint. For this backend that identity is **`backend` + `method`** (e.g.
+  `external-signer/ephemeral`). Note the **ephemeral** method is intentionally **non-reproducible** (a fresh
+  cert per build), so signed *bytes* are not stamped for reproducibility; the fingerprint tracks the
+  *signing configuration*, not the signature bytes (consistent with the §9 non-repro stance).
 - **No host sudo:** the janitor normalizes IC's root-owned staging **before** the host sign step, so
   `external-signer` runs unprivileged (`2026-06-29-signing.md` §7.7 / §9). The IC passes run in the
   toolchain container as usual.
@@ -200,6 +219,10 @@ Ship after the ephemeral e2e is green.
   cleanup can't reach host root (the wipe class of bug).
 - **ca.pem publication:** to `<output_dir>/<slug>.ca_cert.pem` (never into the swept staging dir), the
   enrollment artifact for the (deferred) Secure Boot boot test.
+- **Pinned signer for provenance.** Since org-trust is the whole premise, the pipeline must **pin a
+  specific `external-signer` version** (acquired from its internal feed) rather than tracking latest —
+  provenance/reproducibility of the signing tool itself. tailor only preflights presence (OQ3); the
+  pin is a pipeline responsibility, but the design calls it out as required for a trusted build.
 
 ## 9. Correctness bar — myimage ephemeral e2e
 
@@ -209,16 +232,19 @@ Ship after the ephemeral e2e is green.
    sign-artifacts` (ephemeral) → `inject-files` → fixed-VPC VHD, and emits `<slug>.ca_cert.pem`.
 2. The signed artifacts verify against the published cert: UKI/shim/bootloader are Authenticode-signed;
    the verity root hash carries a detached signature (when in the item set).
-3. Runs on the arm64 build VM, host-sudo-free, with the IC binary from the pipeline drop.
+3. Runs on the arm64 build VM, host-sudo-free, with the IC binary from the **custom ACL IC branch**
+   (which must carry both repartitioning and `output-artifacts`/`inject-files` — §8).
 4. (Deferred, test-wiring) enroll `ca.pem` into an OVMF `db` and boot under QEMU Secure Boot.
 
 ## 10. Implementation plan / milestones
 
 - **P1 — config + backend surface.** Add `external-signer` to `SigningBackend` + `method`/`items`/`remote-service`
   fields to `SigningProfile`; extend `validate` and the `preflight_profile` capability checks
-  (`external-signer` + ephemeral host deps). *(config + preflight; no execution)*
+  (`external-signer` + ephemeral host deps). *(config + preflight; no execution — does not touch the §6
+  principle, so cleared to start ahead of Paco's review.)*
 - **P2 — extract-pass authoring.** Auto-generate the `output.artifacts` extract config from
-  `profile.items` (§6), wired into the three-pass executor's first pass (raw output).
+  `profile.items` (§6), wired into the three-pass executor's first pass (raw output). **HOLD until
+  Paco blesses the §6 non-goal supersession** — this is the reversal he needs to sign off.
 - **P3 — `External-signerSigner`.** Implement the `Signer` impl in `tailor-sign` (write `sign-config.yaml`,
   run `external-signer sign-artifacts`, publish `ca.pem`); register it for `backend: external-signer`.
 - **P4 — myimage ephemeral e2e** (the §9 bar) on the arm64 VM; iterate to green with `peer-session`.
@@ -228,8 +254,11 @@ Ship after the ephemeral e2e is green.
 
 1. **verityHash extraction (§5):** does IC auto-emit the verity root-hash artifact, or must it be in
    `output.artifacts.items`? → picks the `items` default behavior. *(verify with `ic`)*
-2. **IC floor on the pipeline drop (§8):** confirm the arm64 IC drop is ≥ 0.14 with
-   `output-artifacts`/`inject-files`. *(owner: peer-session + ic)*
+2. **Toolchain IC branch carries both repartitioning *and* signing (§8):** myimage needs the **custom
+   IC branch** with ACL support (`acl:` config block + repartitioning/verity/OEM preview features) —
+   stock/internal-registry IC rejects those. Confirm that **same** branch also carries `output-artifacts` +
+   `inject-files` (≥ 0.14); if not, build-IC and sign-IC diverge (single-binary risk). *(owner:
+   peer-session + ic)*
 3. **external-signer arm64 host deps:** confirm `pesign`/`certutil`/`openssl` are present (or installable)
    on the arm64 build VM for ephemeral.
 4. **`items` token names:** confirm IC's exact `output.artifacts.items` tokens (`ukis`, `shim`,
