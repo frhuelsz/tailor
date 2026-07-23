@@ -9,14 +9,14 @@
 > `pull: never` toolchain. The whole build runs **inside Docker**, so tailor's dependency footprint
 > stays "just a container engine" (no host Go/make/git).
 >
-> **Layering (tailor ↔ IC ↔ ACL):** producing the IC container is an *IC* build concern; tailor only
+> **Layering (tailor ↔ IC ↔ distro):** producing the IC container is an *IC* build concern; tailor only
 > automates the mechanical clone → compile → assemble → tag pipeline that a user otherwise runs by
 > hand. tailor never reasons about what a given IC commit can or cannot do — the commit is just a
 > pinned, reproducible input (mirroring how `version` is informational, `2026-06-22-design.md` §8).
 
 ## 1. Motivation
 
-Consuming an unreleased or forked IC (e.g. an ACL-pipeline build, or a PR under test) means:
+Consuming an unreleased or forked IC (e.g. a downstream distro-pipeline build, or a PR under test) means:
 
 1. clone `azure-linux-image-tools` at some commit,
 2. compile the Go `imagecustomizer` binary,
@@ -40,7 +40,7 @@ The canonical build is two phases (`toolkit/tools/imagecustomizer/container/` in
   to — `qemu-img`, `veritysetup`, `grub2`, `createrepo_c`, `systemd-ukify`, …, `COPY usr /usr`,
   entrypoint runs `imagecustomizer "$@"`). The script drops `grub2-pc` on arm64.
 
-A common lighter variant (observed in ACL workflows) is a **binary swap**: `FROM` the *official* IC
+A common lighter variant (observed in some distro workflows) is a **binary swap**: `FROM` the *official* IC
 container and `COPY` a freshly built binary over `/usr/bin/imagecustomizer`, adding only the deps the
 official image lacks (e.g. `systemd-ukify` on arm64). It reuses the official image's whole runtime
 environment, so it is much faster, at the cost of tracking an official base tag.
@@ -142,6 +142,6 @@ an IC developer's edit-compile-run loop).
 ## Open questions
 
 1. Default strategy: **full** (self-contained, matches upstream) vs **binarySwap** (fast, matches the
-   ACL binary-swap flow)?
+   binary-swap flow)?
 2. Should a `ref:`/`branch:` source be allowed under `--locked`, or must locked builds carry an
    explicit SHA?

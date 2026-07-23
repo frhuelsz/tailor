@@ -9,8 +9,8 @@
 > `--tools-dir <that dir>` to IC. tailor never passes `--tools-dir /`. This is the safe, first-class
 > replacement for the manual `--tools-dir /` that caused the 2026-07-06 wipe.
 >
-> **Layering (tailor ↔ IC ↔ ACL):** `--tools-dir` is an *IC* capability. tailor wraps it generically
-> for any distro base (Azure Linux, Fedora, …); tailor has **no ACL-specific knowledge**. ACL just
+> **Layering (tailor ↔ IC ↔ distro):** `--tools-dir` is an *IC* capability. tailor wraps it generically
+> for any distro base (Azure Linux, Fedora, …); tailor has **no distro-specific knowledge**. Azure Linux just
 > happens to be the common case that needs it.
 >
 > **2026-07-09 update:** the `pull:` policy and local-image-`Id` machinery described below is now
@@ -25,7 +25,7 @@ Some images can't be customized without an external package-manager userspace. I
 "must contain a package manager (tdnf or dnf) and its runtime dependencies"
 ([IC create-tools-dir how-to](https://microsoft.github.io/azure-linux-image-tools/imagecustomizer/how-to/create-tools-dir.html));
 IC uses it as a chroot, mounting the target image at `/_imageroot` and running
-`tdnf --installroot=/_imageroot`. Sealed/minimal images (notably ACL, which ships no in-image `tdnf`)
+`tdnf --installroot=/_imageroot`. Sealed/minimal images (notably Azure Linux, which ships no in-image `tdnf`)
 require it for package / UKI-create / verity operations.
 
 tailor has **no way to supply a tools-dir today**, so a user hits IC's "tools-dir required" gate and
@@ -57,12 +57,12 @@ machinery (pull policy, digest pinning for remote, local-image `Id` for local-on
 ```yaml
 # tailor.yaml
 toolsDirSources:
-  - name: acl                       # a fully-remote source — pulled + digest-pinned (reproducible)
+  - name: azurelinux                       # a fully-remote source — pulled + digest-pinned (reproducible)
     container: mcr.microsoft.com/azurelinux/base/core
     tag: "3.0"
     pull: missing                   # always | missing (default) | never — same semantics as toolchains
-  - name: acl-extended              # a LOCAL image with extra deps baked in (not pushed anywhere)
-    container: acl-tools-extended
+  - name: azurelinux-extended              # a LOCAL image with extra deps baked in (not pushed anywhere)
+    container: custom-tools-extended
     tag: local
     pull: never                     # local-only: use the image Id (not locked)
   - name: fedora
@@ -97,7 +97,7 @@ An image sets `toolsDir:`, an object with two fields:
 ```yaml
 # image.yaml — by name, default (read-only) access
 toolsDir:
-  source: acl
+  source: azurelinux
 ```
 
 ```yaml
@@ -213,5 +213,5 @@ filesystem to a digest-keyed cache dir, binds it **read-only by default** (a per
 when `access: rw`), and passes `--tools-dir <dir>` to `customize`/`create`. It reuses toolchain
 resolution + the lockfile, gates on the `tools-dir` preview feature with a single config read, and —
 crucially — makes `--tools-dir /` a thing tailor structurally never does. Together with the
-mount-isolation design, this closes the incident's root cause while giving ACL (and any other
+mount-isolation design, this closes the incident's root cause while giving Azure Linux (and any other
 package-manager-less base) a first-class, reproducible tools-dir.

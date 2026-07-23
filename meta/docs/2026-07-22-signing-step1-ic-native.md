@@ -1,46 +1,39 @@
-# tailor — Secure Boot signing via IC-native deferred signing (external-signer): complete design
+# tailor — IC-native deferred signing (execution design)
 
-> **Status:** Ready for review · _2026-07-23_ (was: Proposed/scoping, 2026-07-22) · design co-driven
-> with the `peer-session` myimage/e2e track
+> **Status:** Ready for review · _2026-07-23_
 >
-> Complete, implementable design for tailor Secure Boot signing. tailor drives **IC-native deferred
-> signing** — `output-artifacts` → sign → `inject-files` — with the sign step delegated to
-> **external-signer** (the org-sanctioned IC-native signer; ephemeral for dev, remote-service for production). This
-> is *exactly* tailor's existing three-pass signing model (`2026-06-29-signing.md`), so external-signer
-> drops in as a **`Signer` backend** with **no change to the executor or the `Signer` port**. The
-> correctness bar is a signed `tailor build myimage <cell>` producing a signed VHD + published `ca.pem`
-> via external-signer **ephemeral**, end to end, on the arm64 build VM.
->
-> Public-repo note: mechanism only. Internal package feeds/versions, remote-service key codes, managed-identity
-> / Key-Vault / cert names, DRI emails, and internal branch/build identifiers are omitted.
+> Complete, implementable design for how tailor produces Secure Boot–signed images. tailor drives
+> **IC-native deferred signing** — an Image Customizer `output-artifacts` extract pass → a host-side
+> sign step → an IC `inject-files` pass. This is exactly tailor's existing three-pass signing model
+> (`2026-06-29-signing.md`), so the signing tool plugs in as a **`Signer` backend** with **no change
+> to the executor or the `Signer` port**. Scope of this design: a signed `tailor build` produces a
+> signed disk image plus a published enrollment certificate, using a self-signed (ephemeral) key.
 
-## 1. The mechanism (verified against external-signer + IC)
+## 1. The mechanism
 
-Signing is **deferred** — it slots between two IC invocations using IC's own preview features
-`output-artifacts` + `inject-files` (IC ≥ 0.14):
+Signing is **deferred** — not baked into the customize run. It slots between two IC invocations using
+IC's own preview features `output-artifacts` + `inject-files`:
 
 ```
 1. IC customize (extract pass)   config: previewFeatures:[output-artifacts,…] + output.artifacts:{items, path}, output raw
-      → writes the UNSIGNED .efi artifacts into <artifacts> + an inject-files.yaml manifest   (no package ops → no --tools-dir)
-2. sign the artifacts in place   external-signer sign-artifacts --build-dir <b> --config-file <sign-config.yaml>
-      sign-config.yaml: input.artifactsPath=<artifacts>; signingMethod:{ ephemeral | remote-service }
+      → writes the UNSIGNED boot artifacts into <artifacts> + an inject-files.yaml manifest   (no package ops → no --tools-dir)
+2. host-side sign (in place)     an external signer signs the extracted artifacts, keyed by the emitted manifest
 3. IC inject-files               inject-files --config-file <artifacts>/inject-files.yaml --image-file <unsigned.raw> --output-image-file <signed.raw> --output-image-format raw
-      → then qemu-img convert raw → fixed VPC VHD (Azure gallery)
+      → then convert raw → the requested disk format
 ```
 
-external-signer signs, per the manifest IC emits: **UKI + UKI addons**, **shim**, **systemd-boot / grub**
-(Authenticode), and the **dm-verity root hash** (detached PKCS#7). Two methods:
+The signable set is the boot chain IC (and tailor) already rebuild — the UKI(s), UKI addons, the boot
+loader (systemd-boot / grub), and the dm-verity root hash. The extract pass does **no package
+operations**, so it needs no tools-dir. The signer occupies the middle step and signs in place.
 
-- **ephemeral** — self-signed x509 generated on the fly, **private key destroyed** after; public
-  `ca.pem` captured for Secure Boot `db` enrollment. **Dev/test only** (unique cert per build). Host
-  deps: `pesign`, `certutil` (nss-tools), `openssl`.
-- **remote-service** — Microsoft production signing service; managed-identity auth against a Key-Vault OneCert,
-  per-environment key codes. **Required for production/pre-release.**
+**Key sources.** Two modes, orthogonal to the mechanism:
+- **ephemeral** — a self-signed certificate generated on the fly, private key destroyed after signing;
+  the public certificate is published for Secure Boot `db` enrollment. Dev/test (unique cert per
+  build). This design's scope.
+- **external service** — a remote/enterprise signing service against a stable certificate chain, for
+  production. Modeled as a seam (§7); not built here.
 
-The signable unit is exactly what IC (and tailor) already rebuild — the UKI + boot chain — so the
-extract pass needs no packages (no tools-dir), and external-signer occupies the sign pass unchanged.
-
-## 2. Reconciliation: external-signer is a `Signer` backend; the 3-pass executor is unchanged
+## 2. Reconciliation: the signer is a `Signer` backend; the 3-pass executor is unchanged
 
 The `Signer` port already exists at the right granularity (`crates/tailor-core/src/ports.rs`):
 
@@ -54,59 +47,51 @@ trait Signer {
 ```
 
 `SigningPlan` is **artifact-set granular** — it hands the signer the whole `inject-files.yaml` + the
-`artifacts_dir`. That is precisely external-signer's unit of work, so **`External-signerSigner` is a drop-in
-`Signer` impl**:
+`artifacts_dir`, which is the natural unit for a signer that signs the extracted set in one pass. So a
+delegating **external-signer backend is a drop-in `Signer` impl**:
 
-- **`preflight()`** — `external-signer` present (PATH or configured path); for `ephemeral`, the host deps
-  `pesign`/`certutil`/`openssl`; for `remote-service`, identity/Key-Vault/key-code/DRI config completeness.
-- **`sign(plan)`** — write a `sign-config.yaml` (`input.artifactsPath = plan.artifacts_dir`;
-  `signingMethod: { ephemeral | remote-service }`; ephemeral `publicKeysPath` under a `plan.leaf_id`-scoped dir),
-  run `external-signer sign-artifacts --build-dir <b> --config-file <sign-config.yaml>`, then return
-  `SigningResult { published_ca_cert: Some(<ca.pem copied to plan.ca_cert_dest>) }` (ephemeral) or
-  `None` (remote-service).
+- **`preflight()`** — the signer binary is present (PATH or configured path) and its host dependencies
+  are available.
+- **`sign(plan)`** — write the signer's config (pointing at `plan.artifacts_dir`, key-source method,
+  and a `plan.leaf_id`-scoped output dir), invoke the signer over the artifacts, and return
+  `SigningResult { published_ca_cert }` (the enrollment cert, for ephemeral) or `None`.
 
-So the **three-pass executor (`2026-06-29-signing.md` §5) is unchanged**: external-signer occupies the
-existing "host-side sign step"; the customize (extract) and `inject-files` passes are as designed. The
-raw `openssl`+`sbsign` backend the 06-29 doc describes remains a **peer `Signer` impl** that loops
-over the same `inject-files.yaml` internally. Both satisfy the identical port — this is the whole
-point of the port.
+So the **three-pass executor (`2026-06-29-signing.md` §5) is unchanged**: the signer occupies the
+existing host-side sign step; the customize (extract) and `inject-files` passes are as designed. The
+built-in `openssl`+`sbsign` backend the 06-29 doc describes remains a **peer `Signer` impl** that
+loops over the same `inject-files.yaml` internally. Both satisfy the identical port — the whole point
+of the port.
 
 ### 2.1 Two axes: driver vs key-source
 
-The existing `SigningBackend` enum (`local-test-ca` / `keypair` / `azure-key-vault`) models a
-**key source** on the assumption tailor itself is the signing driver. external-signer adds a **driver**
-axis (tailor delegates the whole sign step to an external tool that has *its own* key sources). The
-config models this as a new backend `external-signer` whose `method` sub-selects external-signer's key source:
+The existing `SigningBackend` enum (`local-test-ca` / `keypair` / `azure-key-vault`) models a **key
+source** on the assumption tailor itself is the signing driver. A delegating external signer adds a
+**driver** axis — tailor hands the whole sign step to an external tool that has its own key sources.
+The config models this as a new backend whose `method` sub-selects the tool's key source:
 
-| Concept | tailor-driven | external-signer-driven |
+| Concept | tailor-driven | delegated-signer |
 | --- | --- | --- |
-| driver | tailor loops `openssl`/`sbsign` per artifact | delegate to `external-signer sign-artifacts` |
-| ephemeral key | `backend: local-test-ca` | `backend: external-signer, method: ephemeral` |
-| BYO key | `backend: keypair` | (external-signer has no BYO-file method today) |
-| remote/prod | `backend: azure-key-vault` (future) | `backend: external-signer, method: remote-service` |
+| driver | tailor loops `openssl`/`sbsign` per artifact | delegate to the external signer |
+| ephemeral key | `backend: local-test-ca` | `method: ephemeral` |
+| BYO key | `backend: keypair` | (tool-dependent) |
+| remote/prod | `backend: azure-key-vault` (future) | `method: <external-service>` |
 
-Keep all of them; `external-signer` is the ACL/myimage default (§4). We do **not** delete the raw backend —
-it preserves non-external signer environments and the S3 pure-Rust north star (`2026-06-29-signing.md` §11).
+Keep all of them; the delegating backend is one more peer. We do **not** remove the built-in backend —
+it preserves environments without the external signer and the S3 pure-Rust north star
+(`2026-06-29-signing.md` §11).
 
-## 3. Resolved open questions (OQ1–OQ4)
+## 3. Resolved design decisions
 
-- **OQ1 — backend split: add `external-signer` as a first-class `Signer` backend; keep the raw
-  `openssl`+`sbsign` backend.** external-signer is the default for ACL/myimage (org-sanctioned, matches the
-  tailor-less ship-today path); the raw backend stays for non-external signer envs and the pure-Rust goal.
-  *(Agreed with downstream.)*
-- **OQ2 — `items`: profile declares `items`, default `[ukis, shim, bootloader]`; the emitted
-  `inject-files.yaml` is the source of truth for what gets *signed*.** But see §5 — the request set
-  (`output.artifacts.items`, an **input** to the extract pass) and the sign set (the emitted manifest)
-  are different phases; `verity-hash` must be *requested* up front, not only detected after (confirmed:
-  IC gates it on `items` membership). *(Refines
-  downstream's OQ2.)*
-- **OQ3 — binary sourcing: preflight `external-signer` on PATH or a configured path, exactly like
-  `openssl`/`sbsign`.** Acquisition (feed download + version pin) is **pipeline plumbing**, not
-  tailor's job — keeps tailor environment-agnostic and free of a package-source dependency.
-  *(Agreed.)*
-- **OQ4 — remote-service: `method: ephemeral | remote-service` under `external-signer`; ephemeral is the complete step-1,
-  remote-service is the documented seam (§7).** HPC ships unsigned/SB-off, so remote-service isn't on the myimage
-  validation critical path; ephemeral is the correctness bar. *(Agreed.)*
+- **Backend split:** add the delegating external-signer as a first-class `Signer` backend; **keep**
+  the built-in `openssl`+`sbsign` backend. The external signer is the default where it is the
+  sanctioned path; the built-in stays as fallback and for the pure-Rust goal.
+- **`items` default `[ukis, shim, bootloader]`;** the emitted `inject-files.yaml` is the source of
+  truth for what gets *signed*. But the request set and sign set are different phases — see §5.
+- **Binary sourcing:** preflight the signer on PATH or a configured path, exactly like
+  `openssl`/`sbsign`. Acquisition (download + version pin) is environment/pipeline plumbing, not
+  tailor's job — keeps tailor environment-agnostic.
+- **Key source:** `method: ephemeral | <external-service>`; ephemeral is this design, the external
+  service is the documented seam (§7).
 
 ## 4. Config surface
 
@@ -115,168 +100,128 @@ Extend `SigningProfile` / `SigningBackend` (`crates/tailor-config/src/schema.rs`
 ```yaml
 # tailor.yaml
 signing:
-  default: myimage-ephemeral
+  default: signed
   profiles:
-    myimage-ephemeral:
-      backend: external-signer         # NEW driver backend (kebab-case, matching existing tokens)
-      method: ephemeral           # ephemeral (step 1) | remote-service (§7)
-      items: [ukis, shim, bootloader]   # optional; default this set. IC tokens: ukis, uki-addons(auto), shim, bootloader, verity-hash. Add verity-hash only when verity-sealed (§5); never list uki-addons.
+    signed:
+      backend: external-signer    # NEW delegating driver backend
+      method: ephemeral           # ephemeral | <external-service> (§7)
+      items: [ukis, shim, bootloader]   # optional; default this set. See §5 for the item tokens.
       # publishCaCert: <path>     # default <output_dir>/<slug>.ca_cert.pem
-      # --- remote-service only (§7): ---
-      # remote-service: { clientId, keyVaultName, certificateName, keyCodes: {uki, shim, bootloader, verityHash}, driEmails: [...] }
 ```
 
 ```yaml
-# myimage/image.yaml
-signing: myimage-ephemeral
+# image.yaml
+signing: signed
 ```
 
 Schema notes:
-- `backend: external-signer` is a new `SigningBackend` variant; `method` (enum `ephemeral|remote-service`) is
-  required for it. `items` optional (§5). `remote-service:` sub-object required iff `method: remote-service`.
-- `SigningProfile::validate` gains the `external-signer` arm (method present; remote-service fields complete when
-  `method: remote-service`). This is config-shape validation only; presence/capability probing is the build
-  preflight.
+- the delegating backend is a new `SigningBackend` variant; `method` (enum) is required for it.
+  `items` optional (§5). Any external-service sub-config is required only for that method.
+- `SigningProfile::validate` gains the new arm (method present; service fields complete when the
+  external-service method is chosen). Config-shape validation only; presence/capability probing is the
+  build preflight.
 
-## 5. `items`: request set vs sign set (resolved from IC branch source)
+## 5. `items`: request set vs sign set
 
-`output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*
-(confirmed: `artifactsinputoutput.go` gates the verity artifact on `items` membership). So:
+`output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*. So:
 
 - **Request set (input, decided before extract):** `profile.items`, default **`[ukis, shim,
-  bootloader]`**. The exact IC item tokens (from `outputartifactsitemtype.go`) are: `ukis`,
-  `uki-addons`, `shim`, `bootloader`, `verity-hash`. Two rules:
-  - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is a **hard error**. So the
-    default set does *not* name it.
-  - **`verity-hash` is NOT auto-emitted** — IC extracts the dm-verity root hash **only** when
-    `verity-hash` is in `items` (confirmed against the branch). This vindicates the request-vs-sign
-    split: tailor cannot detect verity from the emitted manifest, because the manifest only contains
-    what was requested. tailor stays config-opaque (doesn't parse the user's `config:`), so verity
-    inclusion is **explicit** — either `verity-hash` in `profile.items`, or a small declared
-    `verity: true` profile flag that tailor expands to append `verity-hash`. **Not auto.**
-- **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. external-signer
+  bootloader]`**. The IC item tokens are: `ukis`, `uki-addons`, `shim`, `bootloader`, `verity-hash`.
+  Two rules:
+  - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is an error, so the default
+    set does not name it.
+  - **`verity-hash` is not auto-emitted** — IC extracts the dm-verity root hash **only** when
+    `verity-hash` is in `items`. So tailor cannot detect verity from the emitted manifest (the manifest
+    only contains what was requested). tailor stays config-opaque (it does not parse the user's
+    `config:`), so verity inclusion is **explicit**: `verity-hash` in `profile.items`, or a small
+    declared `verity: true` profile flag that tailor expands to append `verity-hash`. Not auto.
+- **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. The signer
   signs the whole manifest; tailor does not re-derive it. This keeps the sign step config-opaque and
   robust to IC adding artifact kinds.
 
-**Inject-files schema/CLI (from the branch, for the P3 wiring):** the inject pass is
-`imagecustomizer inject-files --build-dir <dir> --config-file <inject-files.yaml> --image-file <base>
---output-image-file <out> --output-image-format <fmt>` (flag is `--config-file`; `--build-dir`
-required). The manifest is a top-level `injectFiles:` list (each entry `partition/source/destination/
-type`) with `previewFeatures: [inject-files]`. **Correction to `2026-06-29-signing.md` / the `Signer`
-port comment:** there is **no `unsignedSource` field** — signing is **in place on `source`**. The
-06-29 `source`/`unsignedSource` wording is outdated and should be updated when the signer lands (P3).
+**Inject-files CLI/schema (for the signer wiring):** the inject pass is `imagecustomizer inject-files
+--build-dir <dir> --config-file <inject-files.yaml> --image-file <base> --output-image-file <out>
+--output-image-format <fmt>` (flag is `--config-file`; `--build-dir` required). The manifest is a
+top-level `injectFiles:` list (each entry `partition/source/destination/type`) with `previewFeatures:
+[inject-files]`. Signing is **in place on `source`** (there is no separate `unsignedSource` field —
+the `source`/`unsignedSource` wording in `2026-06-29-signing.md` is outdated and should be corrected
+when the signer lands).
 
-## 6. output.artifacts authorship — a deliberate, documented change from 06-29
+## 6. output.artifacts authorship — a deliberate change from 06-29
 
 `2026-06-29-signing.md` §3 lists as a **non-goal**: *"tailor does not model or rewrite
 `output.artifacts` — the user authors it in their `config:`."* This design **supersedes that specific
-non-goal**: for a signed build, **tailor auto-authors the `output.artifacts` extract directives** (and
-`previewFeatures: [output-artifacts, …]`, raw output) for the extract pass, derived mechanically from
-`profile.items`. Rationale: requiring every user to hand-write IC preview scaffolding to get a signed
-image defeats "declarative signing"; the directives are purely mechanical and fully determined by the
-profile. tailor still never parses or rewrites the user's *functional* `config:` — it only **adds** the
-extract directives for the dedicated extract pass. (The final image is produced by the `inject-files`
-pass over the user's real customized image, unchanged.) This is the one intentional principle change,
-called out so reviewers see it.
+non-goal**: for a signed build, tailor **auto-authors** the `output.artifacts` extract directives (and
+`previewFeatures: [output-artifacts, …]`, raw output) for the dedicated extract pass, derived
+mechanically from `profile.items`. Rationale: requiring every user to hand-write IC preview
+scaffolding to get a signed image defeats declarative signing; the directives are purely mechanical
+and fully determined by the profile. tailor still never parses or rewrites the user's *functional*
+`config:` — it only **adds** the extract directives for the extract pass, and produces the final image
+via the `inject-files` pass over the user's real customized image, unchanged.
 
-**Collision case (user also hand-authored `output.artifacts`):** because tailor generates a **dedicated
-extract config** for the extract pass (rather than editing the user's config in place), the user's own
-`output.artifacts`, if any, does not apply to the extract pass — tailor's generated directives are
-authoritative there. To avoid silent surprise, the recommended behavior is: if the user's `config:`
-already contains an `output.artifacts` block on a **signed** cell, tailor **errors** with a clear
-message ("remove `output.artifacts`; tailor authors it for signed builds") rather than silently
-overriding or attempting a merge. (Merging is rejected — reconciling two artifact-item sets is exactly
-the config-modeling tailor avoids.)
+**Collision case:** because tailor generates a **dedicated** extract config (rather than editing the
+user's config in place), a user's own `output.artifacts` does not apply to the extract pass. To avoid
+silent surprise, if the user's `config:` already contains an `output.artifacts` block on a **signed**
+cell, tailor **errors** ("remove `output.artifacts`; tailor authors it for signed builds") rather than
+silently overriding or merging. This is the one intentional principle change, flagged for review.
 
-## 7. remote-service seam (next milestone, not step 1)
+## 7. External-service seam (next milestone)
 
-`method: remote-service` reuses the same `External-signerSigner`, differing only in the `sign-config.yaml`
-`signingMethod` block and `preflight()`:
+An external production signing service reuses the same delegating `Signer`, differing only in the
+signer config's key-source block and `preflight()`:
+- **Config:** an environment-specific service sub-object (identity, key/cert references, per-item key
+  codes). Supplied via the environment, **never committed to a workspace**.
+- **No enrollment cert:** a stable production chain means `SigningResult.published_ca_cert` is `None`.
+- **Non-reproducible:** production signatures typically embed a timestamp, so signed bytes are not
+  reproducible (sign once, reuse the bytes). Consistent with `2026-06-29-signing.md` §9.
 
-- **Config:** the `remote-service:` sub-object (managed-identity client id, Key-Vault name, cert name, per-item
-  key codes, DRI emails). All environment-specific — **not** committed to a public workspace; supplied
-  via the pipeline/environment.
-- **Auth:** `az login` as the managed identity before signing (pipeline step); `preflight()` checks
-  config completeness, not live auth.
-- **No `ca.pem`:** remote-service signs against a stable Microsoft chain, so `SigningResult.published_ca_cert`
-  is `None` (no per-build enrollment cert).
-- **Non-repro:** remote-service embeds an RFC-3161 timestamp → signed bytes aren't reproducible (sign once,
-  reuse the bytes downstream). Consistent with `2026-06-29-signing.md` §9.
-
-Ship after the ephemeral e2e is green.
+Ship after the ephemeral path is green.
 
 ## 8. Invariants & environment floor
 
-- **IC version floor + toolchain provenance.** `output-artifacts` + `inject-files` need **IC ≥ 0.14**;
-  the signing extract pass does no package ops, so it needs only that floor. **Important (myimage):** the
-  myimage SKU configs use ACL-specific IC surface — an `acl:` config block and related preview features
-  (ACL repartitioning / verity re-init / OEM-id) — which **stock IC rejects**. So the toolchain
-  container must be built from the **custom IC branch that carries that ACL support**, *not* the
-  generic internal-registry IC drop. The floor question was a **single-binary risk** (the *same* branch must
-  also carry `output-artifacts` + `inject-files`). **Resolved favorably (verified in the branch
-  source):** that custom ACL branch carries **both** — the `acl:`/repartitioning/verity/OEM preview
-  features **and** the full `output-artifacts` items + `inject-files`. So **one binary** both
-  repartitions and signs; no build-IC/sign-IC divergence, no rebase. (Its `ToolVersion` is
-  ldflags-injected so no numeric ≥ 0.14 is readable from the tree, but the feature presence the floor
-  proxies for is all there.)
-- **Signer identity in the fingerprint.** Per `2026-06-29-signing.md` §8, the signer identity feeds the
-  per-cell fingerprint. For this backend that identity is **`backend` + `method`** (e.g.
-  `external-signer/ephemeral`). Note the **ephemeral** method is intentionally **non-reproducible** (a fresh
-  cert per build), so signed *bytes* are not stamped for reproducibility; the fingerprint tracks the
-  *signing configuration*, not the signature bytes (consistent with the §9 non-repro stance).
+- **IC version floor:** the design needs an IC that provides the `output-artifacts` + `inject-files`
+  preview features (the signing extract pass does no package ops, so it needs only those). The
+  toolchain container tailor drives must provide them.
+- **Signer identity in the fingerprint:** per `2026-06-29-signing.md` §8, the signer identity feeds
+  the per-cell fingerprint — here `backend` + `method`. The **ephemeral** method is intentionally
+  **non-reproducible** (fresh cert per build), so the fingerprint tracks the *signing configuration*,
+  not the signature bytes.
 - **No host sudo:** the janitor normalizes IC's root-owned staging **before** the host sign step, so
-  `external-signer` runs unprivileged (`2026-06-29-signing.md` §7.7 / §9). The IC passes run in the
-  toolchain container as usual.
+  the signer runs unprivileged (`2026-06-29-signing.md` §7.7 / §9). The IC passes run in the toolchain
+  container as usual.
 - **tools-dir / build-dir isolation:** unchanged — `buildDirBase` off `/`, tools-dir isolation so IC
   cleanup can't reach host root (the wipe class of bug).
 - **ca.pem publication:** to `<output_dir>/<slug>.ca_cert.pem` (never into the swept staging dir), the
   enrollment artifact for the (deferred) Secure Boot boot test.
-- **Pinned signer for provenance.** Since org-trust is the whole premise, the pipeline must **pin a
-  specific `external-signer` version** (acquired from its internal feed) rather than tracking latest —
-  provenance/reproducibility of the signing tool itself. tailor only preflights presence (OQ3); the
-  pin is a pipeline responsibility, but the design calls it out as required for a trusted build.
+- **Pinned signer:** where reproducibility/provenance matter, the environment should pin a specific
+  signer version rather than track latest. tailor only preflights presence; the pin is an environment
+  responsibility.
 
-## 9. Correctness bar — myimage ephemeral e2e
+## 9. Correctness bar
 
 "Fully works" =:
-
-1. `tailor build myimage --cell <slug>` with `signing: myimage-ephemeral` runs extract → `external-signer
-   sign-artifacts` (ephemeral) → `inject-files` → fixed-VPC VHD, and emits `<slug>.ca_cert.pem`.
+1. `tailor build <image> --cell <slug>` with an ephemeral signing profile runs extract → sign →
+   `inject-files` → the requested disk format, and emits `<slug>.ca_cert.pem`.
 2. The signed artifacts verify against the published cert: UKI/shim/bootloader are Authenticode-signed;
    the verity root hash carries a detached signature (when in the item set).
-3. Runs on the arm64 build VM, host-sudo-free, with the IC binary from the **custom ACL IC branch**
-   (confirmed to carry both repartitioning and `output-artifacts`/`inject-files` — §8).
-4. (Deferred, test-wiring) enroll `ca.pem` into an OVMF `db` and boot under QEMU Secure Boot.
+3. Host-sudo-free, with a toolchain IC that provides `output-artifacts`/`inject-files`.
+4. (Deferred, test-wiring) enroll the cert into a firmware `db` and boot under Secure Boot.
 
 ## 10. Implementation plan / milestones
 
-- **P1 — config + backend surface.** Add `external-signer` to `SigningBackend` + `method`/`items`/`remote-service`
-  fields to `SigningProfile`; extend `validate` and the `preflight_profile` capability checks
-  (`external-signer` + ephemeral host deps). *(config + preflight; no execution — does not touch the §6
-  principle, so cleared to start ahead of Paco's review.)*
+- **P1 — config + backend surface.** Add the delegating backend to `SigningBackend` +
+  `method`/`items` fields to `SigningProfile`; extend `validate` and the `preflight_profile` capability
+  checks (the signer + its host deps). *(config + preflight; no execution — does not touch the §6
+  principle, cleared to start ahead of the principle sign-off.)*
 - **P2 — extract-pass authoring.** Auto-generate the `output.artifacts` extract config from
-  `profile.items` (§6), wired into the three-pass executor's first pass (raw output). **HOLD until
-  Paco blesses the §6 non-goal supersession** — this is the reversal he needs to sign off.
-- **P3 — `External-signerSigner`.** Implement the `Signer` impl in `tailor-sign` (write `sign-config.yaml`,
-  run `external-signer sign-artifacts`, publish `ca.pem`); register it for `backend: external-signer`.
-- **P4 — myimage ephemeral e2e** (the §9 bar) on the arm64 VM; iterate to green with `peer-session`.
-- **P5 — remote-service seam** (§7) as a follow-up milestone.
+  `profile.items` (§6), wired into the three-pass executor's first pass (raw output). **HOLD until the
+  §6 non-goal supersession is signed off** — the one reversal that needs review.
+- **P3 — the delegating `Signer` impl** in `tailor-sign` (write the signer config, run the signer,
+  publish `ca.pem`); register it for the new backend.
+- **P4 — the ephemeral end-to-end** (the §9 bar).
+- **P5 — external-service seam** (§7) as a follow-up.
 
 ## 11. Open items
 
-**Resolved (verified against the custom ACL IC branch source by `peer-session`, 2026-07-23):**
-
-1. **verity extraction (§5):** IC does **not** auto-emit the verity root hash — it is gated on
-   `verity-hash` ∈ `output.artifacts.items`. → default `items = [ukis, shim, bootloader]`; append
-   `verity-hash` explicitly (or via a `verity: true` profile flag). ✅
-2. **Single-binary floor (§8):** the custom ACL branch carries **both** ACL repartitioning **and**
-   `output-artifacts` + `inject-files` — one binary repartitions *and* signs, no divergence. ✅
-3. **`items` tokens (§5):** exact IC tokens are `ukis`, `uki-addons` (auto with `ukis`; listing it is
-   a hard error), `shim`, `bootloader`, `verity-hash` (kebab). Default set confirmed correct. ✅
-   Inject-files CLI/schema captured in §5 (`--config-file`; top-level `injectFiles:`; in-place on
-   `source`, **no** `unsignedSource`).
-
-**Remaining (non-blocking for the design):**
-
-- **external-signer arm64 host deps:** confirm `pesign`/`certutil`/`openssl` are present (or installable)
-  on the arm64 build VM for ephemeral. *(owner: peer-session; verifying)*
+- **Host deps:** confirm the ephemeral signer's host dependencies are present (or installable) on the
+  target build host.

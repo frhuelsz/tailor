@@ -45,7 +45,7 @@ type=kata, runtime=openvmm
 ```
 
 `container` cells simply **have no `runtime` axis**; `kata` cells do. That is the whole idea, and it
-maps cleanly onto how ACL-style images actually branch.
+maps cleanly onto how sealed/verity distro images actually branch.
 
 ## 3. Config surface
 

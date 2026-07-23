@@ -40,7 +40,7 @@ Trident's `tests/images/builder` resolves base images two ways that land on one 
 
 The image config (`ImageConfig.base_image`) only ever names a `BaseImage`; the bytes are a file on
 disk by the time IC runs. The named base images are a fixed enum: `baremetal`, `core_selinux`,
-`qemu_guest`, `core_arm64`, `minimal`, the `ubuntu_*` and `myimage_*` variants, etc.
+`qemu_guest`, `core_arm64`, `minimal`, the `ubuntu_*` and `appliance_*` variants, etc.
 
 ### 1.2 Why tailor's current `oci` / `azureLinux` base does not fit
 
