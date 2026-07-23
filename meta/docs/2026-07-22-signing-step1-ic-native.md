@@ -97,7 +97,8 @@ it preserves non-external signer environments and the S3 pure-Rust north star (`
 - **OQ2 — `items`: profile declares `items`, default `[ukis, shim, bootloader]`; the emitted
   `inject-files.yaml` is the source of truth for what gets *signed*.** But see §5 — the request set
   (`output.artifacts.items`, an **input** to the extract pass) and the sign set (the emitted manifest)
-  are different phases; verityHash must be *requested* up front, not only detected after. *(Refines
+  are different phases; `verity-hash` must be *requested* up front, not only detected after (confirmed:
+  IC gates it on `items` membership). *(Refines
   downstream's OQ2.)*
 - **OQ3 — binary sourcing: preflight `external-signer` on PATH or a configured path, exactly like
   `openssl`/`sbsign`.** Acquisition (feed download + version pin) is **pipeline plumbing**, not
@@ -119,7 +120,7 @@ signing:
     myimage-ephemeral:
       backend: external-signer         # NEW driver backend (kebab-case, matching existing tokens)
       method: ephemeral           # ephemeral (step 1) | remote-service (§7)
-      items: [ukis, shim, bootloader]   # optional; default this set (+ verityHash when verity-sealed, §5)
+      items: [ukis, shim, bootloader]   # optional; default this set. IC tokens: ukis, uki-addons(auto), shim, bootloader, verity-hash. Add verity-hash only when verity-sealed (§5); never list uki-addons.
       # publishCaCert: <path>     # default <output_dir>/<slug>.ca_cert.pem
       # --- remote-service only (§7): ---
       # remote-service: { clientId, keyVaultName, certificateName, keyCodes: {uki, shim, bootloader, verityHash}, driEmails: [...] }
@@ -137,24 +138,33 @@ Schema notes:
   `method: remote-service`). This is config-shape validation only; presence/capability probing is the build
   preflight.
 
-## 5. `items`: request set vs sign set (the one subtlety to get right)
+## 5. `items`: request set vs sign set (resolved from IC branch source)
 
-`output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*.
-So:
+`output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*
+(confirmed: `artifactsinputoutput.go` gates the verity artifact on `items` membership). So:
 
-- **Request set (input, decided before extract):** `profile.items`, defaulting to
-  `[ukis, shim, bootloader]`. **verityHash must be added to the request set when the image is
-  verity-sealed** — tailor cannot "detect it from the emitted manifest" because the manifest only
-  contains what was requested. tailor stays **config-opaque** (`2026-06-29-signing.md` §8): it does
-  **not** parse the user's `config:` to discover verity. So verity inclusion is either (a) explicit in
-  `profile.items`, or (b) driven by a small declared signal (e.g. a `verity: true` profile flag).
-  **Open item to verify with the `ic` agent:** does IC's `output-artifacts` emit the verity root-hash
-  artifact automatically for a verity-sealed image, or only when `verityHash`/`verity` is in `items`?
-  The answer picks (a) vs (b). Until confirmed, default the request set to `[ukis, shim, bootloader]`
-  and let the profile add `verityHash` explicitly.
+- **Request set (input, decided before extract):** `profile.items`, default **`[ukis, shim,
+  bootloader]`**. The exact IC item tokens (from `outputartifactsitemtype.go`) are: `ukis`,
+  `uki-addons`, `shim`, `bootloader`, `verity-hash`. Two rules:
+  - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is a **hard error**. So the
+    default set does *not* name it.
+  - **`verity-hash` is NOT auto-emitted** — IC extracts the dm-verity root hash **only** when
+    `verity-hash` is in `items` (confirmed against the branch). This vindicates the request-vs-sign
+    split: tailor cannot detect verity from the emitted manifest, because the manifest only contains
+    what was requested. tailor stays config-opaque (doesn't parse the user's `config:`), so verity
+    inclusion is **explicit** — either `verity-hash` in `profile.items`, or a small declared
+    `verity: true` profile flag that tailor expands to append `verity-hash`. **Not auto.**
 - **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. external-signer
   signs the whole manifest; tailor does not re-derive it. This keeps the sign step config-opaque and
   robust to IC adding artifact kinds.
+
+**Inject-files schema/CLI (from the branch, for the P3 wiring):** the inject pass is
+`imagecustomizer inject-files --build-dir <dir> --config-file <inject-files.yaml> --image-file <base>
+--output-image-file <out> --output-image-format <fmt>` (flag is `--config-file`; `--build-dir`
+required). The manifest is a top-level `injectFiles:` list (each entry `partition/source/destination/
+type`) with `previewFeatures: [inject-files]`. **Correction to `2026-06-29-signing.md` / the `Signer`
+port comment:** there is **no `unsignedSource` field** — signing is **in place on `source`**. The
+06-29 `source`/`unsignedSource` wording is outdated and should be updated when the signer lands (P3).
 
 ## 6. output.artifacts authorship — a deliberate, documented change from 06-29
 
@@ -202,11 +212,13 @@ Ship after the ephemeral e2e is green.
   myimage SKU configs use ACL-specific IC surface — an `acl:` config block and related preview features
   (ACL repartitioning / verity re-init / OEM-id) — which **stock IC rejects**. So the toolchain
   container must be built from the **custom IC branch that carries that ACL support**, *not* the
-  generic internal-registry IC drop. This reframes the floor question into a **single-binary risk**: the *same*
-  custom IC branch that adds ACL repartitioning must **also** carry `output-artifacts` + `inject-files`
-  (≥ 0.14), because one binary must both **repartition and sign**. If the ACL branch predates 0.14 or
-  lacks those preview features, build-IC and sign-IC diverge — a real design risk to resolve up front
-  (open item #2).
+  generic internal-registry IC drop. The floor question was a **single-binary risk** (the *same* branch must
+  also carry `output-artifacts` + `inject-files`). **Resolved favorably (verified in the branch
+  source):** that custom ACL branch carries **both** — the `acl:`/repartitioning/verity/OEM preview
+  features **and** the full `output-artifacts` items + `inject-files`. So **one binary** both
+  repartitions and signs; no build-IC/sign-IC divergence, no rebase. (Its `ToolVersion` is
+  ldflags-injected so no numeric ≥ 0.14 is readable from the tree, but the feature presence the floor
+  proxies for is all there.)
 - **Signer identity in the fingerprint.** Per `2026-06-29-signing.md` §8, the signer identity feeds the
   per-cell fingerprint. For this backend that identity is **`backend` + `method`** (e.g.
   `external-signer/ephemeral`). Note the **ephemeral** method is intentionally **non-reproducible** (a fresh
@@ -233,7 +245,7 @@ Ship after the ephemeral e2e is green.
 2. The signed artifacts verify against the published cert: UKI/shim/bootloader are Authenticode-signed;
    the verity root hash carries a detached signature (when in the item set).
 3. Runs on the arm64 build VM, host-sudo-free, with the IC binary from the **custom ACL IC branch**
-   (which must carry both repartitioning and `output-artifacts`/`inject-files` — §8).
+   (confirmed to carry both repartitioning and `output-artifacts`/`inject-files` — §8).
 4. (Deferred, test-wiring) enroll `ca.pem` into an OVMF `db` and boot under QEMU Secure Boot.
 
 ## 10. Implementation plan / milestones
@@ -250,16 +262,21 @@ Ship after the ephemeral e2e is green.
 - **P4 — myimage ephemeral e2e** (the §9 bar) on the arm64 VM; iterate to green with `peer-session`.
 - **P5 — remote-service seam** (§7) as a follow-up milestone.
 
-## 11. Open items (to close before/while implementing)
+## 11. Open items
 
-1. **verityHash extraction (§5):** does IC auto-emit the verity root-hash artifact, or must it be in
-   `output.artifacts.items`? → picks the `items` default behavior. *(verify with `ic`)*
-2. **Toolchain IC branch carries both repartitioning *and* signing (§8):** myimage needs the **custom
-   IC branch** with ACL support (`acl:` config block + repartitioning/verity/OEM preview features) —
-   stock/internal-registry IC rejects those. Confirm that **same** branch also carries `output-artifacts` +
-   `inject-files` (≥ 0.14); if not, build-IC and sign-IC diverge (single-binary risk). *(owner:
-   peer-session + ic)*
-3. **external-signer arm64 host deps:** confirm `pesign`/`certutil`/`openssl` are present (or installable)
-   on the arm64 build VM for ephemeral.
-4. **`items` token names:** confirm IC's exact `output.artifacts.items` tokens (`ukis`, `shim`,
-   `bootloader`, and the verity token) match external-signer's expectations end to end.
+**Resolved (verified against the custom ACL IC branch source by `peer-session`, 2026-07-23):**
+
+1. **verity extraction (§5):** IC does **not** auto-emit the verity root hash — it is gated on
+   `verity-hash` ∈ `output.artifacts.items`. → default `items = [ukis, shim, bootloader]`; append
+   `verity-hash` explicitly (or via a `verity: true` profile flag). ✅
+2. **Single-binary floor (§8):** the custom ACL branch carries **both** ACL repartitioning **and**
+   `output-artifacts` + `inject-files` — one binary repartitions *and* signs, no divergence. ✅
+3. **`items` tokens (§5):** exact IC tokens are `ukis`, `uki-addons` (auto with `ukis`; listing it is
+   a hard error), `shim`, `bootloader`, `verity-hash` (kebab). Default set confirmed correct. ✅
+   Inject-files CLI/schema captured in §5 (`--config-file`; top-level `injectFiles:`; in-place on
+   `source`, **no** `unsignedSource`).
+
+**Remaining (non-blocking for the design):**
+
+- **external-signer arm64 host deps:** confirm `pesign`/`certutil`/`openssl` are present (or installable)
+  on the arm64 build VM for ephemeral. *(owner: peer-session; verifying)*
