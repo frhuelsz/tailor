@@ -1427,7 +1427,7 @@
 <td><code>skip</code></td>
 <td>bool</td>
 <td>no</td>
-<td>Default <code>false</code>. When <code>true</code>, the image is excluded from <strong>bulk</strong> selection — any command run with no image named (<code>build</code>, <code>matrix</code>, <code>slugs</code>, <code>validate</code>, <code>render</code>, <code>export</code>, <code>clean</code>, …), so a pipeline that runs those over all images never picks it up. Build it by naming it explicitly (<code>tailor build &lt;name&gt;</code>); <code>tailor list</code> marks it <code>(skip)</code>. Useful for an experimental config that isn't ready to build in CI.</td>
+<td>Default <code>false</code>. When <code>true</code>, the image is excluded from <strong>bulk</strong> selection — any command run with no image named (<code>build</code>, <code>matrix</code>, <code>slugs</code>, <code>validate</code>, <code>render</code>, <code>export</code>, <code>clean</code>, …), so a pipeline that runs those over all images never picks it up. Build it by naming it explicitly (<code>tailor build &lt;name&gt;</code>); <code>tailor list</code> marks it <code>(skip)</code>. Useful for an experimental config that isn't ready to build in CI. <strong>Also valid in a <code>by-&lt;axis&gt;/&lt;value&gt;.yaml</code> fragment</strong> — there it drops every cell that picks that value from bulk selection, unless the run pins that value (<code>-s &lt;axis&gt;=&lt;value&gt;</code>) or names the cell (<code>--cell &lt;slug&gt;</code>); a non-pinning selector like <code>-s arch=amd64</code> does <em>not</em> resurrect it. Fragment <code>skip</code> merges last-wins (a more-specific fragment may set <code>skip: false</code>).</td>
 </tr>
 <tr>
 <td><code>toolchain</code></td>
