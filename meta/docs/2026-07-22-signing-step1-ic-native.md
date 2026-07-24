@@ -144,9 +144,10 @@ Schema notes:
   **systemd-boot's own EFI binary is not emitted by any current `output.artifacts` item**, so it
   cannot be signed through the IC-native extract → inject flow today. Signing systemd-boot under
   SB-enforcing therefore needs one of:
-  - **(a)** an out-of-band **in-place ESP re-sign** of the systemd-boot EFI after the image is built
-    (i.e. outside the IC-native inject flow) — the fallback the older mount-based signer path provides;
-    or
+  - **(a)** an out-of-band **in-place ESP re-sign** of the systemd-boot EFI after the image is built,
+    outside the IC-native inject flow — concretely: mount the image's ESP (loop-mount the built
+    image), `sbsign` `systemd-boot*.efi` in place, unmount. This is the mechanism the older
+    mount-based signer path provides; or
   - **(b)** a future upstream IC **`systemd-boot` `output.artifacts` item** (does not exist today),
     which would make the systemd-boot chain fully IC-native like the grub chain.
 
