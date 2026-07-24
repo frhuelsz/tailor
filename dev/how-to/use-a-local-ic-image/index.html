@@ -1372,7 +1372,7 @@
 <h1 id="use-a-locally-built-image-customizer-image">Use a locally-built Image Customizer image<a class="headerlink" href="#use-a-locally-built-image-customizer-image" title="Permanent link">&para;</a></h1>
 <p>Sometimes the toolchain (or a tools-dir source) is an image you build <strong>locally</strong> and never push to
 a registry — for example an Image Customizer image with extra host tools layered in, tagged
-<code>acl-imagecustomizer:local</code>. tailor runs such images directly: no registry, no <code>localhost:5000</code>
+<code>my-ic:local</code>. tailor runs such images directly: no registry, no <code>localhost:5000</code>
 workaround.</p>
 <h2 id="1-reference-the-local-image">1. Reference the local image<a class="headerlink" href="#1-reference-the-local-image" title="Permanent link">&para;</a></h2>
 <p>Name the local image in <code>toolchains:</code> (or <code>toolsDirSources:</code>) exactly as it is tagged locally, and
@@ -1384,14 +1384,14 @@ leave <code>pull</code> at its default (<code>missing</code>) or set it to <code
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-ic</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">entries</span><span class="p">:</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-ic</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">      </span><span class="nt">container</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acl-imagecustomizer</span><span class="w">      </span><span class="c1"># a local `docker images` tag, not a registry path</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">      </span><span class="nt">container</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-ic</span><span class="w">      </span><span class="c1"># a local `docker images` tag, not a registry path</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">pull</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">missing</span><span class="w">                        </span><span class="c1"># missing (default) uses the local image when present</span>
 </code></pre></div>
 <p>Build as usual:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>tailor<span class="w"> </span>build
 </code></pre></div>
-<p>Under <code>pull: missing</code>, tailor inspects the local daemon, finds <code>acl-imagecustomizer:local</code>, and runs
+<p>Under <code>pull: missing</code>, tailor inspects the local daemon, finds <code>my-ic:local</code>, and runs
 it <strong>without a registry pull</strong>. Under <code>pull: never</code>, tailor requires the image to be present locally
 (or a locked digest) and never contacts a registry — use it to guarantee an offline build.</p>
 <h2 id="2-how-the-image-is-identified-and-whether-it-locks">2. How the image is identified (and whether it locks)<a class="headerlink" href="#2-how-the-image-is-identified-and-whether-it-locks" title="Permanent link">&para;</a></h2>
