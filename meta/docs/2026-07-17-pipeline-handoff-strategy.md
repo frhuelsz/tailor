@@ -2,19 +2,22 @@
 
 > **Status:** Proposed · _2026-07-17_
 >
-> Constraint (decided): tailor is currently an **unofficial, personal skunkworks project** (personal
-> GitHub) — **not** an org-owned, org-built, trust-chained tool. So there is **no provenance/trust
-> chain that would let it run inside an official signed release pipeline** — not as a dependency, a
-> downloaded binary, or a container step. tailor therefore runs **only in dev and PR-gate CI**, and
-> the official pipeline consumes **only artifacts committed to the repo and approved through normal
-> PR review** — their trust derives from a human reviewing the committed *output*, not from tailor's
-> provenance. This doc frames tailor as a **build-input generator** whose output is reviewed like
-> source, and ranks the artifact formats it can emit. It generalizes the export proposal
+> Constraint (decided): tailor is currently an **personal project** (personal
+> GitHub) — **not** an org-owned, org-built, trust-chained tool. So there is
+> **no provenance/trust chain that would let it run inside an official signed
+> release pipeline** — not as a dependency, a downloaded binary, or a container
+> step. tailor therefore runs **only in dev and PR-gate CI**, and the official
+> pipeline consumes **only artifacts committed to the repo and approved through
+> normal PR review** — their trust derives from a human reviewing the committed
+> *output*, not from tailor's provenance. This doc frames tailor as a
+> **build-input generator** whose output is reviewed like source, and ranks the
+> artifact formats it can emit. It generalizes the export proposal
 > (`2026-07-16-render-ahead-export.md`), which is one such format.
 >
-> **Transitional by design.** This constraint is expected to relax if/when tailor gains an official
-> trust chain; the strategy is deliberately a **bridge** (see §7), not a permanent architecture that
-> would be painful to unwind once tailor can run in pipelines directly.
+> **Transitional by design.** This constraint is expected to relax if/when
+> tailor gains an official trust chain; the strategy is deliberately a
+> **bridge** (see §7), not a permanent architecture that would be painful to
+> unwind once tailor can run in pipelines directly.
 
 ## 1. The reframe — where tailor runs vs what the pipeline consumes
 
