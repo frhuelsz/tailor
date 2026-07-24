@@ -9,6 +9,36 @@
 > to the executor or the `Signer` port**. Scope of this design: a signed `tailor build` produces a
 > signed disk image plus a published enrollment certificate, using a self-signed (ephemeral) key.
 
+## 0. Delta from what is checked in
+
+The checked-in signing design (`2026-06-29-signing.md`) and code (`crates/tailor-core/src/signing.rs`
+foundation + the `Signer` port in `ports.rs` + the `SigningBackend` enum in
+`tailor-config/src/schema.rs`) already give us the 3-pass model, the `Signer`/`SigningPlan` port, and
+key-source backends (`local-test-ca` / `keypair` / `azure-key-vault`) — but only as **config +
+preflight** (no execution). This design adds four things and changes one principle; **everything else
+is reused unchanged**:
+
+1. **A delegating "external signer" backend (new).** The checked-in `SigningBackend` variants model a
+   **key source**, assuming tailor itself drives signing (loop `openssl`/`sbsign` per artifact). This
+   design adds a backend that **delegates the whole host-side sign step** to an external signing tool
+   (a *driver* axis), with `method: ephemeral | <external-service>` sub-selecting the tool's key
+   source. See §2.1 (two axes) and §2.2 (the tool contract). The built-in backend stays as a peer.
+2. **`items` request-set model + the `bootloader`/`verity-hash` rules (new).** The checked-in design
+   didn't specify what to extract; this pins the default `[ukis, shim]`, the request-set-vs-sign-set
+   split, `bootloader` as opt-in (it hard-errors on a grub-less ESP), and explicit `verity-hash`
+   (§5).
+3. **IC preview-feature floor + single-binary constraint (new).** States the `output-artifacts` +
+   `inject-files` floor and that one IC binary must carry all needed preview features (§8).
+4. **`output.artifacts` auto-authoring — the one principle change (§6).** `2026-06-29-signing.md` §3
+   made it a **non-goal** for tailor to author `output.artifacts` (the user was to write it). This
+   design **supersedes that**: for a signed build tailor auto-authors the extract directives for a
+   dedicated extract pass. This is the only reversal and is flagged for review (gates milestone P2).
+
+**Reused unchanged:** the 3-pass executor (`§5`), the `Signer` trait + `SigningPlan`/`SigningResult`
+port granularity, `ca.pem` publication, the no-sudo / tools-dir-isolation invariants, and the
+fingerprint/lockfile treatment. No port or executor signature changes — the new backend is a drop-in
+`Signer` impl.
+
 ## 1. The mechanism
 
 Signing is **deferred** — not baked into the customize run. It slots between two IC invocations using
@@ -79,6 +109,54 @@ The config models this as a new backend whose `method` sub-selects the tool's ke
 Keep all of them; the delegating backend is one more peer. We do **not** remove the built-in backend —
 it preserves environments without the external signer and the S3 pure-Rust north star
 (`2026-06-29-signing.md` §11).
+
+### 2.2 The external signer contract (what "a delegating signer" must expose)
+
+The delegating backend does not target a specific product — it targets any **signing tool that
+exposes this contract**. It is a small, deliberately generic interface that maps cleanly onto the
+`Signer` port and onto IC's `output-artifacts` / `inject-files` shape:
+
+1. **Invocation — one "sign these artifacts" command.** The tool exposes a single non-interactive
+   subcommand (conceptually `sign-artifacts`) that accepts:
+   - a **work/build dir** (scratch),
+   - a **signer-config file** (see (4)),
+   - the **artifacts path** — the directory IC's extract pass populated, and
+   - for the ephemeral method, an **output path for the public key(s)/cert**.
+2. **Discovery — the tool reads IC's emitted manifest, not tailor's opinion.** It signs the boot
+   artifacts present in the artifacts dir as described by the `inject-files.yaml` IC emitted (UKI(s),
+   UKI addons, shim, the boot loader, and the dm-verity root hash when extracted). tailor does not
+   enumerate them; the manifest is the source of truth (§5, sign set).
+3. **In-place signing.** The tool writes signatures **back into the artifacts dir in place**, so the
+   subsequent IC `inject-files` pass injects the now-signed bytes into the image. No image mounting.
+   Signature formats by artifact kind: **Authenticode** (PE) for UKI / UKI-addons / shim / boot
+   loader; **detached PKCS#7** for the dm-verity root hash.
+4. **Key source selected in the signer-config file — at least two methods:**
+   - **ephemeral** — generate a self-signed cert on the fly, sign, destroy the private key, and emit
+     the **public cert** to the requested output path (for Secure Boot `db` enrollment). Config is
+     just the public-key output location.
+   - **external/remote service** (§7) — sign against a stable enterprise chain held in a secret store;
+     config carries an identity, the key/cert references, and per-artifact-kind key selectors. Emits
+     no enrollment cert.
+5. **Exit contract.** Non-zero exit on any signing failure; the signed artifacts and (ephemeral) the
+   public cert are the only outputs tailor consumes.
+
+**How the `Signer` port maps onto this contract** (the delegating impl in `tailor-sign`):
+
+| `Signer` / `SigningPlan` | external-signer backend behavior |
+| --- | --- |
+| `preflight()` | tool binary resolvable (PATH/configured) + its host deps present; config-shape valid |
+| `sign(plan)` | render a signer-config file (method = `ephemeral`/external; ephemeral public-key out = a `plan.leaf_id`-scoped dir), then invoke the tool's `sign-artifacts` with `--artifacts-path plan.artifacts_dir` and the build dir |
+| `plan.inject_files_yaml` | the manifest the tool reads to know what to sign (2) — tailor passes/points at it, stays opaque to its contents |
+| `plan.artifacts_dir` | the tool's artifacts path (signed in place) |
+| `plan.leaf_id` | scopes the per-cell signer-config + ephemeral key output so parallel cells never share a key |
+| `plan.ca_cert_dest` / `SigningResult.published_ca_cert` | ephemeral: the emitted public cert, copied to `<output_dir>/<slug>.ca_cert.pem`; external service: `None` |
+
+Because the contract is exactly "sign the IC-extracted artifact set in place, keyed by the emitted
+manifest, with an ephemeral or a remote key source," it slots into the existing host-side sign step of
+the 3-pass executor with **no port change** — the tool's process invocation replaces the built-in
+`openssl`/`sbsign` loop, nothing else moves. The modern IC-native signing tools already expose this
+contract (that is what makes the IC-native deferred flow tool-agnostic); tailor targets the contract,
+not any one implementation.
 
 ## 3. Resolved design decisions
 
