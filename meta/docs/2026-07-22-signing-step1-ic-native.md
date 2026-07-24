@@ -5,9 +5,10 @@
 > Complete, implementable design for how tailor produces Secure Boot–signed images. tailor drives
 > **IC-native deferred signing** — an Image Customizer `output-artifacts` extract pass → a host-side
 > sign step → an IC `inject-files` pass. This is exactly tailor's existing three-pass signing model
-> (`2026-06-29-signing.md`), so the signing tool plugs in as a **`Signer` backend** with **no change
-> to the executor or the `Signer` port**. Scope of this design: a signed `tailor build` produces a
-> signed disk image plus a published enrollment certificate, using a self-signed (ephemeral) key.
+> (`2026-06-29-signing.md`), so an IC-native signing tool (**`ic-sign`** in this doc) plugs in as a
+> **`Signer` backend** with **no change to the executor or the `Signer` port**. Scope of this design:
+> a signed `tailor build` produces a signed disk image plus a published enrollment certificate, using
+> a self-signed (ephemeral) key.
 
 ## 0. Delta from what is checked in
 
@@ -18,10 +19,10 @@ key-source backends (`local-test-ca` / `keypair` / `azure-key-vault`) — but on
 preflight** (no execution). This design adds four things and changes one principle; **everything else
 is reused unchanged**:
 
-1. **A delegating "external signer" backend (new).** The checked-in `SigningBackend` variants model a
+1. **An `ic-sign` delegating backend (new).** The checked-in `SigningBackend` variants model a
    **key source**, assuming tailor itself drives signing (loop `openssl`/`sbsign` per artifact). This
-   design adds a backend that **delegates the whole host-side sign step** to an external signing tool
-   (a *driver* axis), with `method: ephemeral | <external-service>` sub-selecting the tool's key
+   design adds a backend that **delegates the whole host-side sign step** to ic-sign (an IC-native signing tool)
+   (a *driver* axis), with `method: ephemeral | service` sub-selecting the tool's key
    source. See §2.1 (two axes) and §2.2 (the tool contract). The built-in backend stays as a peer.
 2. **`items` request-set model + the `bootloader`/`verity-hash` rules (new).** The checked-in design
    didn't specify what to extract; this pins the default `[ukis, shim]`, the request-set-vs-sign-set
@@ -47,7 +48,7 @@ IC's own preview features `output-artifacts` + `inject-files`:
 ```
 1. IC customize (extract pass)   config: previewFeatures:[output-artifacts,…] + output.artifacts:{items, path}, output raw
       → writes the UNSIGNED boot artifacts into <artifacts> + an inject-files.yaml manifest   (no package ops → no --tools-dir)
-2. host-side sign (in place)     an external signer signs the extracted artifacts, keyed by the emitted manifest
+2. host-side sign (in place)     ic-sign signs the extracted artifacts, keyed by the emitted manifest
 3. IC inject-files               inject-files --config-file <artifacts>/inject-files.yaml --image-file <unsigned.raw> --output-image-file <signed.raw> --output-image-format raw
       → then convert raw → the requested disk format
 ```
@@ -60,7 +61,7 @@ operations**, so it needs no tools-dir. The signer occupies the middle step and 
 - **ephemeral** — a self-signed certificate generated on the fly, private key destroyed after signing;
   the public certificate is published for Secure Boot `db` enrollment. Dev/test (unique cert per
   build). This design's scope.
-- **external service** — a remote/enterprise signing service against a stable certificate chain, for
+- **service** — a remote signing service against a stable certificate chain, for
   production. Modeled as a seam (§7); not built here.
 
 ## 2. Reconciliation: the signer is a `Signer` backend; the 3-pass executor is unchanged
@@ -77,13 +78,13 @@ trait Signer {
 ```
 
 `SigningPlan` is **artifact-set granular** — it hands the signer the whole `inject-files.yaml` + the
-`artifacts_dir`, which is the natural unit for a signer that signs the extracted set in one pass. So a
-delegating **external-signer backend is a drop-in `Signer` impl**:
+`artifacts_dir`, which is the natural unit for a signer that signs the extracted set in one pass. So
+the **`ic-sign` backend is a drop-in `Signer` impl**:
 
-- **`preflight()`** — the signer binary is present (PATH or configured path) and its host dependencies
-  are available.
-- **`sign(plan)`** — write the signer's config (pointing at `plan.artifacts_dir`, key-source method,
-  and a `plan.leaf_id`-scoped output dir), invoke the signer over the artifacts, and return
+- **`preflight()`** — the `ic-sign` binary is present (PATH or configured path) and its host
+  dependencies are available.
+- **`sign(plan)`** — write `ic-sign`'s config (pointing at `plan.artifacts_dir`, key-source method,
+  and a `plan.leaf_id`-scoped output dir), invoke `ic-sign` over the artifacts, and return
   `SigningResult { published_ca_cert }` (the enrollment cert, for ephemeral) or `None`.
 
 So the **three-pass executor (`2026-06-29-signing.md` §5) is unchanged**: the signer occupies the
@@ -95,38 +96,39 @@ of the port.
 ### 2.1 Two axes: driver vs key-source
 
 The existing `SigningBackend` enum (`local-test-ca` / `keypair` / `azure-key-vault`) models a **key
-source** on the assumption tailor itself is the signing driver. A delegating external signer adds a
+source** on the assumption tailor itself is the signing driver. The `ic-sign` backend adds a
 **driver** axis — tailor hands the whole sign step to an external tool that has its own key sources.
 The config models this as a new backend whose `method` sub-selects the tool's key source:
 
 | Concept | tailor-driven | delegated-signer |
 | --- | --- | --- |
-| driver | tailor loops `openssl`/`sbsign` per artifact | delegate to the external signer |
+| driver | tailor loops `openssl`/`sbsign` per artifact | delegate to `ic-sign` |
 | ephemeral key | `backend: local-test-ca` | `method: ephemeral` |
 | BYO key | `backend: keypair` | (tool-dependent) |
-| remote/prod | `backend: azure-key-vault` (future) | `method: <external-service>` |
+| remote/prod | `backend: azure-key-vault` (future) | `method: service` |
 
 Keep all of them; the delegating backend is one more peer. We do **not** remove the built-in backend —
-it preserves environments without the external signer and the S3 pure-Rust north star
+it preserves environments without `ic-sign` and the S3 pure-Rust north star
 (`2026-06-29-signing.md` §11).
 
-### 2.2 The external signer contract (what "a delegating signer" must expose)
+### 2.2 The `ic-sign` contract (what the delegating backend integrates against)
 
-The delegating backend does not target a specific product — it targets any **signing tool that
-exposes this contract**. It is a small, deliberately generic interface that maps cleanly onto the
-`Signer` port and onto IC's `output-artifacts` / `inject-files` shape:
+The `ic-sign` backend integrates against a small, well-defined tool interface — the contract `ic-sign`
+exposes. tailor targets that **contract**, so any signing tool exposing it works; `ic-sign` is the
+concrete IC-native tool this design assumes. The contract maps cleanly onto the `Signer` port and onto
+IC's `output-artifacts` / `inject-files` shape:
 
-1. **Invocation — one "sign these artifacts" command.** The tool exposes a single non-interactive
+1. **Invocation — one "sign these artifacts" command.** `ic-sign` exposes a single non-interactive
    subcommand (conceptually `sign-artifacts`) that accepts:
    - a **work/build dir** (scratch),
    - a **signer-config file** (see (4)),
    - the **artifacts path** — the directory IC's extract pass populated, and
    - for the ephemeral method, an **output path for the public key(s)/cert**.
-2. **Discovery — the tool reads IC's emitted manifest, not tailor's opinion.** It signs the boot
+2. **Discovery — `ic-sign` reads IC's emitted manifest, not tailor's opinion.** It signs the boot
    artifacts present in the artifacts dir as described by the `inject-files.yaml` IC emitted (UKI(s),
    UKI addons, shim, the boot loader, and the dm-verity root hash when extracted). tailor does not
    enumerate them; the manifest is the source of truth (§5, sign set).
-3. **In-place signing.** The tool writes signatures **back into the artifacts dir in place**, so the
+3. **In-place signing.** `ic-sign` writes signatures **back into the artifacts dir in place**, so the
    subsequent IC `inject-files` pass injects the now-signed bytes into the image. No image mounting.
    Signature formats by artifact kind: **Authenticode** (PE) for UKI / UKI-addons / shim / boot
    loader; **detached PKCS#7** for the dm-verity root hash.
@@ -134,7 +136,7 @@ exposes this contract**. It is a small, deliberately generic interface that maps
    - **ephemeral** — generate a self-signed cert on the fly, sign, destroy the private key, and emit
      the **public cert** to the requested output path (for Secure Boot `db` enrollment). Config is
      just the public-key output location.
-   - **external/remote service** (§7) — sign against a stable enterprise chain held in a secret store;
+   - **service** (§7) — sign against a stable certificate chain held in a secret store;
      config carries an identity, the key/cert references, and per-artifact-kind key selectors. Emits
      no enrollment cert.
 5. **Exit contract.** Non-zero exit on any signing failure; the signed artifacts and (ephemeral) the
@@ -142,26 +144,26 @@ exposes this contract**. It is a small, deliberately generic interface that maps
 
 **How the `Signer` port maps onto this contract** (the delegating impl in `tailor-sign`):
 
-| `Signer` / `SigningPlan` | external-signer backend behavior |
+| `Signer` / `SigningPlan` | ic-sign backend behavior |
 | --- | --- |
 | `preflight()` | tool binary resolvable (PATH/configured) + its host deps present; config-shape valid |
 | `sign(plan)` | render a signer-config file (method = `ephemeral`/external; ephemeral public-key out = a `plan.leaf_id`-scoped dir), then invoke the tool's `sign-artifacts` with `--artifacts-path plan.artifacts_dir` and the build dir |
 | `plan.inject_files_yaml` | the manifest the tool reads to know what to sign (2) — tailor passes/points at it, stays opaque to its contents |
 | `plan.artifacts_dir` | the tool's artifacts path (signed in place) |
 | `plan.leaf_id` | scopes the per-cell signer-config + ephemeral key output so parallel cells never share a key |
-| `plan.ca_cert_dest` / `SigningResult.published_ca_cert` | ephemeral: the emitted public cert, copied to `<output_dir>/<slug>.ca_cert.pem`; external service: `None` |
+| `plan.ca_cert_dest` / `SigningResult.published_ca_cert` | ephemeral: the emitted public cert, copied to `<output_dir>/<slug>.ca_cert.pem`; service: `None` |
 
 Because the contract is exactly "sign the IC-extracted artifact set in place, keyed by the emitted
 manifest, with an ephemeral or a remote key source," it slots into the existing host-side sign step of
-the 3-pass executor with **no port change** — the tool's process invocation replaces the built-in
-`openssl`/`sbsign` loop, nothing else moves. The modern IC-native signing tools already expose this
-contract (that is what makes the IC-native deferred flow tool-agnostic); tailor targets the contract,
-not any one implementation.
+the 3-pass executor with **no port change** — `ic-sign`'s process invocation replaces the built-in
+`openssl`/`sbsign` loop, nothing else moves. `ic-sign` exposes exactly this contract; because tailor
+integrates against the contract (not `ic-sign`'s internals), any other tool exposing the same
+interface would drop in unchanged.
 
 ## 3. Resolved design decisions
 
-- **Backend split:** add the delegating external-signer as a first-class `Signer` backend; **keep**
-  the built-in `openssl`+`sbsign` backend. The external signer is the default where it is the
+- **Backend split:** add the `ic-sign` as a first-class `Signer` backend; **keep**
+  the built-in `openssl`+`sbsign` backend. `ic-sign` is the default where it is the
   sanctioned path; the built-in stays as fallback and for the pure-Rust goal.
 - **`items` default `[ukis, shim]`** (universally safe — see §5; `bootloader` is opt-in because it
   hard-errors on a grub-less ESP); the emitted `inject-files.yaml` is the source of truth for what
@@ -169,8 +171,8 @@ not any one implementation.
 - **Binary sourcing:** preflight the signer on PATH or a configured path, exactly like
   `openssl`/`sbsign`. Acquisition (download + version pin) is environment/pipeline plumbing, not
   tailor's job — keeps tailor environment-agnostic.
-- **Key source:** `method: ephemeral | <external-service>`; ephemeral is this design, the external
-  service is the documented seam (§7).
+- **Key source:** `method: ephemeral | service`; ephemeral is this design, the
+  service method is the documented seam (§7).
 
 ## 4. Config surface
 
@@ -182,8 +184,8 @@ signing:
   default: secureboot-ephemeral
   profiles:
     secureboot-ephemeral:
-      backend: external-signer    # NEW delegating driver backend
-      method: ephemeral           # ephemeral | <external-service> (§7)
+      backend: ic-sign    # NEW delegating driver backend
+      method: ephemeral           # ephemeral | service (§7)
       items: [ukis, shim]         # optional; default. Add `bootloader` for a grub chain (§5). See §5 for the item tokens.
       # bootloader: grub          # optional chain hint → appends `bootloader` (grub-only; §5)
       # publishCaCert: <path>     # default <output_dir>/<slug>.ca_cert.pem
@@ -196,9 +198,9 @@ signing: secureboot-ephemeral
 
 Schema notes:
 - the delegating backend is a new `SigningBackend` variant; `method` (enum) is required for it.
-  `items` optional (§5). Any external-service sub-config is required only for that method.
+  `items` optional (§5). Any service sub-config is required only for that method.
 - `SigningProfile::validate` gains the new arm (method present; service fields complete when the
-  external-service method is chosen). Config-shape validation only; presence/capability probing is the
+  service method is chosen). Config-shape validation only; presence/capability probing is the
   build preflight.
 
 ## 5. `items`: request set vs sign set
@@ -275,10 +277,11 @@ silent surprise, if the user's `config:` already contains an `output.artifacts` 
 cell, tailor **errors** ("remove `output.artifacts`; tailor authors it for signed builds") rather than
 silently overriding or merging. This is the one intentional principle change, flagged for review.
 
-## 7. External-service seam (next milestone)
+## 7. Service seam (next milestone)
 
-An external production signing service reuses the same delegating `Signer`, differing only in the
-signer config's key-source block and `preflight()`:
+An `ic-sign` production run against a remote signing service reuses the same `ic-sign`
+backend, differing only in `ic-sign`'s key-source block (`method: service`) and
+`preflight()`:
 - **Config:** an environment-specific service sub-object (identity, key/cert references, per-item key
   codes). Supplied via the environment, **never committed to a workspace**.
 - **No enrollment cert:** a stable production chain means `SigningResult.published_ca_cert` is `None`.
@@ -332,7 +335,7 @@ Ship after the ephemeral path is green.
 - **P3 — the delegating `Signer` impl** in `tailor-sign` (write the signer config, run the signer,
   publish `ca.pem`); register it for the new backend.
 - **P4 — the ephemeral end-to-end** (the §9 bar).
-- **P5 — external-service seam** (§7) as a follow-up.
+- **P5 — service seam** (§7) as a follow-up.
 
 ## 11. Open items
 
