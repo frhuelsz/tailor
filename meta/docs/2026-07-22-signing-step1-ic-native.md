@@ -151,9 +151,15 @@ Schema notes:
   - **(b)** a future upstream IC **`systemd-boot` `output.artifacts` item** (does not exist today),
     which would make the systemd-boot chain fully IC-native like the grub chain.
 
-  tailor's default stays `[ukis, shim, bootloader]` (grub is the common case; `bootloader` is simply a
-  no-op when grub is absent). A systemd-boot target should set `items: [ukis, shim]` and, if it must
-  sign systemd-boot itself, rely on **(a)** until **(b)** lands.
+  tailor's default stays `[ukis, shim, bootloader]` (grub is the common case). A systemd-boot target
+  should set `items: [ukis, shim]` and, if it must sign systemd-boot itself, rely on **(a)** until
+  **(b)** lands. **Caveat (unverified — see open items):** keeping `bootloader` in the default is only
+  safe if IC's `bootloader` item **silently skips** (emits nothing) on a grub-less ESP. If IC instead
+  **hard-errors** when no grub EFI is present, then `[ukis, shim, bootloader]` cannot be the universal
+  default — a grub-less target would then be *required* to drop `bootloader` (i.e. `items: [ukis,
+  shim]`), and tailor should either default per-detected-chain or make dropping `bootloader` the
+  documented rule for systemd-boot. Confirm the skip-vs-error behavior empirically before blessing the
+  default.
 - **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. The signer
   signs the whole manifest; tailor does not re-derive it. This keeps the sign step config-opaque and
   robust to IC adding artifact kinds.
@@ -244,5 +250,9 @@ Ship after the ephemeral path is green.
 
 ## 11. Open items
 
+- **`bootloader` on a grub-less ESP — skip or error?** Confirm empirically whether IC's `bootloader`
+  `output.artifacts` item silently skips (emits nothing) or hard-errors when there is no grub EFI. If
+  it errors, `[ukis, shim, bootloader]` cannot be the universal default (§5) — a systemd-boot target
+  must drop `bootloader`, and tailor should default per-chain or document the drop as the rule.
 - **Host deps:** confirm the ephemeral signer's host dependencies are present (or installable) on the
   host running tailor.
