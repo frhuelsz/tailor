@@ -5,7 +5,7 @@ named source in `tailor.yaml`:
 
 ```yaml
 toolsDirSources:
-  - name: acl
+  - name: base
     container: mcr.microsoft.com/azurelinux/base/core
     tag: "3.0"
 ```
@@ -14,7 +14,7 @@ Then opt in from the image:
 
 ```yaml
 toolsDir:
-  source: acl
+  source: base
 
 config:
   previewFeatures:

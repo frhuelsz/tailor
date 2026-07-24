@@ -283,7 +283,7 @@ is not a license to ignore the rule in new code.
 
 ## Architecture & structural soundness
 
-This workspace is a collection of minimal binaries for Azure Linux (ACL)
+This workspace is a collection of minimal binaries for Azure Linux
 system management. Each binary is a focused tool that does one thing well.
 
 ### Layering rules

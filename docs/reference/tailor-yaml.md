@@ -106,7 +106,7 @@ and is bound read-only by default. tailor never passes `--tools-dir /`.
 
 ```yaml
 toolsDirSources:
-  - name: acl
+  - name: base
     container: mcr.microsoft.com/azurelinux/base/core
     tag: "3.0"
     pull: missing

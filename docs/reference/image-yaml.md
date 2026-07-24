@@ -34,7 +34,7 @@ images without a `RepoDigest` run by image `Id` and are not lockable. The inline
 
 ```yaml
 toolsDir:
-  source: acl
+  source: base
 
 config:
   previewFeatures:

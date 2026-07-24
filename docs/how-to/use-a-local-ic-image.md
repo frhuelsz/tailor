@@ -2,7 +2,7 @@
 
 Sometimes the toolchain (or a tools-dir source) is an image you build **locally** and never push to
 a registry — for example an Image Customizer image with extra host tools layered in, tagged
-`acl-imagecustomizer:local`. tailor runs such images directly: no registry, no `localhost:5000`
+`my-ic:local`. tailor runs such images directly: no registry, no `localhost:5000`
 workaround.
 
 ## 1. Reference the local image
@@ -18,7 +18,7 @@ toolchains:
   default: local-ic
   entries:
     - name: local-ic
-      container: acl-imagecustomizer      # a local `docker images` tag, not a registry path
+      container: my-ic      # a local `docker images` tag, not a registry path
       tag: local
       pull: missing                        # missing (default) uses the local image when present
 ```
@@ -29,7 +29,7 @@ Build as usual:
 tailor build
 ```
 
-Under `pull: missing`, tailor inspects the local daemon, finds `acl-imagecustomizer:local`, and runs
+Under `pull: missing`, tailor inspects the local daemon, finds `my-ic:local`, and runs
 it **without a registry pull**. Under `pull: never`, tailor requires the image to be present locally
 (or a locked digest) and never contacts a registry — use it to guarantee an offline build.
 
