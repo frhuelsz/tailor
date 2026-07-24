@@ -85,8 +85,9 @@ it preserves environments without the external signer and the S3 pure-Rust north
 - **Backend split:** add the delegating external-signer as a first-class `Signer` backend; **keep**
   the built-in `openssl`+`sbsign` backend. The external signer is the default where it is the
   sanctioned path; the built-in stays as fallback and for the pure-Rust goal.
-- **`items` default `[ukis, shim, bootloader]`;** the emitted `inject-files.yaml` is the source of
-  truth for what gets *signed*. But the request set and sign set are different phases — see §5.
+- **`items` default `[ukis, shim]`** (universally safe — see §5; `bootloader` is opt-in because it
+  hard-errors on a grub-less ESP); the emitted `inject-files.yaml` is the source of truth for what
+  gets *signed*. But the request set and sign set are different phases — see §5.
 - **Binary sourcing:** preflight the signer on PATH or a configured path, exactly like
   `openssl`/`sbsign`. Acquisition (download + version pin) is environment/pipeline plumbing, not
   tailor's job — keeps tailor environment-agnostic.
@@ -105,7 +106,8 @@ signing:
     secureboot-ephemeral:
       backend: external-signer    # NEW delegating driver backend
       method: ephemeral           # ephemeral | <external-service> (§7)
-      items: [ukis, shim, bootloader]   # optional; default this set. See §5 for the item tokens.
+      items: [ukis, shim]         # optional; default. Add `bootloader` for a grub chain (§5). See §5 for the item tokens.
+      # bootloader: grub          # optional chain hint → appends `bootloader` (grub-only; §5)
       # publishCaCert: <path>     # default <output_dir>/<slug>.ca_cert.pem
 ```
 
@@ -125,8 +127,9 @@ Schema notes:
 
 `output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*. So:
 
-- **Request set (input, decided before extract):** `profile.items`, default **`[ukis, shim,
-  bootloader]`**. The IC item tokens are: `ukis`, `uki-addons`, `shim`, `bootloader`, `verity-hash`.
+- **Request set (input, decided before extract):** `profile.items`, default **`[ukis, shim]`** — the
+  **universally safe** set (see the `bootloader` rule for why it is not `[ukis, shim, bootloader]`).
+  The IC item tokens are: `ukis`, `uki-addons`, `shim`, `bootloader`, `verity-hash`.
   Three rules:
   - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is an error, so the default
     set does not name it.
@@ -135,15 +138,22 @@ Schema notes:
     only contains what was requested). tailor stays config-opaque (it does not parse the user's
     `config:`), so verity inclusion is **explicit**: `verity-hash` in `profile.items`, or a small
     declared `verity: true` profile flag that tailor expands to append `verity-hash`. Not auto.
-  - **`bootloader` is grub-specific** — the IC `bootloader` item extracts the grub EFI (`grub*.efi`).
-    It therefore covers the boot loader for a grub-based chain, but emits nothing for a chain that has
-    no grub. See the coverage note below.
+  - **`bootloader` is grub-specific and hard-errors without grub — so it is opt-in, not default.**
+    The IC `bootloader` item unconditionally copies a **fixed per-arch grub EFI path** off the ESP
+    (e.g. `grubaa64.efi` / `grubx64.efi`); it is **not** conditioned on the bootloader actually
+    present. On a grub-less ESP that copy fails and IC **aborts the entire `output.artifacts` pass**
+    with an artifact-copy error (there is no skip/continue branch as there is for `verity-hash`).
+    Confirmed in IC source (`outputArtifacts()` in `artifactsinputoutput.go`). Therefore including
+    `bootloader` on a systemd-boot image **hard-fails the build** — it cannot be a silent default.
+    tailor stays config-opaque, so `bootloader` is added **explicitly** (`bootloader` in
+    `profile.items`) or via a declared `bootloader: grub` chain hint that tailor expands to append it
+    — mirroring the `verity: true` pattern. See the coverage note below.
 - **Boot-loader coverage depends on the chain (grub vs systemd-boot):** for a `shim → grub → UKI`
-  chain, `[ukis, shim, bootloader]` covers the whole signable EFI chain via IC extraction. For a
-  `shim → systemd-boot → UKI` chain (no grub), the IC-extractable set is only **`[ukis, shim]`** —
-  **systemd-boot's own EFI binary is not emitted by any current `output.artifacts` item**, so it
-  cannot be signed through the IC-native extract → inject flow today. Signing systemd-boot under
-  SB-enforcing therefore needs one of:
+  chain, adding `bootloader` (→ `[ukis, shim, bootloader]`) covers the whole signable EFI chain via IC
+  extraction. For a `shim → systemd-boot → UKI` chain (no grub), the safe set is the default
+  **`[ukis, shim]`**, and **systemd-boot's own EFI binary is not emitted by any current
+  `output.artifacts` item** — so it cannot be signed through the IC-native extract → inject flow
+  today. Signing systemd-boot under SB-enforcing therefore needs one of:
   - **(a)** an out-of-band **in-place ESP re-sign** of the systemd-boot EFI after the image is built,
     outside the IC-native inject flow — concretely: mount the image's ESP (loop-mount the built
     image), `sbsign` `systemd-boot*.efi` in place, unmount. This is the mechanism the older
@@ -151,15 +161,12 @@ Schema notes:
   - **(b)** a future upstream IC **`systemd-boot` `output.artifacts` item** (does not exist today),
     which would make the systemd-boot chain fully IC-native like the grub chain.
 
-  tailor's default stays `[ukis, shim, bootloader]` (grub is the common case). A systemd-boot target
-  should set `items: [ukis, shim]` and, if it must sign systemd-boot itself, rely on **(a)** until
-  **(b)** lands. **Caveat (unverified — see open items):** keeping `bootloader` in the default is only
-  safe if IC's `bootloader` item **silently skips** (emits nothing) on a grub-less ESP. If IC instead
-  **hard-errors** when no grub EFI is present, then `[ukis, shim, bootloader]` cannot be the universal
-  default — a grub-less target would then be *required* to drop `bootloader` (i.e. `items: [ukis,
-  shim]`), and tailor should either default per-detected-chain or make dropping `bootloader` the
-  documented rule for systemd-boot. Confirm the skip-vs-error behavior empirically before blessing the
-  default.
+  **Default resolution:** because `bootloader` hard-errors on a grub-less ESP (confirmed, above),
+  `[ukis, shim, bootloader]` is **not** a safe universal default. The default is **`[ukis, shim]`**;
+  a **grub** target opts `bootloader` in (explicitly, or via `bootloader: grub`). Since tailor is
+  config-opaque it cannot auto-detect the chain, so it does not silently add `bootloader`; a build
+  that probes the ESP to auto-select per chain is a possible future enhancement, but the safe,
+  opaque-preserving default is `[ukis, shim]` + explicit opt-in.
 - **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. The signer
   signs the whole manifest; tailor does not re-derive it. This keeps the sign step config-opaque and
   robust to IC adding artifact kinds.
@@ -229,8 +236,9 @@ Ship after the ephemeral path is green.
 "Fully works" =:
 1. `tailor build <image> --cell <slug>` with an ephemeral signing profile runs extract → sign →
    `inject-files` → the requested disk format, and emits `<slug>.ca_cert.pem`.
-2. The signed artifacts verify against the published cert: UKI/shim/bootloader are Authenticode-signed;
-   the verity root hash carries a detached signature (when in the item set).
+2. The signed artifacts verify against the published cert: UKI/shim (and `bootloader` for a grub
+   chain) are Authenticode-signed; the verity root hash carries a detached signature (when in the item
+   set).
 3. Host-sudo-free, with a toolchain IC that provides `output-artifacts`/`inject-files`.
 4. (Deferred, test-wiring) enroll the cert into a firmware `db` and boot under Secure Boot.
 
@@ -250,9 +258,10 @@ Ship after the ephemeral path is green.
 
 ## 11. Open items
 
-- **`bootloader` on a grub-less ESP — skip or error?** Confirm empirically whether IC's `bootloader`
-  `output.artifacts` item silently skips (emits nothing) or hard-errors when there is no grub EFI. If
-  it errors, `[ukis, shim, bootloader]` cannot be the universal default (§5) — a systemd-boot target
-  must drop `bootloader`, and tailor should default per-chain or document the drop as the rule.
+- **~~`bootloader` on a grub-less ESP — skip or error?~~ RESOLVED (2026-07-24):** IC's `bootloader`
+  item **hard-errors** (does not skip) on a grub-less ESP — `outputArtifacts()` unconditionally copies
+  a fixed per-arch grub EFI path and aborts the whole pass if it is absent (confirmed in IC source).
+  Resolution folded into §5: the default is **`[ukis, shim]`** and `bootloader` is **opt-in** (explicit
+  or via a `bootloader: grub` hint); it is never silently defaulted.
 - **Host deps:** confirm the ephemeral signer's host dependencies are present (or installable) on the
   host running tailor.
