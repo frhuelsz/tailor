@@ -100,9 +100,9 @@ Extend `SigningProfile` / `SigningBackend` (`crates/tailor-config/src/schema.rs`
 ```yaml
 # tailor.yaml
 signing:
-  default: signed
+  default: secureboot-ephemeral
   profiles:
-    signed:
+    secureboot-ephemeral:
       backend: external-signer    # NEW delegating driver backend
       method: ephemeral           # ephemeral | <external-service> (§7)
       items: [ukis, shim, bootloader]   # optional; default this set. See §5 for the item tokens.
@@ -111,7 +111,7 @@ signing:
 
 ```yaml
 # image.yaml
-signing: signed
+signing: secureboot-ephemeral
 ```
 
 Schema notes:
@@ -181,7 +181,9 @@ Ship after the ephemeral path is green.
 
 - **IC version floor:** the design needs an IC that provides the `output-artifacts` + `inject-files`
   preview features (the signing extract pass does no package ops, so it needs only those). The
-  toolchain container tailor drives must provide them.
+  toolchain container tailor drives must provide them. Note the single-binary constraint: when the
+  same IC binary is also relied on for other preview features, that one binary must carry **all** of
+  them (there is no per-pass binary selection).
 - **Signer identity in the fingerprint:** per `2026-06-29-signing.md` §8, the signer identity feeds
   the per-cell fingerprint — here `backend` + `method`. The **ephemeral** method is intentionally
   **non-reproducible** (fresh cert per build), so the fingerprint tracks the *signing configuration*,
@@ -224,4 +226,4 @@ Ship after the ephemeral path is green.
 ## 11. Open items
 
 - **Host deps:** confirm the ephemeral signer's host dependencies are present (or installable) on the
-  target build host.
+  host running tailor.
