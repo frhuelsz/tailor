@@ -127,7 +127,7 @@ Schema notes:
 
 - **Request set (input, decided before extract):** `profile.items`, default **`[ukis, shim,
   bootloader]`**. The IC item tokens are: `ukis`, `uki-addons`, `shim`, `bootloader`, `verity-hash`.
-  Two rules:
+  Three rules:
   - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is an error, so the default
     set does not name it.
   - **`verity-hash` is not auto-emitted** — IC extracts the dm-verity root hash **only** when
@@ -135,6 +135,24 @@ Schema notes:
     only contains what was requested). tailor stays config-opaque (it does not parse the user's
     `config:`), so verity inclusion is **explicit**: `verity-hash` in `profile.items`, or a small
     declared `verity: true` profile flag that tailor expands to append `verity-hash`. Not auto.
+  - **`bootloader` is grub-specific** — the IC `bootloader` item extracts the grub EFI (`grub*.efi`).
+    It therefore covers the boot loader for a grub-based chain, but emits nothing for a chain that has
+    no grub. See the coverage note below.
+- **Boot-loader coverage depends on the chain (grub vs systemd-boot):** for a `shim → grub → UKI`
+  chain, `[ukis, shim, bootloader]` covers the whole signable EFI chain via IC extraction. For a
+  `shim → systemd-boot → UKI` chain (no grub), the IC-extractable set is only **`[ukis, shim]`** —
+  **systemd-boot's own EFI binary is not emitted by any current `output.artifacts` item**, so it
+  cannot be signed through the IC-native extract → inject flow today. Signing systemd-boot under
+  SB-enforcing therefore needs one of:
+  - **(a)** an out-of-band **in-place ESP re-sign** of the systemd-boot EFI after the image is built
+    (i.e. outside the IC-native inject flow) — the fallback the older mount-based signer path provides;
+    or
+  - **(b)** a future upstream IC **`systemd-boot` `output.artifacts` item** (does not exist today),
+    which would make the systemd-boot chain fully IC-native like the grub chain.
+
+  tailor's default stays `[ukis, shim, bootloader]` (grub is the common case; `bootloader` is simply a
+  no-op when grub is absent). A systemd-boot target should set `items: [ukis, shim]` and, if it must
+  sign systemd-boot itself, rely on **(a)** until **(b)** lands.
 - **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. The signer
   signs the whole manifest; tailor does not re-derive it. This keeps the sign step config-opaque and
   robust to IC adding artifact kinds.
