@@ -15,7 +15,7 @@ use std::{
 };
 
 use serde::Deserialize;
-use tailor_config::{SigningBackend, SigningProfile};
+use tailor_config::{SigningBackend, SigningMethod, SigningProfile};
 use tailor_core::{MissingPrerequisite, SignError, Signer, SigningPlan, SigningResult};
 use tempfile::TempDir;
 use tracing::debug;
@@ -38,6 +38,19 @@ pub fn build_signer(
     profile: &SigningProfile,
     base_dir: &Path,
 ) -> Arc<dyn Signer> {
+    if profile.backend == SigningBackend::IcSign {
+        return Arc::new(IcSignSigner {
+            profile_id: profile_id.to_owned(),
+            bin: resolve_bin(base_dir, profile.bin.as_deref()),
+            // `method` is required for `ic-sign` (config `validate`); default to the seam if absent so
+            // the signer's own preflight reports it rather than panicking.
+            method: profile.method.unwrap_or(SigningMethod::Service),
+            publish_override: profile
+                .publish_ca_cert
+                .as_deref()
+                .map(|p| resolve(base_dir, Some(p))),
+        });
+    }
     let key_source = match profile.backend {
         SigningBackend::LocalTestCa => KeySource::LocalTestCa {
             // `publishCaCert` (resolved against the workspace root) pins a fixed publish path; absent,
@@ -54,6 +67,8 @@ pub fn build_signer(
         SigningBackend::AzureKeyVault => KeySource::Unsupported {
             backend: SigningBackend::AzureKeyVault.as_str(),
         },
+        // Handled by the early return above.
+        SigningBackend::IcSign => unreachable!("ic-sign builds an IcSignSigner before this match"),
     };
     Arc::new(HostSigner {
         profile_id: profile_id.to_owned(),
@@ -64,6 +79,21 @@ pub fn build_signer(
 
 fn resolve(base_dir: &Path, path: Option<&Path>) -> PathBuf {
     base_dir.join(path.unwrap_or(Path::new("")))
+}
+
+/// Resolve the `ic-sign` binary reference to what [`Command`] should invoke. A bare name (no path
+/// separator) is left as-is for `PATH` lookup (the default `ic-sign`, or an override installed on
+/// `PATH`); a relative path is resolved against the workspace root; an absolute path is used verbatim.
+fn resolve_bin(base_dir: &Path, bin: Option<&Path>) -> String {
+    let Some(bin) = bin else {
+        return IC_SIGN_DEFAULT_BIN.to_owned();
+    };
+    let has_separator = bin.components().count() > 1 || bin.is_absolute();
+    if has_separator {
+        base_dir.join(bin).to_string_lossy().into_owned()
+    } else {
+        bin.to_string_lossy().into_owned()
+    }
 }
 
 /// Where the signing key/cert come from (`meta/docs/2026-06-29-signing.md` §6).
@@ -232,6 +262,190 @@ impl HostSigner {
         }
         let ca = guard.as_ref().expect("invariant: CA minted above");
         Ok((ca.key.clone(), ca.cert.clone()))
+    }
+}
+
+// ───────────────────────────── ic-sign (delegating) backend ─────────────────────────────
+
+/// Default `ic-sign` binary name (resolved on `PATH`) when a profile sets no `bin:`. Deliberately
+/// generic — tailor integrates against the tool *contract* (`meta/docs/2026-07-22-signing-step1-ic-native.md` §2.2),
+/// not a specific vendor binary; point `bin:` at a concrete install to use another one.
+const IC_SIGN_DEFAULT_BIN: &str = "ic-sign";
+/// The `ic-sign` subcommand that signs an IC-extracted artifact set in place.
+const IC_SIGN_SUBCOMMAND: &str = "sign-artifacts";
+/// `pesign` — a host dependency of the `ic-sign` ephemeral method (PE/Authenticode signing).
+const PESIGN: &str = "pesign";
+/// `certutil` (nss-tools) — a host dependency of the `ic-sign` ephemeral method (cert handling).
+const CERTUTIL: &str = "certutil";
+
+/// A [`Signer`] that delegates the whole host-side sign step to an external IC-native signing tool
+/// (`ic-sign`): it renders the tool's config, runs `<bin> sign-artifacts` over the IC-extracted
+/// artifacts (signed in place), and publishes the ephemeral enrollment cert
+/// (`meta/docs/2026-07-22-signing-step1-ic-native.md` §2.2). tailor stays opaque to the emitted
+/// `inject-files.yaml` — the tool reads it to decide what to sign.
+#[derive(Debug)]
+struct IcSignSigner {
+    profile_id: String,
+    /// The binary to invoke ([`Command`] resolves a bare name on `PATH`).
+    bin: String,
+    method: SigningMethod,
+    /// `publishCaCert` override; absent ⇒ the executor's per-image `<output_dir>/<slug>.ca_cert.pem`.
+    publish_override: Option<PathBuf>,
+}
+
+impl Signer for IcSignSigner {
+    fn preflight(&self) -> Result<(), SignError> {
+        let mut missing = Vec::new();
+        let mut note = |detail: String| {
+            missing.push(MissingPrerequisite {
+                profile_id: self.profile_id.clone(),
+                detail,
+                images: Vec::new(),
+            });
+        };
+        if !bin_available(&self.bin) {
+            note(format!(
+                "`ic-sign` binary `{}` not found (install it on PATH or set `bin:` to its path)",
+                self.bin
+            ));
+        }
+        match self.method {
+            SigningMethod::Ephemeral => {
+                for tool in [OPENSSL, PESIGN, CERTUTIL] {
+                    if !tool_on_path(tool) {
+                        note(format!(
+                            "`{tool}` not found on PATH (required by the `ic-sign` ephemeral method)"
+                        ));
+                    }
+                }
+            }
+            SigningMethod::Service => {
+                note(
+                    "`ic-sign` `method: service` is not implemented yet \
+                      (meta/docs/2026-07-22-signing-step1-ic-native.md §7)"
+                        .to_owned(),
+                );
+            }
+        }
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(SignError::Preflight { missing })
+        }
+    }
+
+    fn sign(&self, plan: &SigningPlan) -> Result<SigningResult, SignError> {
+        match self.method {
+            SigningMethod::Ephemeral => self.sign_ephemeral(plan),
+            SigningMethod::Service => Err(SignError::Execution {
+                detail: "`ic-sign` `method: service` is not implemented yet \
+                         (meta/docs/2026-07-22-signing-step1-ic-native.md §7)"
+                    .to_owned(),
+            }),
+        }
+    }
+}
+
+impl IcSignSigner {
+    /// The ephemeral flow: render a `sign-config.yaml` selecting the ephemeral method, run
+    /// `<bin> sign-artifacts` over `plan.artifacts_dir` (signs in place), and publish the emitted
+    /// public enrollment cert to the plan's destination.
+    fn sign_ephemeral(&self, plan: &SigningPlan) -> Result<SigningResult, SignError> {
+        let work = TempDir::new().map_err(|e| SignError::Execution {
+            detail: format!("create ic-sign work dir: {e}"),
+        })?;
+        // The tool writes the ephemeral public key(s)/cert here; scoped per work dir so parallel cells
+        // never collide.
+        let public_keys = work.path().join("publickeys");
+        fs::create_dir_all(&public_keys)
+            .map_err(|e| io_err("create publickeys dir", &public_keys, &e))?;
+
+        let config = work.path().join("sign-config.yaml");
+        let config_text = format!(
+            "signingMethod:\n  ephemeral:\n    publicKeysPath: {}\n",
+            lossy(&public_keys)
+        );
+        fs::write(&config, config_text)
+            .map_err(|e| io_err("write sign-config.yaml", &config, &e))?;
+
+        run(
+            &self.bin,
+            &[
+                IC_SIGN_SUBCOMMAND,
+                "--build-dir",
+                &lossy(work.path()),
+                "--config-file",
+                &lossy(&config),
+                "--artifacts-path",
+                &lossy(&plan.artifacts_dir),
+                "--ephemeral-public-keys-path",
+                &lossy(&public_keys),
+            ],
+        )?;
+
+        // Publish the emitted enrollment cert for firmware `db` enrollment.
+        let emitted = find_enrollment_cert(&public_keys)?;
+        let dest = self
+            .publish_override
+            .clone()
+            .unwrap_or_else(|| plan.ca_cert_dest.clone());
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_err("create CA cert dir", parent, &e))?;
+        }
+        fs::copy(&emitted, &dest).map_err(|e| io_err("publish enrollment cert", &dest, &e))?;
+
+        Ok(SigningResult {
+            published_ca_cert: Some(dest),
+        })
+    }
+}
+
+/// Is the `ic-sign` binary reference invocable? A bare name is probed on `PATH`; a path is checked for
+/// existence. A cheap, side-effect-free presence probe for preflight.
+fn bin_available(bin: &str) -> bool {
+    let path = Path::new(bin);
+    if path.components().count() > 1 || path.is_absolute() {
+        path.is_file()
+    } else {
+        tool_on_path(bin)
+    }
+}
+
+/// Locate the ephemeral enrollment cert the tool wrote into its public-keys dir. Prefers a PEM whose
+/// name mentions `ca`; otherwise the sole `.pem`/`.crt`/`.cer`. Errors if none or if ambiguous.
+fn find_enrollment_cert(public_keys: &Path) -> Result<PathBuf, SignError> {
+    let entries = fs::read_dir(public_keys)
+        .map_err(|e| io_err("read publickeys dir", public_keys, &e))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().is_some_and(|ext| {
+                let ext = ext.to_ascii_lowercase();
+                ext == "pem" || ext == "crt" || ext == "cer"
+            })
+        })
+        .collect::<Vec<_>>();
+    let named_ca = entries.iter().find(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.to_ascii_lowercase().contains("ca"))
+    });
+    match (named_ca, entries.as_slice()) {
+        (Some(ca), _) => Ok(ca.clone()),
+        (None, [only]) => Ok(only.clone()),
+        (None, []) => Err(SignError::Execution {
+            detail: format!(
+                "`ic-sign` produced no enrollment cert in `{}`",
+                public_keys.display()
+            ),
+        }),
+        (None, many) => Err(SignError::Execution {
+            detail: format!(
+                "`ic-sign` produced {} certs in `{}`; cannot pick the enrollment cert",
+                many.len(),
+                public_keys.display()
+            ),
+        }),
     }
 }
 
@@ -512,7 +726,7 @@ mod tests {
 
     use std::fs;
 
-    use tailor_config::{SigningBackend, SigningProfile};
+    use tailor_config::{SigningBackend, SigningMethod, SigningProfile};
     use tempfile::tempdir;
 
     fn profile(backend: SigningBackend) -> SigningProfile {
@@ -523,6 +737,8 @@ mod tests {
             publish_ca_cert: None,
             vault: None,
             certificate: None,
+            method: None,
+            bin: None,
         }
     }
 
@@ -676,6 +892,161 @@ mod tests {
         assert!(
             !dir.path().join("image.ca_cert.pem").exists(),
             "default path should be unused when the override is set"
+        );
+    }
+
+    // ───────────────────────────── ic-sign backend ─────────────────────────────
+
+    fn ic_sign_profile(method: SigningMethod, bin: Option<PathBuf>) -> SigningProfile {
+        let mut p = profile(SigningBackend::IcSign);
+        p.method = Some(method);
+        p.bin = bin;
+        p
+    }
+
+    #[test]
+    fn resolve_bin_defaults_and_distinguishes_names_from_paths() {
+        let base = Path::new("/ws");
+        assert_eq!(resolve_bin(base, None), IC_SIGN_DEFAULT_BIN);
+        // A bare name stays a PATH lookup.
+        assert_eq!(resolve_bin(base, Some(Path::new("prismsign"))), "prismsign");
+        // A relative path resolves against the workspace root.
+        assert_eq!(
+            resolve_bin(base, Some(Path::new("tools/ic-sign"))),
+            "/ws/tools/ic-sign"
+        );
+        // An absolute path is used verbatim.
+        assert_eq!(
+            resolve_bin(base, Some(Path::new("/opt/ic-sign"))),
+            "/opt/ic-sign"
+        );
+    }
+
+    #[test]
+    fn ic_sign_preflight_reports_a_missing_binary() {
+        let dir = tempdir().unwrap();
+        // An absolute path that does not exist ⇒ not invocable.
+        let missing = dir.path().join("nope/ic-sign");
+        let profile = ic_sign_profile(SigningMethod::Ephemeral, Some(missing.clone()));
+        let signer = build_signer("sb", &profile, dir.path());
+        let err = signer.preflight().unwrap_err();
+        let SignError::Preflight { missing: unmet } = err else {
+            panic!("expected a preflight error, got {err:?}");
+        };
+        assert!(
+            unmet.iter().any(|m| m.detail.contains("not found")
+                && m.detail.contains(&missing.to_string_lossy().into_owned())),
+            "preflight should name the missing binary, got {unmet:?}"
+        );
+    }
+
+    #[test]
+    fn ic_sign_service_method_is_reported_unimplemented() {
+        let dir = tempdir().unwrap();
+        // Point `bin` at a real, invocable file so only the method gates the result.
+        let bin = write_stub(dir.path());
+        let profile = ic_sign_profile(SigningMethod::Service, Some(bin));
+        let signer = build_signer("sb", &profile, dir.path());
+        let err = signer.preflight().unwrap_err();
+        let SignError::Preflight { missing: unmet } = err else {
+            panic!("expected a preflight error, got {err:?}");
+        };
+        assert!(
+            unmet.iter().any(|m| m.detail.contains("method: service")),
+            "service method should preflight as unimplemented, got {unmet:?}"
+        );
+    }
+
+    /// Write an executable stub that emulates `ic-sign sign-artifacts`: it writes an enrollment cert
+    /// into the `--ephemeral-public-keys-path` dir and marks each artifact as signed. Returns its
+    /// absolute path.
+    #[cfg(unix)]
+    fn write_stub(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let stub = dir.join("ic-sign-stub.sh");
+        fs::write(
+            &stub,
+            r#"#!/bin/sh
+pubkeys=""
+artifacts=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ephemeral-public-keys-path) pubkeys="$2"; shift 2 ;;
+    --artifacts-path) artifacts="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$pubkeys"
+printf -- '-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n' > "$pubkeys/ca.pem"
+for f in "$artifacts"/*; do [ -f "$f" ] && printf 'SIGNED' >> "$f"; done
+exit 0
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        stub
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ic_sign_ephemeral_drives_the_tool_and_publishes_the_cert() {
+        let dir = tempdir().unwrap();
+        let bin = write_stub(dir.path());
+
+        // An IC-extracted artifacts dir with a boot artifact + the emitted manifest.
+        let artifacts = dir.path().join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(artifacts.join("boot.efi"), b"UNSIGNED").unwrap();
+        fs::write(
+            artifacts.join("inject-files.yaml"),
+            "injectFiles:\n- source: ./boot.efi\n  type: ukis\n",
+        )
+        .unwrap();
+
+        let profile = ic_sign_profile(SigningMethod::Ephemeral, Some(bin));
+        let signer = build_signer("sb", &profile, dir.path());
+        let dest = dir.path().join("out/myimage_arm64_vhd.ca_cert.pem");
+        let plan = SigningPlan {
+            inject_files_yaml: artifacts.join("inject-files.yaml"),
+            artifacts_dir: artifacts.clone(),
+            leaf_id: "myimage_arm64_vhd".to_owned(),
+            ca_cert_dest: dest.clone(),
+        };
+
+        let result = signer.sign(&plan).unwrap();
+        assert_eq!(result.published_ca_cert.as_deref(), Some(dest.as_path()));
+        assert!(dest.exists(), "the enrollment cert should be published");
+        // The tool signed the artifact in place.
+        assert_eq!(
+            fs::read_to_string(artifacts.join("boot.efi")).unwrap(),
+            "UNSIGNEDSIGNED"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ic_sign_ephemeral_errors_when_the_tool_emits_no_cert() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        // A stub that signs nothing and emits no cert.
+        let bin = dir.path().join("empty.sh");
+        fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let artifacts = dir.path().join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        let profile = ic_sign_profile(SigningMethod::Ephemeral, Some(bin));
+        let signer = build_signer("sb", &profile, dir.path());
+        let plan = SigningPlan {
+            inject_files_yaml: artifacts.join("inject-files.yaml"),
+            artifacts_dir: artifacts.clone(),
+            leaf_id: "myimage".to_owned(),
+            ca_cert_dest: dir.path().join("out/ca.pem"),
+        };
+        let err = signer.sign(&plan).unwrap_err();
+        assert!(
+            matches!(err, SignError::Execution { detail } if detail.contains("no enrollment cert")),
+            "expected a no-cert execution error"
         );
     }
 }

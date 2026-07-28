@@ -171,6 +171,8 @@ mod tests {
             publish_ca_cert: None,
             vault: None,
             certificate: None,
+            method: None,
+            bin: None,
         }
     }
 

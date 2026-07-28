@@ -340,6 +340,36 @@ pub struct SigningProfile {
     /// `azure-key-vault`: certificate name.
     #[serde(default)]
     pub certificate: Option<String>,
+    /// `ic-sign`: key-source method the signing tool uses (`ephemeral` for dev/test, `service` for a
+    /// remote production service). Required for the `ic-sign` backend (`meta/docs/2026-07-22-signing-step1-ic-native.md` §2.2).
+    #[serde(default)]
+    pub method: Option<SigningMethod>,
+    /// `ic-sign`: the signing-tool binary (name on `PATH` or an absolute path). Defaults to `ic-sign`
+    /// when omitted; override to point at a specific install. Kept configurable so tailor stays
+    /// tool-agnostic and never hard-codes a vendor binary name.
+    #[serde(default)]
+    pub bin: Option<PathBuf>,
+}
+
+/// The key-source method for the `ic-sign` backend (`meta/docs/2026-07-22-signing-step1-ic-native.md` §2.2, §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SigningMethod {
+    /// Self-signed cert minted on the fly, private key destroyed after signing; the public cert is
+    /// published for Secure Boot `db` enrollment. Dev/test.
+    Ephemeral,
+    /// Remote/production signing service against a stable certificate chain (§7 seam).
+    Service,
+}
+
+impl SigningMethod {
+    /// The lowercase token as written in `tailor.yaml`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SigningMethod::Ephemeral => "ephemeral",
+            SigningMethod::Service => "service",
+        }
+    }
 }
 
 /// Where a signing key comes from (`meta/docs/2026-06-29-signing.md` §6). The PE signer is orthogonal.
@@ -352,6 +382,9 @@ pub enum SigningBackend {
     Keypair,
     /// Remote signing via Azure Key Vault (future).
     AzureKeyVault,
+    /// Delegate the host-side sign step to an external IC-native signing tool (`ic-sign`), which
+    /// signs the IC-extracted boot artifacts in place (`meta/docs/2026-07-22-signing-step1-ic-native.md`).
+    IcSign,
 }
 
 impl SigningBackend {
@@ -361,6 +394,7 @@ impl SigningBackend {
             SigningBackend::LocalTestCa => "local-test-ca",
             SigningBackend::Keypair => "keypair",
             SigningBackend::AzureKeyVault => "azure-key-vault",
+            SigningBackend::IcSign => "ic-sign",
         }
     }
 }
@@ -389,6 +423,11 @@ impl SigningProfile {
                 }
                 if self.certificate.is_none() {
                     return Err(missing("certificate"));
+                }
+            }
+            SigningBackend::IcSign => {
+                if self.method.is_none() {
+                    return Err(missing("method"));
                 }
             }
             SigningBackend::LocalTestCa => {}
@@ -986,6 +1025,36 @@ toolsDirSources:
             err,
             crate::ConfigError::InvalidSigningProfile { .. }
         ));
+    }
+
+    #[test]
+    fn ic_sign_profile_requires_a_method() {
+        let config: SigningConfig =
+            serde_yaml_ng::from_str("profiles:\n  sb:\n    backend: ic-sign\n").unwrap();
+        let err = resolve_signing(Some(&SigningRef::Profile("sb".to_owned())), Some(&config))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::ConfigError::InvalidSigningProfile { .. }
+        ));
+    }
+
+    #[test]
+    fn ic_sign_profile_parses_method_and_bin() {
+        let config: SigningConfig = serde_yaml_ng::from_str(
+            "profiles:\n  sb:\n    backend: ic-sign\n    method: ephemeral\n    bin: tools/ic-sign\n",
+        )
+        .unwrap();
+        let (_, profile) =
+            resolve_signing(Some(&SigningRef::Profile("sb".to_owned())), Some(&config))
+                .unwrap()
+                .unwrap();
+        assert_eq!(profile.backend, SigningBackend::IcSign);
+        assert_eq!(profile.method, Some(SigningMethod::Ephemeral));
+        assert_eq!(
+            profile.bin.as_deref(),
+            Some(std::path::Path::new("tools/ic-sign"))
+        );
     }
 
     // ----- base-image catalogue -----
