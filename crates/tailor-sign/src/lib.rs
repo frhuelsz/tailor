@@ -18,7 +18,7 @@ use serde::Deserialize;
 use tailor_config::{SigningBackend, SigningMethod, SigningProfile};
 use tailor_core::{MissingPrerequisite, SignError, Signer, SigningPlan, SigningResult};
 use tempfile::TempDir;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// The `openssl` binary — CA/leaf minting and verity-hash CMS signing.
 const OPENSSL: &str = "openssl";
@@ -311,11 +311,18 @@ impl Signer for IcSignSigner {
         }
         match self.method {
             SigningMethod::Ephemeral => {
+                // The ephemeral method's PE/cert host tools (`openssl`/`pesign`/`certutil`) are the
+                // *signer's* internal dependencies, not tailor's to gate on — a delegating backend
+                // only requires its `bin`. Warn (don't fail) when they're absent so a host-run signer
+                // gets an early signal, while a containerized signer (deps inside its container) still
+                // preflights clean.
                 for tool in [OPENSSL, PESIGN, CERTUTIL] {
                     if !tool_on_path(tool) {
-                        note(format!(
-                            "`{tool}` not found on PATH (required by the `ic-sign` ephemeral method)"
-                        ));
+                        warn!(
+                            "`{tool}` not found on PATH — the `ic-sign` ephemeral method needs it \
+                             where the signer runs; a host-run signer will fail at sign time \
+                             (harmless if the signer is containerized)"
+                        );
                     }
                 }
             }
