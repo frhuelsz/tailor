@@ -11,6 +11,5 @@ toolchains:
       tag: "latest"
 
 defaults:
-  architectures: [amd64]
   outputs:
     - format: cosi
