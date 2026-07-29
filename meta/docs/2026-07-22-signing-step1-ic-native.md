@@ -1,8 +1,10 @@
 # tailor — IC-native deferred signing (execution design)
 
-> **Status:** Ready for review · _2026-07-27_ (rubber-duck pass folded in — see §11 for open
-> decisions surfaced: fail-closed chain completeness, verity completeness, fingerprint/caching, the
-> cert-contract-vs-port question, and §6 authoring sign-off)
+> **Status:** e2e-proven · _2026-07-29_ · the ephemeral `[ukis]` path built + signed + verified
+> end-to-end on a real base (extract → `ic-sign` sign → inject; the output UKI verifies against the
+> emitted enrollment cert). Model: **tailor reads the user's `output.artifacts`, it never authors it**
+> (see §5/§6). Remaining open decisions in §11 (verity completeness, cert-contract-vs-port,
+> fail-closed chain) are refinements, not blockers.
 >
 > Complete, implementable design for how tailor produces Secure Boot–signed images. tailor drives
 > **IC-native deferred signing** — an Image Customizer `output-artifacts` extract pass → a host-side
@@ -18,31 +20,31 @@ The checked-in signing design (`2026-06-29-signing.md`) and code (`crates/tailor
 foundation + the `Signer` port in `ports.rs` + the `SigningBackend` enum in
 `tailor-config/src/schema.rs`) already give us the 3-pass model, the `Signer`/`SigningPlan` port, and
 key-source backends (`local-test-ca` / `keypair` / `azure-key-vault`) — but only as **config +
-preflight** (no execution). This design adds four things and changes one principle; **everything else
-is reused unchanged**:
+preflight** (no execution). This design adds **two** things; **every 2026-06-29 principle and
+everything else is reused unchanged**:
 
 1. **An `ic-sign` delegating backend (new).** The checked-in `SigningBackend` variants model a
    **key source**, assuming tailor itself drives signing (loop `openssl`/`sbsign` per artifact). This
-   design adds a backend that **delegates the whole host-side sign step** to ic-sign (an IC-native signing tool)
-   (a *driver* axis), with `method: ephemeral | service` sub-selecting the tool's key
+   design adds a backend that **delegates the whole host-side sign step** to `ic-sign` (an IC-native
+   signing tool) — a *driver* axis — with `method: ephemeral | service` sub-selecting the tool's key
    source. See §2.1 (two axes) and §2.2 (the tool contract). The built-in backend stays as a peer.
-2. **`items` request-set model + the `bootloader`/`verity-hash` rules (new).** The checked-in design
-   didn't specify what to extract; this pins the default `[ukis, shim]`, the request-set-vs-sign-set
-   split, `bootloader` as opt-in (it hard-errors on a grub-less ESP), and explicit `verity-hash`
-   (§5).
-3. **IC preview-feature floor + single-binary constraint (new).** States the `output-artifacts` +
+2. **IC preview-feature floor + single-binary constraint (new).** States the `output-artifacts` +
    `inject-files` floor and that one IC binary must carry all needed preview features (§8).
-4. **`output.artifacts` authoring — the one principle change (§6).** `2026-06-29-signing.md` §3
-   made it a **non-goal** for tailor to author `output.artifacts` (the user was to write it), and the
-   current executor enforces that (it *errors* if a signed cell has no `output.artifacts`). This
-   design **supersedes that**: for a signed build tailor auto-adds the directives to the cell's
-   rendered config (pass 1 — no separate extract config). This is the only reversal and is flagged for
-   review (gates milestone P2).
+
+**The 2026-06-29 non-goal stands — tailor does NOT author `output.artifacts`.** The user declares the
+`output.artifacts` block (items + preview features) in their own IC `config:`; tailor **reads** it
+(structural detection + `path` relocation, as `output_artifacts.rs` already does) but never writes the
+item list. So there is **no `profile.items` field** and **no auto-authoring** — the user's
+`output.artifacts.items` is the single source of truth for what gets extracted, the emitted
+`inject-files.yaml` manifest is the source of truth for what gets signed, and both are already covered
+by the per-cell fingerprint (the whole IC config is hashed). This keeps config-opacity intact and
+avoids a profile-vs-config drift class of bug. See §5 (request set vs sign set) and §6 (why read, not
+author).
 
 **Reused unchanged:** the 3-pass executor (`§5`), the `Signer` trait + `SigningPlan`/`SigningResult`
 port granularity, `ca.pem` publication, the no-sudo / tools-dir-isolation invariants, and the
 fingerprint/lockfile treatment. No port or executor signature changes — the new backend is a drop-in
-`Signer` impl.
+`Signer` impl. The signing profile is **key-source only** (`backend` + `method` + `bin`, §4).
 
 ## 1. The mechanism
 
@@ -50,7 +52,7 @@ Signing is **deferred** — not baked into the customize run. It slots between t
 IC's own preview features `output-artifacts` + `inject-files`:
 
 ```
-1. IC customize (pass 1)         the user's real config + auto-added output.artifacts:{items, path}; previewFeatures:[output-artifacts,…]; output raw
+1. IC customize (pass 1)         the user's real config (incl. their output.artifacts:{items, path} + previewFeatures:[output-artifacts,inject-files,…]); output raw
       → produces the unsigned raw image AND writes the UNSIGNED boot artifacts into <artifacts> + an inject-files.yaml manifest
 2. host-side sign (in place)     ic-sign signs the extracted artifacts, keyed by the emitted manifest
 3. IC inject-files               inject-files --config-file <artifacts>/inject-files.yaml --image-file <unsigned.raw> --output-image-file <signed.raw> --output-image-format raw
@@ -59,13 +61,15 @@ IC's own preview features `output-artifacts` + `inject-files`:
 
 The signable set is the boot chain IC (and tailor) already rebuild — the UKI(s), UKI addons, the boot
 loader (systemd-boot / grub), and the dm-verity root hash. **Pass 1 is the full customize** — the
-user's actual config (whatever package ops, UKI rebuild, verity re-seal it declares), extended with
-`output.artifacts` so the *same* invocation that produces the unsigned raw image also extracts the
-boot artifacts and emits `inject-files.yaml`. It therefore runs with whatever tools-dir that config
-already needs; there is **no separate extraction-only pass**. This single-pass identity is essential:
-the bytes signed in step 2 are exactly the bytes pass 1 baked into `unsigned.raw`, and step 3 injects
-the signed replacements back into that same image. The signer occupies the middle step and signs in
-place. (This matches the implemented three-pass executor in `crates/tailor-exec/src/executor.rs`.)
+user's actual config (whatever package ops, UKI rebuild, verity re-seal it declares), *including the
+`output.artifacts` block the user authored* (§6), so the *same* invocation that produces the unsigned
+raw image also extracts the boot artifacts and emits `inject-files.yaml`. tailor relocates that
+block's `path` (for sudo-free reclaim) but authors none of it. It therefore runs with whatever
+tools-dir that config already needs; there is **no separate extraction-only pass**. This single-pass
+identity is essential: the bytes signed in step 2 are exactly the bytes pass 1 baked into
+`unsigned.raw`, and step 3 injects the signed replacements back into that same image. The signer
+occupies the middle step and signs in place. (This matches the implemented three-pass executor in
+`crates/tailor-exec/src/executor.rs`.)
 
 **Key sources.** Two modes, orthogonal to the mechanism:
 - **ephemeral** — a self-signed certificate generated on the fly, private key destroyed after signing;
@@ -172,101 +176,119 @@ interface would drop in unchanged.
 
 ## 3. Resolved design decisions
 
-- **Backend split:** add the `ic-sign` as a first-class `Signer` backend; **keep**
-  the built-in `openssl`+`sbsign` backend. `ic-sign` is the default where it is the
-  sanctioned path; the built-in stays as fallback and for the pure-Rust goal.
-- **`items` default `[ukis, shim]`** (universally safe — see §5; `bootloader` is opt-in because it
-  hard-errors on a grub-less ESP); the emitted `inject-files.yaml` is the source of truth for what
-  gets *signed*. But the request set and sign set are different phases — see §5.
+- **Backend split:** add `ic-sign` as a first-class `Signer` backend; **keep** the built-in
+  `openssl`+`sbsign` backend. `ic-sign` is the default where it is the sanctioned path; the built-in
+  stays as fallback and for the pure-Rust goal.
+- **Items live in the user's `output.artifacts`, not the profile.** The user declares
+  `config.output.artifacts.items` (the request set); IC emits `inject-files.yaml` (the sign set); the
+  signer signs the manifest. tailor authors neither — it reads. So there is **no `profile.items`**
+  (§5, §6).
 - **Binary sourcing:** preflight the signer on PATH or a configured path, exactly like
   `openssl`/`sbsign`. Acquisition (download + version pin) is environment/pipeline plumbing, not
   tailor's job — keeps tailor environment-agnostic.
-- **Key source:** `method: ephemeral | service`; ephemeral is this design, the
-  service method is the documented seam (§7).
+- **Key source:** `method: ephemeral | service`; ephemeral is this design, the service method is the
+  documented seam (§7).
 
 ## 4. Config surface
 
-Extend `SigningProfile` / `SigningBackend` (`crates/tailor-config/src/schema.rs`):
+The signing profile is **key-source only** — `backend` + `method` + `bin` (plus the existing
+key-source fields). It does **not** carry `items`: what to extract/sign lives in the user's own IC
+`config.output.artifacts` (§5, §6).
 
 ```yaml
-# tailor.yaml
+# tailor.yaml — the signing profile: key source + which tool, nothing about items
 signing:
   default: secureboot-ephemeral
   profiles:
     secureboot-ephemeral:
-      backend: ic-sign    # NEW delegating driver backend
+      backend: ic-sign            # delegating driver backend
       method: ephemeral           # ephemeral | service (§7)
-      items: [ukis, shim]         # optional; default. Add `bootloader` for a grub chain (§5). See §5 for the item tokens.
-      # bootloader: grub          # optional chain hint → appends `bootloader` (grub-only; §5)
-      # publishCaCert: <path>     # default <output_dir>/<slug>.ca_cert.pem
+      # bin: /opt/ic-sign         # optional; the signing tool. Bare name → PATH; path → workspace-relative. Default `ic-sign`.
+      # publishCaCert: ./out/ca.pem   # optional; default <output_dir>/<slug>.ca_cert.pem
 ```
 
 ```yaml
-# image.yaml
-signing: secureboot-ephemeral
+# image.yaml — opt in, and (today) hand-author output.artifacts + the two signing preview features
+name: appliance
+base:
+  path: ./bases/appliance.vhd     # a base that already carries a UKI (mode: passthrough), or use uki.mode: create
+  arch: arm64
+signing: secureboot-ephemeral     # ← the whole signing opt-in
+
+config:
+  previewFeatures:
+    - output-artifacts            # signing mechanism (extract pass)
+    - inject-files                # signing mechanism (inject pass)
+    - uki                         # image-specific: this base's UKI handling
+  os:
+    uki:
+      mode: passthrough           # base already has UKIs — preserve + sign (vs. `create`)
+  output:
+    artifacts:
+      items: [ukis]               # ← the request set: what to extract & sign (user-owned; see §5)
+      path: ./out-artifacts       # tailor relocates this to a tailor-owned staging dir anyway
 ```
 
+Everything under `config:` is the user's IC config, passed through opaquely. tailor only **reads**
+`output.artifacts` to (a) confirm a signed cell actually declares it — else it errors — and (b)
+relocate its `path` for the sudo-free janitor. `items`/`os.uki.mode`/the non-signing preview features
+are the user's to get right for their image (they know its boot chain; tailor is config-opaque). A
+signed build additionally needs `runtime.buildDirBase` set (the IC chroot/overlay needs a real host
+dir) — see §8.
+
 Schema notes:
-- the delegating backend is a new `SigningBackend` variant; `method` (enum) is required for it.
-  `items` optional (§5). Any service sub-config is required only for that method.
-- `SigningProfile::validate` gains the new arm (method present; service fields complete when the
-  service method is chosen). Config-shape validation only; presence/capability probing is the
+- `SigningBackend` gains the `ic-sign` variant; `method` (enum) is **required** for it, `bin`
+  optional. Any `service` sub-config is required only for that method.
+- `SigningProfile::validate` gains the `ic-sign` arm (require `method`). Config-shape validation only;
+  presence/capability probing is the
   build preflight.
 
 ## 5. `items`: request set vs sign set
 
-`output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*. So:
+`output.artifacts.items` is an **input** to the extract pass — IC only extracts what you *request*.
+**The user authors it** in `config.output.artifacts.items`; tailor reads (never writes) it. Two
+phases:
 
-- **Request set (input, decided before extract):** `profile.items`, default **`[ukis, shim]`** — the
-  **universally safe** set (see the `bootloader` rule for why it is not `[ukis, shim, bootloader]`).
-  The IC item tokens are: `ukis`, `uki-addons`, `shim`, `bootloader`, `verity-hash`.
-  Three rules:
-  - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is an error, so the default
-    set does not name it.
+- **Request set (input, in the user's config):** `config.output.artifacts.items`. There is no tailor
+  default and no `profile.items` — the person editing the image picks the items, because getting them
+  right depends on the image's boot chain, which tailor (config-opaque) cannot see. A safe, common
+  starting point is **`[ukis]`** (or `[ukis, shim]`). The IC item tokens are: `ukis`, `uki-addons`,
+  `shim`, `bootloader`, `verity-hash`. Rules the author must know:
+  - **`uki-addons` is auto-included with `ukis`** — listing it explicitly is an error.
   - **`verity-hash` is not auto-emitted** — IC extracts the dm-verity root hash **only** when
-    `verity-hash` is in `items`. So tailor cannot detect verity from the emitted manifest (the manifest
-    only contains what was requested). tailor stays **config-opaque** — meaning it does no *typed
-    semantic* modeling of the user's IC config (it does, today, structurally inspect and rewrite the
-    generic YAML tree: `output_artifacts.rs` already detects an `output.artifacts` block and relocates
-    its path). So verity inclusion is **explicit**: `verity-hash` in `profile.items`, or a small
-    declared `verity: true` profile flag that tailor expands to append `verity-hash`. Not auto.
-    **⚠ Correctness caveat (open item):** if the image *is* verity-sealed but the profile omits
-    `verity-hash`, the root hash is never extracted or signed, yet the build still succeeds and is
-    presented as "signed" — a silent hole (an unverifiable verity chain under Secure Boot). A signed
-    profile should therefore require an **explicit** verity decision (`verity: true|false`) rather
-    than defaulting to absent. See Open Items.
-  - **`bootloader` is grub-specific and hard-errors without grub — so it is opt-in, not default.**
-    The IC `bootloader` item unconditionally copies a **fixed per-arch grub EFI path** off the ESP
-    (e.g. `grubaa64.efi` / `grubx64.efi`); it is **not** conditioned on the bootloader actually
-    present. On a grub-less ESP that copy fails and IC **aborts the entire `output.artifacts` pass**
-    with an artifact-copy error (there is no skip/continue branch as there is for `verity-hash`).
-    Confirmed in IC source (`outputArtifacts()` in `artifactsinputoutput.go`). Therefore including
-    `bootloader` on a systemd-boot image **hard-fails the build** — it cannot be a silent default.
-    tailor stays config-opaque, so `bootloader` is added **explicitly** (`bootloader` in
-    `profile.items`) or via a declared `bootloader: grub` chain hint that tailor expands to append it
-    — mirroring the `verity: true` pattern. See the coverage note below.
+    `verity-hash` is in `items`. **⚠ Correctness caveat:** if the image *is* verity-sealed but the
+    author omits `verity-hash`, the root hash is never extracted or signed, yet the build still
+    succeeds and looks "signed" — a silent hole (an unverifiable verity chain under Secure Boot). A
+    verity-sealed image **must** include `verity-hash`. tailor can't detect verity for them (opaque),
+    so this is the author's responsibility; see Open Items for whether tailor should at least warn.
+  - **`bootloader` is grub-specific and hard-errors without grub.** The IC `bootloader` item
+    unconditionally copies a **fixed per-arch grub EFI path** off the ESP (e.g. `grubaa64.efi` /
+    `grubx64.efi`); it is **not** conditioned on the bootloader actually present. On a grub-less ESP
+    that copy fails and IC **aborts the entire `output.artifacts` pass** with an artifact-copy error
+    (no skip/continue branch, unlike `verity-hash`; confirmed in IC source `outputArtifacts()` in
+    `artifactsinputoutput.go`). So include `bootloader` **only** for a grub chain; a systemd-boot
+    image must omit it or the build hard-fails.
 - **Boot-loader coverage depends on the chain (grub vs systemd-boot):** for a `shim → grub → UKI`
-  chain, adding `bootloader` (→ `[ukis, shim, bootloader]`) covers the whole signable EFI chain via IC
-  extraction. For a `shim → systemd-boot → UKI` chain (no grub), the safe set is the default
-  **`[ukis, shim]`**, and **systemd-boot's own EFI binary is not emitted by any current
-  `output.artifacts` item** — so it cannot be signed through the IC-native extract → inject flow
-  today. Signing systemd-boot under SB-enforcing therefore needs one of:
+  chain, `[ukis, shim, bootloader]` covers the whole signable EFI chain via IC extraction. For a
+  `shim → systemd-boot → UKI` chain (no grub), the extractable set is `[ukis, shim]`, and
+  **systemd-boot's own EFI binary is not emitted by any current `output.artifacts` item** — so it
+  cannot be signed through the IC-native extract → inject flow today. Signing systemd-boot under
+  SB-enforcing therefore needs one of:
   - **(a)** an out-of-band **in-place ESP re-sign** of the systemd-boot EFI after the image is built,
     outside the IC-native inject flow — concretely: mount the image's ESP (loop-mount the built
     image), `sbsign` `systemd-boot*.efi` in place, unmount. This is the mechanism the older
     mount-based signer path provides; or
   - **(b)** a future upstream IC **`systemd-boot` `output.artifacts` item** (does not exist today),
     which would make the systemd-boot chain fully IC-native like the grub chain.
-
-  **Default resolution:** because `bootloader` hard-errors on a grub-less ESP (confirmed, above),
-  `[ukis, shim, bootloader]` is **not** a safe universal default. The default is **`[ukis, shim]`**;
-  a **grub** target opts `bootloader` in (explicitly, or via `bootloader: grub`). Since tailor is
-  config-opaque it cannot auto-detect the chain, so it does not silently add `bootloader`; a build
-  that probes the ESP to auto-select per chain is a possible future enhancement, but the safe,
-  opaque-preserving default is `[ukis, shim]` + explicit opt-in.
 - **Sign set (what actually gets signed):** every entry in the emitted `inject-files.yaml`. The signer
   signs the whole manifest; tailor does not re-derive it. This keeps the sign step config-opaque and
   robust to IC adding artifact kinds.
+
+**Why no `profile.items` / no auto-authoring:** because the request set lives in the user's config, it
+is already covered by the per-cell fingerprint (the whole IC config is hashed — `fingerprint.rs`), the
+author picks items that are valid for *their* boot chain (no tailor guessing that could hard-fail on
+`bootloader`/`shim`), and there is no second copy on the profile to drift out of sync. tailor reading
+the config is strictly safer than tailor authoring it. See §6.
 
 **Inject-files CLI/schema (for the signer wiring):** the inject pass is `imagecustomizer inject-files
 --build-dir <dir> --config-file <inject-files.yaml> --image-file <base> --output-image-file <out>
@@ -276,33 +298,41 @@ top-level `injectFiles:` list (each entry `partition/source/destination/type`) w
 the `source`/`unsignedSource` wording in `2026-06-29-signing.md` is outdated and should be corrected
 when the signer lands).
 
-## 6. output.artifacts authorship — a deliberate change from 06-29
+## 6. output.artifacts: read, don't author (the 06-29 non-goal stands)
 
 `2026-06-29-signing.md` §3 lists as a **non-goal**: *"tailor does not model or rewrite
-`output.artifacts` — the user authors it in their `config:`."* This design **supersedes that specific
-non-goal**: for a signed build, tailor **auto-adds** the `output.artifacts` directives (and
-`previewFeatures: [output-artifacts, …]`, raw output) to the cell's **rendered config** (the same
-working copy pass 1 runs), derived mechanically from `profile.items`. Rationale: requiring every user
-to hand-write IC preview scaffolding to get a signed image defeats declarative signing; the directives
-are purely mechanical and fully determined by the profile. There is **no separate extract config** —
-tailor injects the directives into the one full customize pass (§1). It does no *typed semantic*
-modeling of the user's config; it only structurally **adds** the `output.artifacts` mapping (the same
-class of structural rewrite `output_artifacts.rs` already performs), leaving every functional
-directive the user wrote intact.
+`output.artifacts` — the user authors it in their `config:`."* **This design keeps that non-goal.**
+An earlier revision proposed reversing it (tailor auto-authoring the `output.artifacts` block from a
+`profile.items` field); that is **rejected** in favour of **read, don't author**:
 
-> **Current-state note:** the implemented executor does **not** yet auto-add these directives — it
-> **requires** the user to author `output.artifacts` and errors otherwise
-> (`executor.rs`: *"image requests `signing:` but its IC config declares no `output.artifacts`"*).
-> This section proposes reversing that. That reversal is milestone P2 and is the one change gated on
-> the author's sign-off.
+- **The user declares `output.artifacts`** (items + `path`) in their own IC `config:`, alongside the
+  other IC directives they already write (`os.uki`, non-signing `previewFeatures`, storage, …).
+- **tailor reads it, never writes the item list.** It performs exactly the structural touch it does
+  today (`output_artifacts.rs`): (a) `uses_output_artifacts()` confirms a **signed** cell actually
+  declares an `output.artifacts` block — and **errors** if not (*"image requests `signing:` but its IC
+  config declares no `output.artifacts`"*, already implemented in `executor.rs`); and (b) it relocates
+  the block's `path` to a tailor-owned staging dir so IC's scratch is reclaimable sudo-free. It does
+  **not** add, remove, or rewrite the `items`.
 
-**Collision case:** if the user's rendered `config:` already contains an `output.artifacts` block on a
-**signed** cell, tailor's auto-added directives would conflict with it. tailor detects this with the
-existing structural check (`output_artifacts::uses_output_artifacts()`) and **errors** ("remove
-`output.artifacts`; tailor authors it for signed builds") rather than silently overriding or merging.
-(Detection is a narrow structural inspection of the generic YAML — consistent with "no typed semantic
-modeling," not with "never inspects.") This is the one intentional principle change, flagged for
-review.
+**Why read beats author** (the reasons the reversal was dropped):
+1. **No item-guessing that can hard-fail.** The item set's validity depends on the image's boot chain
+   (`bootloader` hard-errors on a grub-less ESP; a verity image must include `verity-hash`; §5).
+   tailor is config-opaque and cannot see the chain — so only the image author can pick a set that
+   won't break the build. Authoring from a profile default would shift that burden onto someone who
+   can't see the image.
+2. **No drift.** A `profile.items` field would be a second copy of the request set that could diverge
+   from the user's actual `output.artifacts` — an ambiguity (*which wins?*) that read-only eliminates.
+3. **Fingerprint already covers it.** Because the request set lives in the user's IC config, and the
+   whole config is hashed into the per-cell fingerprint (`fingerprint.rs`), changing `items` already
+   rebuilds the cell — no special-casing needed.
+4. **Opacity preserved.** tailor still does only the narrow structural read/relocate it already does;
+   it adds no `items` and models nothing semantically.
+
+**Cost:** a signed image's config carries a few mechanical lines — the `output.artifacts` block and
+the `output-artifacts` + `inject-files` preview features (see §4's `image.yaml`). That is a small,
+explicit price for keeping signing opaque and correct-by-construction. (If it ever proves worth
+automating, a *future* opt-in could have tailor append just the two signing preview features — never
+the `items` — but that is out of scope here.)
 
 ## 7. Service seam (next milestone)
 
@@ -326,16 +356,18 @@ Ship after the ephemeral path is green.
   single-binary constraint: when the same IC binary is also relied on for other preview features, that
   one binary must carry **all** of them (there is no per-pass binary selection).
 - **Signer identity in the fingerprint:** the per-cell fingerprint (`2026-06-29-signing.md` §8) must
-  include the full resolved signing identity so a config change reliably rebuilds the cell. That is
-  `backend` + `method` + the **normalized request set** (`items` after `verity`/`bootloader` hint
-  expansion) + the chain/verity decision + (for `service`) the stable key/cert identity + the pinned
-  signer version. **Current-state gap:** `fingerprint.rs` today hashes an `inject` bool but **not** the
-  signing profile at all — this must be extended before signed caching is trustworthy. The
-  **ephemeral** method is intentionally **non-reproducible** (fresh cert per build), so its fingerprint
-  tracks the *signing configuration*, not the signature bytes; because a cached, differently-signed
-  image would then read as up-to-date, ephemeral signed cells must treat the image **and** its emitted
-  `ca_cert.pem` as one bundle (both must exist to be up-to-date), or disable caching / add a
-  per-invocation nonce if "fresh cert every build" is a hard requirement. See Open Items.
+  include the resolved **signer identity** so a signing-config change reliably rebuilds the cell —
+  `backend` + `method` (+ `bin`/pinned version, and for `service` the stable key/cert identity). The
+  **request set is already covered**: `items` live in the user's `output.artifacts`, and the whole IC
+  config is hashed (`fingerprint.rs` hashes `canonical_config(ic_config)`), so changing `items`
+  already rebuilds — no separate item hashing needed (a direct benefit of read-don't-author, §6).
+  **Current-state gap:** `fingerprint.rs` hashes an `inject` bool but **not** the signer identity yet —
+  extend it before signed caching is trustworthy. The **ephemeral** method is intentionally
+  **non-reproducible** (fresh cert per build), so its fingerprint tracks the *signing configuration*,
+  not the signature bytes; because a cached, differently-signed image would then read as up-to-date,
+  ephemeral signed cells must treat the image **and** its emitted `ca_cert.pem` as one bundle (both
+  must exist to be up-to-date), or disable caching / add a per-invocation nonce if "fresh cert every
+  build" is a hard requirement. See Open Items.
 - **No host sudo:** the janitor normalizes IC's root-owned staging **before** the host sign step, so
   the signer runs unprivileged (`2026-06-29-signing.md` §7.7 / §9). The IC passes run in the toolchain
   container as usual.
@@ -366,21 +398,19 @@ Ship after the ephemeral path is green.
 
 ## 10. Implementation plan / milestones
 
-- **P1 — config + backend surface.** Add the `ic-sign` backend to `SigningBackend` +
-  `method`/`items` fields to `SigningProfile`; extend `validate` and the `preflight_profile` capability
-  checks (the signer + its host deps). *(config + preflight; no execution.)* **Coupling caveat:** the
-  `items`/`verity`/`bootloader`-hint shape P1 stabilizes only makes sense if §6 (tailor owns
-  `output.artifacts` authoring) is accepted — if §6 is rejected, these fields are redundant with the
-  user's hand-authored block. Resolve §6 and the chain/verity semantics **before** freezing the P1
-  schema, even though P1 writes no execution code.
-- **P2 — output.artifacts authoring.** Auto-add the `output.artifacts` directives to the cell's
-  rendered config from `profile.items` (§6), wired into pass 1 of the three-pass executor. **HOLD until
-  the §6 non-goal supersession is signed off** — the one reversal that needs review. Until then the
-  executor's current "user must author `output.artifacts`" behavior stands.
-- **P3 — the `ic-sign` `Signer` impl** in `tailor-sign` (write the signer config, run `ic-sign`,
-  publish `ca.pem`); register it for the new backend. Unit-testable against manifest fixtures without
-  P2; a real end-to-end needs P2 (or hand-authored `output.artifacts` test configs).
-- **P4 — the ephemeral end-to-end** (the §9 bar).
+- **P1 — config + backend surface. ✅ DONE.** `SigningBackend::IcSign` + `SigningMethod{ephemeral,
+  service}` + `method`/`bin` on `SigningProfile`; `validate` requires `method`; `preflight` checks the
+  `bin` (missing signer host deps warn, not fail — a delegating backend only requires its `bin`).
+  **No `items`/`verity`/`bootloader` on the profile** (read-don't-author, §6).
+- **P2 — output.artifacts authoring. ✂ DROPPED.** Superseded by read-don't-author (§6): the user
+  authors `output.artifacts`; the executor already requires it and tailor reads/relocates it. No
+  auto-authoring work. (A future opt-in to append only the two *signing preview features* could be
+  revisited, but it never authors `items`.)
+- **P3 — the `ic-sign` `Signer` impl. ✅ DONE.** In `tailor-sign`: renders `sign-config.yaml`, runs
+  `<bin> sign-artifacts …`, publishes the emitted enrollment cert; registered for the backend.
+- **P4 — the ephemeral end-to-end. ✅ DONE (the §9 bar).** Verified on a real base: extract → sign →
+  inject produced a signed image + `ca_cert.pem`; the output UKI is Authenticode-signed and verifies
+  against the emitted cert (and fails against a wrong cert — a real positive).
 - **P5 — service seam** (§7) as a follow-up.
 
 ## 11. Open items
@@ -388,36 +418,34 @@ Ship after the ephemeral path is green.
 - **~~`bootloader` on a grub-less ESP — skip or error?~~ RESOLVED (2026-07-24):** IC's `bootloader`
   item **hard-errors** (does not skip) on a grub-less ESP — `outputArtifacts()` unconditionally copies
   a fixed per-arch grub EFI path and aborts the whole pass if it is absent (confirmed in IC source).
-  Resolution folded into §5: the default is **`[ukis, shim]`** and `bootloader` is **opt-in** (explicit
-  or via a `bootloader: grub` hint); it is never silently defaulted.
-- **Host deps:** confirm the ephemeral signer's host dependencies are present (or installable) on the
-  host running tailor.
-- **[decision] Fail-closed boot-chain completeness (§9.0).** Should a signed profile require a declared
-  boot chain (`grub` → require `bootloader`; `systemd-boot` → reject the IC-native flow until the
-  out-of-band ESP re-sign exists; unknown → reject)? Today `[ukis, shim]` can complete on a
-  systemd-boot image with systemd-boot left unsigned yet be labeled "signed." Recommend fail-closed.
-- **[decision] Verity completeness (§5).** Require an explicit `verity: true|false` on signed profiles
-  (no implicit "absent") so a verity-sealed image can't silently ship an unsigned root hash. If we
-  won't require it, document the sharp edge loudly.
-- **[decision] Fingerprint contents + ephemeral caching (§8).** Extend `fingerprint.rs` to hash the
-  resolved signing identity (backend/method/normalized items/chain/verity/cert identity/signer
-  version), and define the up-to-date rule for ephemeral cells (image+cert bundle, or nonce/no-cache).
-  Without this, signed cells can be wrongly skipped.
+  Folded into §5 as author guidance: include `bootloader` only for a grub chain.
+- **~~Host deps~~ RESOLVED:** the ephemeral signer's host deps (`openssl`/`pesign`/`certutil`) are the
+  signer's own; tailor's preflight now **warns** (not fails) when they're absent, so a containerized
+  signer preflights clean (only a missing `bin` hard-fails).
+- **[decision] Fail-closed boot-chain completeness (§9.0).** Should a signed build require a declared
+  boot chain (`grub` → require `bootloader`; `systemd-boot` → flag that systemd-boot's EFI isn't signed
+  by this flow; unknown → reject)? Today a build can complete with part of the chain unsigned yet be
+  labeled "signed." tailor can't detect the chain (opaque), so any enforcement would be author-declared
+  (e.g. a profile/image `chain:` hint) — recommend fail-closed if we add it.
+- **[decision] Verity completeness (§5).** A verity-sealed image whose author omits `verity-hash` ships
+  an unsigned root hash but still "succeeds." tailor can't detect verity (opaque). Open question: should
+  tailor at least **warn** on a signed build whose `output.artifacts.items` omits `verity-hash`
+  (cheap, structural — it already reads the block), accepting some false positives, or leave it wholly
+  to the author? Recommend a soft warn.
+- **[decision] Ephemeral caching (§8).** Extend `fingerprint.rs` to hash the signer identity
+  (`backend`/`method`/`bin`), and define the up-to-date rule for ephemeral cells (image+cert bundle, or
+  nonce/no-cache) so a cached, differently-signed image isn't wrongly skipped. (The request set is
+  already hashed via the user config — read-don't-author, §6.)
 - **[decision] `ic-sign` cert contract vs the port.** §2.2 mentions "public key(s)/cert" (plural) and a
   `leaf_id`-scoped output dir, but `SigningPlan.ca_cert_dest`/`SigningResult.published_ca_cert` are a
-  single path. Confirm ephemeral emits exactly **one** enrollment cert per cell (→ single path is
-  fine, and "unique cert per build" means per cell); if multiple certs or build-level artifacts are
-  ever needed, the port must return a set/dir — which would break the "no port change" headline. Also:
-  the emitted cert is a self-signed leaf, so "CA cert" naming may be a misnomer.
-- **[decision] Conflict semantics for `items` vs `bootloader: grub` / `verity: true`.** Two ways to
-  request the same token. Define: hint expansion is idempotent with an explicit `items` entry;
-  contradictions (`verity: false` + `verity-hash` in `items`) are validation errors; fingerprint uses
-  the normalized set.
+  single path. The e2e emitted exactly **one** enrollment cert per cell (single path is fine, and
+  "unique cert per build" = per cell); if multiple certs or build-level artifacts are ever needed, the
+  port must return a set/dir. Also: the emitted cert is a self-signed leaf, so "CA cert" naming may be
+  a misnomer.
 - **[robustness] `ic-sign` atomicity & fail-closed signing.** Non-zero exit isn't enough for an
-  in-place multi-file op: require it to hard-fail on unrecognized manifest entries, sign into a shadow
-  tree + verify every entry + atomically replace, and publish the enrollment cert only after all
-  artifacts verify. Add a post-sign verification step before `inject-files`. Define partial-failure
-  cleanup.
+  in-place multi-file op: prefer the tool hard-fail on unrecognized manifest entries, sign into a
+  shadow tree + verify every entry + atomically replace, and publish the enrollment cert only after all
+  artifacts verify. A post-sign verification step before `inject-files` would make this robust.
 - **[robustness] Manifest/path integrity.** The emitted `inject-files.yaml` is trusted by the
   privileged `inject-files` pass; canonicalize each `source`, require it to stay under `artifacts_dir`
   (reject `..`/symlink escapes), and verify the manifest is unchanged between sign and inject.
