@@ -273,6 +273,10 @@ impl HostSigner {
 const IC_SIGN_DEFAULT_BIN: &str = "ic-sign";
 /// The `ic-sign` subcommand that signs an IC-extracted artifact set in place.
 const IC_SIGN_SUBCOMMAND: &str = "sign-artifacts";
+/// The fixed filename the `ic-sign` ephemeral method writes the enrollment cert as, into the
+/// `--ephemeral-public-keys-path` directory. Verified against the real tool (its only `.pem` output
+/// name); the CLI contract, not a guess.
+const IC_SIGN_EPHEMERAL_CERT_NAME: &str = "ca.pem";
 /// `pesign` — a host dependency of the `ic-sign` ephemeral method (PE/Authenticode signing).
 const PESIGN: &str = "pesign";
 /// `certutil` (nss-tools) — a host dependency of the `ic-sign` ephemeral method (cert handling).
@@ -418,10 +422,19 @@ fn bin_available(bin: &str) -> bool {
     }
 }
 
-/// Locate the ephemeral enrollment cert the tool wrote into its public-keys dir. Prefers a PEM whose
-/// name mentions `ca`; otherwise the sole `.pem`/`.crt`/`.cer`. Errors if none or if ambiguous.
+/// Locate the ephemeral enrollment cert the tool wrote into its public-keys dir.
+///
+/// The `ic-sign` ephemeral method writes it as a fixed filename ([`IC_SIGN_EPHEMERAL_CERT_NAME`]) —
+/// so that is the **contract**: use `<public_keys>/ca.pem` when present. As a defensive fallback (a
+/// differently-named single cert from another conforming tool), accept a lone `.pem`/`.crt`/`.cer`.
+/// Anything else — no cert, or several with no `ca.pem` — is a deterministic error rather than a
+/// guess.
 fn find_enrollment_cert(public_keys: &Path) -> Result<PathBuf, SignError> {
-    let entries = fs::read_dir(public_keys)
+    let contract = public_keys.join(IC_SIGN_EPHEMERAL_CERT_NAME);
+    if contract.is_file() {
+        return Ok(contract);
+    }
+    let certs = fs::read_dir(public_keys)
         .map_err(|e| io_err("read publickeys dir", public_keys, &e))?
         .filter_map(Result::ok)
         .map(|e| e.path())
@@ -432,23 +445,18 @@ fn find_enrollment_cert(public_keys: &Path) -> Result<PathBuf, SignError> {
             })
         })
         .collect::<Vec<_>>();
-    let named_ca = entries.iter().find(|p| {
-        p.file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.to_ascii_lowercase().contains("ca"))
-    });
-    match (named_ca, entries.as_slice()) {
-        (Some(ca), _) => Ok(ca.clone()),
-        (None, [only]) => Ok(only.clone()),
-        (None, []) => Err(SignError::Execution {
+    match certs.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(SignError::Execution {
             detail: format!(
-                "`ic-sign` produced no enrollment cert in `{}`",
+                "`ic-sign` produced no enrollment cert (`{IC_SIGN_EPHEMERAL_CERT_NAME}`) in `{}`",
                 public_keys.display()
             ),
         }),
-        (None, many) => Err(SignError::Execution {
+        many => Err(SignError::Execution {
             detail: format!(
-                "`ic-sign` produced {} certs in `{}`; cannot pick the enrollment cert",
+                "`ic-sign` produced {} certs in `{}` and none named `{IC_SIGN_EPHEMERAL_CERT_NAME}`; \
+                 cannot pick the enrollment cert",
                 many.len(),
                 public_keys.display()
             ),
@@ -964,30 +972,38 @@ mod tests {
         );
     }
 
-    /// Write an executable stub that emulates `ic-sign sign-artifacts`: it writes an enrollment cert
-    /// into the `--ephemeral-public-keys-path` dir and marks each artifact as signed. Returns its
-    /// absolute path.
+    /// Write an executable stub that emulates `ic-sign sign-artifacts`: it records the argv and the
+    /// received `--config-file` (into `<dir>/seen-argv` and `<dir>/seen-config.yaml`), writes the
+    /// enrollment cert `ca.pem` into `--ephemeral-public-keys-path`, and marks each artifact as
+    /// signed. Returns its absolute path.
     #[cfg(unix)]
     fn write_stub(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let stub = dir.join("ic-sign-stub.sh");
+        let record_dir = dir.to_string_lossy().into_owned();
         fs::write(
             &stub,
-            r#"#!/bin/sh
+            format!(
+                r#"#!/bin/sh
+printf '%s\n' "$@" > "{record_dir}/seen-argv"
 pubkeys=""
 artifacts=""
+config=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --ephemeral-public-keys-path) pubkeys="$2"; shift 2 ;;
     --artifacts-path) artifacts="$2"; shift 2 ;;
+    --config-file) config="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+[ -n "$config" ] && cp "$config" "{record_dir}/seen-config.yaml"
 mkdir -p "$pubkeys"
 printf -- '-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n' > "$pubkeys/ca.pem"
 for f in "$artifacts"/*; do [ -f "$f" ] && printf 'SIGNED' >> "$f"; done
 exit 0
-"#,
+"#
+            ),
         )
         .unwrap();
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
@@ -1054,6 +1070,136 @@ exit 0
         assert!(
             matches!(err, SignError::Execution { detail } if detail.contains("no enrollment cert")),
             "expected a no-cert execution error"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ic_sign_ephemeral_passes_the_expected_cli_and_config() {
+        let dir = tempdir().unwrap();
+        let bin = write_stub(dir.path());
+        let artifacts = dir.path().join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(artifacts.join("inject-files.yaml"), "injectFiles: []\n").unwrap();
+
+        let profile = ic_sign_profile(SigningMethod::Ephemeral, Some(bin));
+        let signer = build_signer("sb", &profile, dir.path());
+        let plan = SigningPlan {
+            inject_files_yaml: artifacts.join("inject-files.yaml"),
+            artifacts_dir: artifacts.clone(),
+            leaf_id: "myimage".to_owned(),
+            ca_cert_dest: dir.path().join("out/ca.pem"),
+        };
+        signer.sign(&plan).unwrap();
+
+        // The exact CLI contract: subcommand + the four flags, with artifacts-path = the plan's dir.
+        let argv = fs::read_to_string(dir.path().join("seen-argv")).unwrap();
+        assert!(argv.contains(IC_SIGN_SUBCOMMAND), "argv: {argv}");
+        for flag in [
+            "--build-dir",
+            "--config-file",
+            "--artifacts-path",
+            "--ephemeral-public-keys-path",
+        ] {
+            assert!(argv.contains(flag), "argv missing {flag}: {argv}");
+        }
+        assert!(
+            argv.contains(&artifacts.to_string_lossy().into_owned()),
+            "argv should pass the plan's artifacts dir: {argv}"
+        );
+        // The rendered sign-config selects the ephemeral method with a publicKeysPath.
+        let config = fs::read_to_string(dir.path().join("seen-config.yaml")).unwrap();
+        assert!(config.contains("signingMethod:"), "config: {config}");
+        assert!(config.contains("ephemeral:"), "config: {config}");
+        assert!(config.contains("publicKeysPath:"), "config: {config}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ic_sign_ephemeral_honors_publish_ca_cert_override() {
+        let dir = tempdir().unwrap();
+        let bin = write_stub(dir.path());
+        let artifacts = dir.path().join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(artifacts.join("inject-files.yaml"), "injectFiles: []\n").unwrap();
+
+        let mut profile = ic_sign_profile(SigningMethod::Ephemeral, Some(bin));
+        profile.publish_ca_cert = Some(PathBuf::from("pinned/enroll.pem"));
+        let signer = build_signer("sb", &profile, dir.path());
+        let plan = SigningPlan {
+            inject_files_yaml: artifacts.join("inject-files.yaml"),
+            artifacts_dir: artifacts.clone(),
+            leaf_id: "myimage".to_owned(),
+            // The per-image default, which the override must win over.
+            ca_cert_dest: dir.path().join("out/default.ca_cert.pem"),
+        };
+        let result = signer.sign(&plan).unwrap();
+
+        let pinned = dir.path().join("pinned/enroll.pem");
+        assert_eq!(result.published_ca_cert.as_deref(), Some(pinned.as_path()));
+        assert!(pinned.exists(), "override path should receive the cert");
+        assert!(
+            !dir.path().join("out/default.ca_cert.pem").exists(),
+            "the per-image default should be unused when the override is set"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ic_sign_ephemeral_propagates_a_tool_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        // A stub that fails partway (writes nothing, non-zero exit) — like prismsign hitting a bad PE.
+        let bin = dir.path().join("fail.sh");
+        fs::write(&bin, "#!/bin/sh\necho 'boom: bad artifact' >&2\nexit 1\n").unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let artifacts = dir.path().join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        let profile = ic_sign_profile(SigningMethod::Ephemeral, Some(bin));
+        let signer = build_signer("sb", &profile, dir.path());
+        let plan = SigningPlan {
+            inject_files_yaml: artifacts.join("inject-files.yaml"),
+            artifacts_dir: artifacts.clone(),
+            leaf_id: "myimage".to_owned(),
+            ca_cert_dest: dir.path().join("out/ca.pem"),
+        };
+        let err = signer.sign(&plan).unwrap_err();
+        // The non-zero tool exit surfaces as an execution error with the captured stderr — and we do
+        // NOT fall through to publish a (non-existent) cert.
+        assert!(
+            matches!(&err, SignError::Execution { detail } if detail.contains("boom")),
+            "expected the tool's stderr in the error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn find_enrollment_cert_prefers_the_contract_name() {
+        let dir = tempdir().unwrap();
+        // A decoy cert plus the contract `ca.pem`; the contract must win regardless of the decoy.
+        fs::write(dir.path().join("leaf.crt"), b"decoy").unwrap();
+        fs::write(dir.path().join(IC_SIGN_EPHEMERAL_CERT_NAME), b"real").unwrap();
+        let found = find_enrollment_cert(dir.path()).unwrap();
+        assert_eq!(found, dir.path().join(IC_SIGN_EPHEMERAL_CERT_NAME));
+    }
+
+    #[test]
+    fn find_enrollment_cert_falls_back_to_a_sole_cert() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("enroll.pem"), b"only").unwrap();
+        let found = find_enrollment_cert(dir.path()).unwrap();
+        assert_eq!(found, dir.path().join("enroll.pem"));
+    }
+
+    #[test]
+    fn find_enrollment_cert_errors_on_ambiguity_without_the_contract_name() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.pem"), b"one").unwrap();
+        fs::write(dir.path().join("b.crt"), b"two").unwrap();
+        let err = find_enrollment_cert(dir.path()).unwrap_err();
+        assert!(
+            matches!(err, SignError::Execution { detail } if detail.contains("cannot pick")),
+            "ambiguous certs with no ca.pem should error deterministically"
         );
     }
 }
