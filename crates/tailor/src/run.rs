@@ -10,18 +10,20 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use indexmap::IndexMap;
 use serde::Serialize;
 use tailor_config::{
-    Arch, BaseSource, OutputFormat, OutputSpec, PullPolicy, RenderedCell, ToolConfig,
-    ToolchainEntry, ToolsDirSourceInline, Workspace, discover, expand, find_manifest, merge_plan,
-    render_image, write_golden,
+    Arch, BaseSource, ImageDefinition, Operation, OutputArtifactsPolicy, OutputFormat, OutputSpec,
+    PullPolicy, RenderedCell, ToolConfig, ToolchainEntry, ToolsDirSourceInline, Workspace,
+    discover, expand, find_manifest, merge_plan, render_image, write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, Cell, ContainerRuntime, CoreError, Executor, LocalImage,
-    LockedBase, LockedContainer, Lockfile, MissingPrerequisite, Orchestrator, ResolvedBase,
-    ResolvedToolchain, ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement,
-    SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download, is_valid_var_name,
-    runtime_config, summarize, toolchain_for, toolchain_key, tools_dir_key, verify,
+    BaseResolver, BuildOptions, Cell, CellSlug, ContainerRuntime, CoreError, ExecutionContext,
+    Executor, LocalImage, LockedBase, LockedContainer, Lockfile, MissingPrerequisite, Orchestrator,
+    ResolvedBase, ResolvedToolchain, ResolvedToolsDirSource, Selector, SignError, Signer,
+    SigningRequirement, SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download,
+    is_valid_var_name, runtime_config, summarize, toolchain_for, toolchain_key, tools_dir_key,
+    verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
@@ -29,8 +31,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::{
-        AddCommand, BasesCommand, BuildArgs, Cli, Command, ExportArgs, InitArgs, InitTemplate,
-        MatrixFormat, TimestampMode,
+        AddCommand, BasesCommand, BuildArgs, Cli, Command, ConvertArgs, ExportArgs, InitArgs,
+        InitTemplate, MatrixFormat, TimestampMode,
     },
     error::AppError,
     scaffold,
@@ -98,6 +100,13 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
         }
         Command::Init(args) => return init(args),
         Command::Add { what } => return add(what),
+        Command::Convert(args) => {
+            let engine = EngineOverride {
+                engine: cli.engine.map(Into::into),
+                host: cli.host.clone(),
+            };
+            return convert(args, &engine).await;
+        }
         _ => {}
     }
     let workspace = load_workspace(&cli)?;
@@ -110,7 +119,7 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
         ic_log_level: cli.ic_log_level.map(Into::into),
     };
     match cli.command {
-        Command::Version | Command::Init(_) | Command::Add { .. } => {
+        Command::Version | Command::Init(_) | Command::Add { .. } | Command::Convert(_) => {
             unreachable!("handled before workspace discovery")
         }
         Command::List => {
@@ -1084,6 +1093,211 @@ async fn wait_for_shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+/// The default Image Customizer container for a workspace-free `tailor convert`.
+const DEFAULT_CONVERT_CONTAINER: &str = "mcr.microsoft.com/azurelinux/imagecustomizer:latest";
+
+/// `tailor convert <input> --to <format>` — a one-shot `imagecustomizer convert` with no workspace or
+/// config. Synthesizes a single convert cell and runs it directly through the executor, reusing the
+/// same container/janitor machinery as `build` (so the output is sudo-free). See
+/// `meta/docs/2026-06-22-design.md` §7.4 (the `convert` operation).
+async fn convert(args: &ConvertArgs, engine: &EngineOverride) -> Result<(), AppError> {
+    let cwd =
+        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let input = tailor_config::absolutize(&args.input, &cwd);
+    if !input.is_file() {
+        return Err(AppError::Message(format!(
+            "input image `{}` does not exist (or is not a file)",
+            input.display()
+        )));
+    }
+    let arch = match args.arch.as_deref() {
+        None | Some("amd64") => Arch::Amd64,
+        Some("arm64") => Arch::Arm64,
+        Some(other) => {
+            return Err(AppError::Message(format!(
+                "unknown architecture `{other}` (expected `amd64` or `arm64`)"
+            )));
+        }
+    };
+
+    // Default the output beside the input (its name with the target extension); an explicit `-o` is
+    // resolved against the current directory.
+    let default_name = format!(
+        "{}.{}",
+        input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("converted"),
+        format_extension(args.to)
+    );
+    let input_parent = input
+        .parent()
+        .map_or_else(|| cwd.clone(), Path::to_path_buf);
+    let final_output = match &args.output {
+        Some(path) => tailor_config::absolutize(path, &cwd),
+        None => input_parent.join(&default_name),
+    };
+    let output_parent = final_output
+        .parent()
+        .map_or_else(|| cwd.clone(), Path::to_path_buf);
+    let slug = final_output
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| AppError::Message("output path has no file name".to_owned()))?
+        .to_owned();
+    // Stage IC's output in a subdir of the destination: a subdir is always a safe read-write mount
+    // (the guard only refuses mounting `cwd`/an ancestor), and it keeps the (potentially huge)
+    // converted image on the destination filesystem so the final move is an instant rename.
+    let staging = output_parent.join(format!(".tailor-convert-{}", std::process::id()));
+
+    // Scratch base for IC's own `--build-dir`: honor --build-dir-base, else a unique dir under the
+    // system temp dir. Never `/`.
+    let build_dir_base = match args.build_dir_base.clone() {
+        Some(dir) => tailor_config::absolutize(dir, &cwd),
+        None => std::env::temp_dir().join(format!("tailor-convert-{}", std::process::id())),
+    };
+
+    let container = args
+        .container
+        .clone()
+        .unwrap_or_else(|| DEFAULT_CONVERT_CONTAINER.to_owned());
+
+    // Reuse the default runtime config (host-root `/host`, privileged, default janitor) and override
+    // the workspace root (so the input's directory is bind-mounted read-only) and the scratch base.
+    let mut runtime = runtime_config(
+        &tailor_config::defaults::default_tool_config(),
+        &Lockfile::default(),
+        &cwd,
+    );
+    runtime.workspace_root = input_parent;
+    runtime.build_dir_base = Some(build_dir_base);
+
+    let cell = convert_cell(&input, &runtime.workspace_root, arch, args.to, slug);
+    let context = ExecutionContext {
+        output_dir: staging.clone(),
+        ic_image_ref: container.clone(),
+        base_ref: None,
+        tools_dir: None,
+        platform: format!("linux/{}", arch.as_str()),
+        clone_index: None,
+        dry_run: args.dry_run,
+        pull: true,
+        signer: None,
+        runtime,
+    };
+
+    if args.dry_run {
+        let result = IcExecutor::new(NoopRuntime)
+            .execute(&cell, &context, CancellationToken::new())
+            .await
+            .map_err(AppError::from)?;
+        println!("{}", result.logs);
+        return Ok(());
+    }
+
+    status(
+        "Converting",
+        &format!("{} → {}", input.display(), args.to.as_str()),
+    );
+    let cancel = cancel_on_signal();
+    let executor = IcExecutor::new(
+        establish_runtime(engine, &tailor_config::defaults::default_tool_config()).await?,
+    );
+    let result = executor.execute(&cell, &context, cancel).await;
+    // Publish the produced image out of staging to the final destination (an instant, same-filesystem
+    // rename), then remove the staging dir regardless of outcome.
+    let published = match &result {
+        Ok(r) if r.exit_code == 0 => fs::rename(&r.artifact_path, &final_output).map_err(|e| {
+            AppError::Message(format!(
+                "move converted image to `{}`: {e}",
+                final_output.display()
+            ))
+        }),
+        _ => Ok(()),
+    };
+    let _ = fs::remove_dir_all(&staging);
+    let result = result.map_err(AppError::from)?;
+    if result.exit_code != 0 {
+        return Err(AppError::Message(format!(
+            "Image Customizer convert failed (exit {})",
+            result.exit_code
+        )));
+    }
+    published?;
+    status("Converted", &final_output.display().to_string());
+    Ok(())
+}
+
+/// The output-file extension for a format (mirrors [`artifact_name`]); `convert` never produces the
+/// directory/`pxe` forms, so every convert format has a real extension.
+fn format_extension(format: OutputFormat) -> &'static str {
+    match format {
+        OutputFormat::Cosi => "cosi",
+        OutputFormat::Vhd | OutputFormat::VhdFixed => "vhd",
+        OutputFormat::Vhdx => "vhdx",
+        OutputFormat::Qcow2 => "qcow2",
+        OutputFormat::Raw | OutputFormat::BaremetalImage => "raw",
+        OutputFormat::Iso => "iso",
+        OutputFormat::PxeTar => "tar.gz",
+        OutputFormat::PxeDir => "",
+    }
+}
+
+/// Synthesize the single `Cell` for a workspace-free convert: a local-file base, `operation: convert`,
+/// no config, one output. `dir` (the base-relative root) is the input's directory.
+fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug: String) -> Cell {
+    let definition = ImageDefinition {
+        name: "convert".to_owned(),
+        toolchain: None,
+        skip: false,
+        tools_dir: None,
+        matrix: None,
+        selectors: None,
+        outputs: None,
+        base: None,
+        features: Vec::new(),
+        params: IndexMap::new(),
+        rpm_sources: Vec::new(),
+        operation: Some(Operation::Convert),
+        output_artifacts: None,
+        signing: None,
+        inject_files: None,
+        extra_dependencies: Vec::new(),
+        config: None,
+    };
+    let target = Target {
+        definition,
+        dir: dir.to_path_buf(),
+        default_outputs: Vec::new(),
+        output_artifacts: OutputArtifactsPolicy::default(),
+        root: dir.to_path_buf(),
+        base_images: tailor_config::BaseImageCatalogue::default(),
+        tools_dir_sources: Vec::new(),
+    };
+    let output = OutputSpec {
+        format,
+        cosi_compression_level: None,
+        name: None,
+    };
+    Cell {
+        target: Arc::new(target),
+        axes: BTreeMap::new(),
+        arch,
+        output,
+        slug: CellSlug(slug),
+        ic_config: serde_yaml_ng::Value::Null,
+        base: BaseSource::Path {
+            path: input.to_path_buf(),
+            arch: Some(arch),
+        },
+        base_image: None,
+        rpm_sources: Vec::new(),
+        tools_dir: None,
+        skip: false,
+        skip_pins: Vec::new(),
     }
 }
 

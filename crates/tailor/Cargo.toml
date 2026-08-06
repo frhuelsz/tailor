@@ -18,6 +18,7 @@ tailor-resolve = { workspace = true }
 tailor-exec = { workspace = true }
 tailor-sign = { workspace = true }
 clap = { workspace = true }
+indexmap = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }

@@ -72,6 +72,7 @@ nav:
       - Select and build one cell: how-to/select-and-build-one-cell.md
       - Cross-arch building: how-to/cross-arch-building.md
       - Change an output format: how-to/change-an-output-format.md
+      - Convert an image format: how-to/convert-an-image-format.md
       - Build from an Azure Linux base: how-to/build-with-an-azure-linux-base.md
       - Use a base-image catalogue: how-to/use-a-base-image-catalogue.md
       - Override a base per axis: how-to/override-a-base-per-axis.md

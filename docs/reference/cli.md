@@ -50,6 +50,22 @@ Resolve and run Image Customizer for selected images. Default: all images.
 | `--jobs N` | Reserved; currently sequential. |
 | `--clones N` | Build N identical clones of each cell. Default: `1`. |
 
+## `tailor convert <input> --to <format>`
+
+Convert a single image file to another format via Image Customizer (`convert`) — no workspace or
+config required. Writes the output beside the input by default (or to `-o`), owned by your user.
+
+| Flag | Meaning |
+| --- | --- |
+| `--to FORMAT` | Target format (required): `vhd`, `vhd-fixed`, `vhdx`, `qcow2`, `raw`, `cosi`, `baremetal-image`. |
+| `-o`, `--output PATH` | Output path. Default: the input's name with the target extension, beside the input. |
+| `--container REF` | The Image Customizer image to run. Default: `mcr.microsoft.com/azurelinux/imagecustomizer:latest`. |
+| `--arch ARCH` | `amd64` (default) or `arm64` — drives `--platform linux/<arch>`. |
+| `--build-dir-base PATH` | Host base for IC scratch. Default: a unique dir under the system temp dir. Must not be `/`. |
+| `--dry-run` | Render the container invocation without running it. |
+
+See [Convert an image format](../how-to/convert-an-image-format.md).
+
 ## `tailor validate [images...]`
 
 Render every selected cell without building. Catches tailor-owned config and merge errors. Accepts `-s/--select` and `--cell`.

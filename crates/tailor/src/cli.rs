@@ -130,6 +130,9 @@ impl From<EngineArg> for tailor_config::Engine {
 pub(crate) enum Command {
     /// Resolve and run Image Customizer for the given images (default: all).
     Build(BuildArgs),
+    /// Convert a single image file to another format via Image Customizer (`convert`), with no
+    /// workspace or config required — a thin wrapper over `imagecustomizer convert`.
+    Convert(ConvertArgs),
     /// Render the final IC config per cell, writing golden snapshots.
     Render(ImagesArgs),
     /// Export committed IC config YAMLs for a non-tailor pipeline; `--check` fails on drift.
@@ -360,4 +363,60 @@ pub(crate) struct BuildArgs {
     /// Build N identical clones of each cell.
     #[arg(long, default_value_t = 1)]
     pub(crate) clones: u32,
+}
+
+/// Args for `tailor convert` — a one-shot, workspace-free `imagecustomizer convert`.
+#[derive(Debug, Args)]
+pub(crate) struct ConvertArgs {
+    /// The input image file to convert (a local path).
+    pub(crate) input: PathBuf,
+
+    /// The target output format. One of the convert-supported formats: `vhd`, `vhd-fixed`, `vhdx`,
+    /// `qcow2`, `raw`, `cosi`, `baremetal-image`.
+    #[arg(long, value_name = "FORMAT", value_parser = parse_convert_format)]
+    pub(crate) to: tailor_config::OutputFormat,
+
+    /// Where to write the converted image (default: the input's name with the target extension,
+    /// beside the input).
+    #[arg(short, long, value_name = "PATH")]
+    pub(crate) output: Option<PathBuf>,
+
+    /// The Image Customizer container to run (default: `mcr.microsoft.com/azurelinux/imagecustomizer:latest`).
+    #[arg(long, value_name = "REF")]
+    pub(crate) container: Option<String>,
+
+    /// The image architecture, driving `--platform linux/<arch>` (default: `amd64`).
+    #[arg(long, value_name = "ARCH")]
+    pub(crate) arch: Option<String>,
+
+    /// Host filesystem base for IC's per-run scratch (must not be `/` or on the same filesystem as
+    /// `/`). Default: a unique directory under the system temp dir.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) build_dir_base: Option<PathBuf>,
+
+    /// Render the container invocation without running it.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+}
+
+/// Parse and restrict `--to` to the formats IC `convert` supports (it takes an already-built image,
+/// so the OS-build-only formats `iso`/`pxe-*` are excluded).
+fn parse_convert_format(value: &str) -> Result<tailor_config::OutputFormat, String> {
+    use tailor_config::OutputFormat;
+    let format = match value {
+        "vhd" => OutputFormat::Vhd,
+        "vhd-fixed" => OutputFormat::VhdFixed,
+        "vhdx" => OutputFormat::Vhdx,
+        "qcow2" => OutputFormat::Qcow2,
+        "raw" => OutputFormat::Raw,
+        "cosi" => OutputFormat::Cosi,
+        "baremetal-image" => OutputFormat::BaremetalImage,
+        other => {
+            return Err(format!(
+                "`{other}` is not a convert-supported format (use one of: vhd, vhd-fixed, vhdx, \
+                 qcow2, raw, cosi, baremetal-image)"
+            ));
+        }
+    };
+    Ok(format)
 }
