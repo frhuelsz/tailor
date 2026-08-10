@@ -446,6 +446,8 @@
       
         
       
+        
+      
     
     
       
@@ -585,6 +587,27 @@
   
   <span class="md-ellipsis">
     Change an output format
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/convert-an-image-format/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Convert an image format
   </span>
   
 
@@ -983,6 +1006,15 @@
   <a href="#tailor-build-images" class="md-nav__link">
     <span class="md-ellipsis">
       tailor build [images...]
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tailor-convert-input-to-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      tailor convert &lt;input&gt; --to &lt;format&gt;
     </span>
   </a>
   
@@ -1487,6 +1519,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tailor-convert-input-to-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      tailor convert &lt;input&gt; --to &lt;format&gt;
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tailor-validate-images" class="md-nav__link">
     <span class="md-ellipsis">
       tailor validate [images...]
@@ -1771,6 +1812,44 @@
 </tr>
 </tbody>
 </table>
+<h2 id="tailor-convert-input-to-format"><code>tailor convert &lt;input&gt; --to &lt;format&gt;</code><a class="headerlink" href="#tailor-convert-input-to-format" title="Permanent link">&para;</a></h2>
+<p>Convert a single image file to another format via Image Customizer (<code>convert</code>) — no workspace or
+config required. Writes the output beside the input by default (or to <code>-o</code>), owned by your user.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--to FORMAT</code></td>
+<td>Target format (required): <code>vhd</code>, <code>vhd-fixed</code>, <code>vhdx</code>, <code>qcow2</code>, <code>raw</code>, <code>cosi</code>, <code>baremetal-image</code>.</td>
+</tr>
+<tr>
+<td><code>-o</code>, <code>--output PATH</code></td>
+<td>Output path. Default: the input's name with the target extension, beside the input.</td>
+</tr>
+<tr>
+<td><code>--container REF</code></td>
+<td>The Image Customizer image to run. Default: <code>mcr.microsoft.com/azurelinux/imagecustomizer:latest</code>.</td>
+</tr>
+<tr>
+<td><code>--arch ARCH</code></td>
+<td><code>amd64</code> (default) or <code>arm64</code> — drives <code>--platform linux/&lt;arch&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>--build-dir-base PATH</code></td>
+<td>Host base for IC scratch. Default: a unique dir under the system temp dir. Must not be <code>/</code>.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>Render the container invocation without running it.</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../../how-to/convert-an-image-format/">Convert an image format</a>.</p>
 <h2 id="tailor-validate-images"><code>tailor validate [images...]</code><a class="headerlink" href="#tailor-validate-images" title="Permanent link">&para;</a></h2>
 <p>Render every selected cell without building. Catches tailor-owned config and merge errors. Accepts <code>-s/--select</code> and <code>--cell</code>.</p>
 <h2 id="tailor-matrix-images-format-jsonslugs"><code>tailor matrix [images...] [--format json|slugs]</code><a class="headerlink" href="#tailor-matrix-images-format-jsonslugs" title="Permanent link">&para;</a></h2>
