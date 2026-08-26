@@ -15,6 +15,7 @@ use tailor_config::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    deps,
     domain::{BuildPlan, Cell, CellSlug, CellToolsDir, PlannedCell, Target},
     error::CoreError,
     fingerprint::{FingerprintInputs, fingerprint},
@@ -110,6 +111,21 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     .resolve(&cell.base, cell.arch, &cell.target.dir)
                     .await?;
                 let resolved_tools_dir = resolved_tools_dir(tools_dir_sources, &cell)?;
+                // Hash the cell's declared local dependencies so an edit to an IC-config-referenced
+                // asset (an `additionalFiles` script, a local RPM) invalidates the incremental
+                // fingerprint — the config text only *names* these files (`deps.rs`).
+                let extra_dependency_hashes = deps::hash_dependencies(
+                    &cell.target.definition.extra_dependencies,
+                    &cell.target.dir,
+                    None,
+                    target.name(),
+                )?;
+                let rpm_source_hashes = deps::hash_dependencies(
+                    &cell.rpm_sources,
+                    &cell.target.dir,
+                    Some(deps::REPODATA_DIR),
+                    target.name(),
+                )?;
                 let print = fingerprint(&FingerprintInputs {
                     slug: cell.slug.as_ref(),
                     toolchain_digest: &resolved_toolchain.ic_image_ref,
@@ -118,8 +134,8 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     operation: target.definition.operation.unwrap_or_default(),
                     inject_files: target.definition.inject_files.unwrap_or(false),
                     tools_dir_digest: resolved_tools_dir.map(|source| source.digest.as_str()),
-                    extra_dependency_hashes: &[],
-                    rpm_source_hashes: &[],
+                    extra_dependency_hashes: &extra_dependency_hashes,
+                    rpm_source_hashes: &rpm_source_hashes,
                 });
                 let artifact =
                     output_dir.join(artifact_name(cell.slug.as_ref(), cell.output.format));
@@ -870,6 +886,120 @@ mod tests {
         assert_eq!(plan.cells.len(), 4);
         assert!(plan.cells.iter().all(|c| !c.up_to_date));
         assert_eq!(plan.stale().count(), 4);
+    }
+
+    /// Regression: editing a file under a declared `extraDependencies` directory must change the
+    /// fingerprint (the config text only *names* the file). Guards the historical bug where `plan()`
+    /// hardcoded `extra_dependency_hashes: &[]` (`deps.rs`).
+    #[tokio::test]
+    async fn editing_an_extra_dependency_changes_the_fingerprint() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: dep
+                outputs:
+                  - format: cosi
+                base:
+                  path: ./b.img
+                extraDependencies:
+                  - ./files
+                config:
+                  os:
+                    additionalFiles:
+                      - source: files/hook.sh
+                        destination: /usr/local/bin/hook.sh
+            "},
+        );
+        write(tmp.path(), "files/hook.sh", "echo before\n");
+
+        let build_target = || {
+            let definition = load_image(tmp.path().join("image.yaml")).unwrap();
+            Arc::new(Target {
+                definition,
+                dir: tmp.path().to_path_buf(),
+                default_outputs: Vec::new(),
+                output_artifacts: OutputArtifactsPolicy::default(),
+                root: tmp.path().to_path_buf(),
+                base_images: BaseImageCatalogue::default(),
+                tools_dir_sources: Vec::new(),
+            })
+        };
+        let tool = tool_config();
+        let toolchains = resolved_toolchains(&tool);
+        let lock = Lockfile::default();
+        let out = TempDir::new().unwrap();
+        let plan_once = || async {
+            Orchestrator::new(FakeExecutor::default(), FakeResolver)
+                .plan(
+                    &[build_target()],
+                    &tool,
+                    &lock,
+                    &toolchains,
+                    &BTreeMap::new(),
+                    &Selector::default(),
+                    out.path(),
+                )
+                .await
+                .unwrap()
+        };
+
+        let before = plan_once().await.cells[0].fingerprint;
+        write(tmp.path(), "files/hook.sh", "echo after\n"); // in-place edit, config unchanged
+        let after = plan_once().await.cells[0].fingerprint;
+        assert_ne!(
+            before, after,
+            "an edit to an extraDependencies file must change the fingerprint"
+        );
+    }
+
+    /// A declared `extraDependencies` path that does not exist fails loudly at plan time
+    /// (fail-closed), rather than silently hashing it as absent.
+    #[tokio::test]
+    async fn a_missing_extra_dependency_fails_planning() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: dep
+                outputs:
+                  - format: cosi
+                base:
+                  path: ./b.img
+                extraDependencies:
+                  - ./missing
+                config:
+                  os:
+                    hostname: dep
+            "},
+        );
+        let definition = load_image(tmp.path().join("image.yaml")).unwrap();
+        let target = Arc::new(Target {
+            definition,
+            dir: tmp.path().to_path_buf(),
+            default_outputs: Vec::new(),
+            output_artifacts: OutputArtifactsPolicy::default(),
+            root: tmp.path().to_path_buf(),
+            base_images: BaseImageCatalogue::default(),
+            tools_dir_sources: Vec::new(),
+        });
+        let tool = tool_config();
+        let toolchains = resolved_toolchains(&tool);
+        let err = Orchestrator::new(FakeExecutor::default(), FakeResolver)
+            .plan(
+                &[target],
+                &tool,
+                &Lockfile::default(),
+                &toolchains,
+                &BTreeMap::new(),
+                &Selector::default(),
+                TempDir::new().unwrap().path(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CoreError::MissingDependency { .. }));
     }
 
     #[tokio::test]

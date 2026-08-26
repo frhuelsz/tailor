@@ -102,6 +102,9 @@ pub enum CoreError {
     #[error("base image `{name}` is missing its file `{}`; run `tailor bases download {name}` or place it", .path.display())]
     BaseImageMissing { name: String, path: PathBuf },
 
+    #[error("image `{image}` declares dependency path `{}`, which does not exist (relative to the image directory)", .path.display())]
+    MissingDependency { image: String, path: PathBuf },
+
     #[error(
         "image `{image}` cell `{slug}` sets base `oci.platform: {platform}` (arch `{platform_arch}`) but the cell arch is `{cell_arch}`; declare a matching `arch` or fix the platform"
     )]

@@ -5,6 +5,7 @@
 
 pub mod ado;
 pub mod catalogue;
+pub mod deps;
 pub mod domain;
 pub mod error;
 pub mod fingerprint;
