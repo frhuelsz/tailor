@@ -1432,7 +1432,7 @@ it <strong>without a registry pull</strong>. Under <code>pull: never</code>, tai
 <p>A local image is built for one architecture. tailor reads the local image's architecture during
 resolution and <strong>fails fast, before any container run,</strong> if it cannot provide a selected cell's arch:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>error: toolchain `local-ic` local image is `amd64` but cell `gizmo_arm64_cosi` targets `arm64`;
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>       no local image for that arch and pull policy won&#39;t fetch it
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>       no local image for that arch and pull policy won't fetch it
 </code></pre></div>
 <p>Build cells whose arch the local image can serve (for example select the matching arch, see
 <a href="../cross-arch-building/">Cross-arch building</a>), or provide a local image for the other arch.</p>
