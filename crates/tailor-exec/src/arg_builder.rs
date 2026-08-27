@@ -883,6 +883,45 @@ mod tests {
         assert!(!binds.iter().any(|bind| bind.starts_with("/:")));
     }
 
+    /// Regression (acl-iso): a directory RPM source becomes a tailor-built farm that the executor
+    /// passes in `extra_rw` (createrepo writes `repodata/` into it). Even though the farm path is also
+    /// an `rpm_sources` entry — which the out-of-workspace loop binds read-only — the overlapping
+    /// read-write bind must win, so IC can create the repo. A `.repo`-file source (not a farm, not in
+    /// `extra_rw`) stays read-only.
+    #[test]
+    fn a_writable_rpm_farm_overrides_the_read_only_rpm_bind() {
+        let mut cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/images/base.raw".into(),
+                arch: None,
+            },
+        );
+        // Mimic the executor's post-`prepare_rpm_farms` cell: one directory farm + one `.repo`
+        // passthrough, both out-of-workspace (so the read-only loop binds them).
+        let farm = PathBuf::from("/rpms/.tailor-farm-sample-0");
+        let repo_file = PathBuf::from("/rpms/extra.repo");
+        cell.rpm_sources = vec![farm.clone(), repo_file];
+        let context = sample_context();
+
+        // The executor adds only the writable (directory) farm to `extra_rw`.
+        let binds = container_binds(&cell, &context, std::slice::from_ref(&farm)).unwrap();
+
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind
+                    == "/rpms/.tailor-farm-sample-0:/host/rpms/.tailor-farm-sample-0:rw"),
+            "the directory farm must be bound read-write; got {binds:?}"
+        );
+        assert!(
+            binds
+                .iter()
+                .any(|bind| bind == "/rpms/extra.repo:/host/rpms/extra.repo:ro"),
+            "a .repo-file source must stay read-only; got {binds:?}"
+        );
+    }
+
     #[test]
     fn render_command_groups_flags_and_values_per_line() {
         let argv = vec![

@@ -99,6 +99,14 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
         let prepared_tools_dir = prepare_tools_dir(&self.runtime, context, cancel.clone()).await?;
 
         let farms = prepare_rpm_farms(cell, context)?;
+        // Directory RPM farms are tailor-created and disposable; IC runs `createrepo_c` in place in
+        // each, so they must be bound read-write (a `.repo`-file passthrough stays read-only). This is
+        // the writable carve-out the read-only workspace bind requires (`meta/docs/2026-06-22-design.md` §7.8).
+        let writable_farms = farms
+            .iter()
+            .filter(|farm| farm.writable)
+            .map(|farm| farm.arg_path.clone())
+            .collect::<Vec<_>>();
         let mut run_cell = cell.clone();
         run_cell.rpm_sources = farms
             .iter()
@@ -152,6 +160,7 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                 context,
                 &run_cell,
                 staging.as_ref(),
+                &writable_farms,
                 &signer,
                 &working_copy_path,
                 log_file.as_ref(),
@@ -160,11 +169,12 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             .await
         } else {
             let args = arg_builder::build_ic_args(&run_cell, context)?;
-            let extra_rw = staging
+            let mut extra_rw = staging
                 .as_ref()
                 .map(|plan| plan.dir.clone())
                 .into_iter()
                 .collect::<Vec<_>>();
+            extra_rw.extend(writable_farms.iter().cloned());
             let result = self
                 .run_ic(
                     cell,
@@ -314,6 +324,7 @@ impl<R: ContainerRuntime> IcExecutor<R> {
         context: &ExecutionContext,
         run_cell: &Cell,
         staging: Option<&output_artifacts::StagingPlan>,
+        writable_farms: &[PathBuf],
         signer: &Arc<dyn Signer>,
         working_copy_path: &Path,
         log_file: Option<&PathBuf>,
@@ -331,13 +342,16 @@ impl<R: ContainerRuntime> IcExecutor<R> {
         };
         let intermediate = arg_builder::intermediate_path(cell, context);
 
-        // Pass 1 — customize → raw intermediate.
+        // Pass 1 — customize → raw intermediate. The staging dir and any writable RPM farms are
+        // bound read-write (createrepo runs in the farms during customize).
+        let mut pass1_rw = vec![plan.dir.clone()];
+        pass1_rw.extend(writable_farms.iter().cloned());
         let customize = self
             .run_ic(
                 cell,
                 context,
                 arg_builder::build_signed_customize_args(run_cell, context, &intermediate)?,
-                slice::from_ref(&plan.dir),
+                &pass1_rw,
                 log_file,
                 cancel.clone(),
             )
@@ -584,6 +598,11 @@ fn copy_dir_all(source: &Path, dest: &Path) -> Result<(), std::io::Error> {
 #[derive(Debug)]
 struct RpmFarm {
     arg_path: PathBuf,
+    /// A tailor-built **directory** farm (reflink/hardlink of a directory source): IC runs
+    /// `createrepo_c` in place here, so it must be bind-mounted read-write. A `.repo`-file passthrough
+    /// is `false` — createrepo does not run and the file stays read-only
+    /// (`meta/docs/2026-06-22-design.md` §7.8).
+    writable: bool,
 }
 
 impl RpmFarm {
@@ -607,10 +626,14 @@ fn prepare_rpm_farms(cell: &Cell, context: &ExecutionContext) -> Result<Vec<RpmF
                 context: format!("failed to build RPM farm `{}`", dest.display()),
                 source: source_err,
             })?;
-            farms.push(RpmFarm { arg_path: dest });
+            farms.push(RpmFarm {
+                arg_path: dest,
+                writable: true,
+            });
         } else {
             farms.push(RpmFarm {
                 arg_path: source.clone(),
+                writable: false,
             });
         }
     }
