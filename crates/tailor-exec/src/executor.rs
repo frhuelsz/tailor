@@ -236,6 +236,13 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             )
             .await?;
         }
+        // Reclaim the disposable RPM farms (root-owned `repodata/` created by IC's createrepo).
+        // Removing the whole farm — not just chowning its repodata — leaves no `.tailor-farm-*`
+        // clutter next to the user's RPMs, and runs on the error path too (best-effort when IC failed).
+        if !writable_farms.is_empty() {
+            self.reclaim_subordinate(&writable_farms, &context.runtime, cancel.clone(), ic_failed)
+                .await?;
+        }
         let result = result?;
 
         if result.exit_code != 0 {
@@ -247,7 +254,6 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
         }
         verify_artifact(&artifact_path, cell.output.format)?;
         let mut managed_paths = vec![artifact_path.clone()];
-        managed_paths.extend(farms.iter().map(RpmFarm::repodata_path));
         // The image cache dir is written by IC inside the privileged container (root-owned); fold it
         // into the janitor sweep so the caller can read/clean it sudo-free.
         if let Some(cache_dir) = &context.runtime.image_cache_dir {
@@ -599,21 +605,20 @@ fn copy_dir_all(source: &Path, dest: &Path) -> Result<(), std::io::Error> {
 struct RpmFarm {
     arg_path: PathBuf,
     /// A tailor-built **directory** farm (reflink/hardlink of a directory source): IC runs
-    /// `createrepo_c` in place here, so it must be bind-mounted read-write. A `.repo`-file passthrough
-    /// is `false` — createrepo does not run and the file stays read-only
+    /// `createrepo_c` in place here, so it must be bind-mounted read-write and reclaimed afterward. A
+    /// `.repo`-file passthrough is `false` — createrepo does not run and the file stays read-only
     /// (`meta/docs/2026-06-22-design.md` §7.8).
     writable: bool,
-}
-
-impl RpmFarm {
-    fn repodata_path(&self) -> PathBuf {
-        self.arg_path.join("repodata")
-    }
 }
 
 fn prepare_rpm_farms(cell: &Cell, context: &ExecutionContext) -> Result<Vec<RpmFarm>, ExecError> {
     let mut farms = Vec::new();
     for (index, source) in cell.rpm_sources.iter().enumerate() {
+        // RPM sources are config-relative; absolutize against the image directory so the farm path
+        // (and its `repodata`, which the janitor binds by absolute path) is never relative — a
+        // relative bind spec is rejected by the container engine (`invalid mount path: must be
+        // absolute`).
+        let source = tailor_config::absolutize(source, &cell.target.dir);
         if source.is_dir() {
             let parent = source.parent().ok_or_else(|| {
                 ExecError::Other(format!(
@@ -622,7 +627,7 @@ fn prepare_rpm_farms(cell: &Cell, context: &ExecutionContext) -> Result<Vec<RpmF
                 ))
             })?;
             let dest = parent.join(farm_name(cell, context.clone_index, index));
-            rpm_farm::build_rpm_farm(source, &dest).map_err(|source_err| ExecError::Io {
+            rpm_farm::build_rpm_farm(&source, &dest).map_err(|source_err| ExecError::Io {
                 context: format!("failed to build RPM farm `{}`", dest.display()),
                 source: source_err,
             })?;
@@ -632,7 +637,7 @@ fn prepare_rpm_farms(cell: &Cell, context: &ExecutionContext) -> Result<Vec<RpmF
             });
         } else {
             farms.push(RpmFarm {
-                arg_path: source.clone(),
+                arg_path: source,
                 writable: false,
             });
         }
@@ -709,6 +714,7 @@ mod tests {
         Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputSpec,
     };
     use tailor_core::{CellSlug, Target};
+    use tempfile::TempDir;
 
     use crate::container::runtime::NoopRuntime;
 
@@ -760,6 +766,73 @@ mod tests {
             signer: None,
             runtime: RuntimeConfig::default(),
         }
+    }
+
+    /// Regression (acl-iso): a **relative** directory `rpmSources` path (`./rpms`) must yield an
+    /// **absolute** farm path — a relative farm path produces a relative bind spec, which the
+    /// container engine rejects (`invalid mount path: must be absolute`). Earlier tests only used
+    /// absolute source paths, so this case slipped through.
+    #[test]
+    fn a_relative_rpm_source_yields_an_absolute_writable_farm() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("rpms")).unwrap();
+        std::fs::write(tmp.path().join("rpms/pkg.rpm"), b"rpm").unwrap();
+
+        let mut cell = dry_run_cell();
+        // The image directory is the tempdir; the source is config-relative.
+        let target = Target {
+            definition: cell.target.definition.clone(),
+            dir: tmp.path().to_path_buf(),
+            default_outputs: Vec::new(),
+            output_artifacts: OutputArtifactsPolicy::default(),
+            root: tmp.path().to_path_buf(),
+            base_images: BaseImageCatalogue::default(),
+            tools_dir_sources: Vec::new(),
+        };
+        cell.target = Arc::new(target);
+        cell.rpm_sources = vec![PathBuf::from("./rpms")];
+
+        let farms = prepare_rpm_farms(&cell, &dry_run_context()).unwrap();
+        assert_eq!(farms.len(), 1);
+        assert!(farms[0].writable, "a directory source is a writable farm");
+        assert!(
+            farms[0].arg_path.is_absolute(),
+            "the farm path must be absolute, got `{}`",
+            farms[0].arg_path.display()
+        );
+        assert!(
+            farms[0].arg_path.starts_with(tmp.path()),
+            "the farm must live beside the source under the image dir"
+        );
+    }
+
+    /// A `.repo`-file `rpmSources` entry is a passthrough (createrepo does not run): not writable, and
+    /// still absolutised for a valid bind/arg.
+    #[test]
+    fn a_repo_file_rpm_source_is_a_non_writable_absolute_passthrough() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("local.repo"), b"[local]\n").unwrap();
+
+        let mut cell = dry_run_cell();
+        let target = Target {
+            definition: cell.target.definition.clone(),
+            dir: tmp.path().to_path_buf(),
+            default_outputs: Vec::new(),
+            output_artifacts: OutputArtifactsPolicy::default(),
+            root: tmp.path().to_path_buf(),
+            base_images: BaseImageCatalogue::default(),
+            tools_dir_sources: Vec::new(),
+        };
+        cell.target = Arc::new(target);
+        cell.rpm_sources = vec![PathBuf::from("./local.repo")];
+
+        let farms = prepare_rpm_farms(&cell, &dry_run_context()).unwrap();
+        assert_eq!(farms.len(), 1);
+        assert!(
+            !farms[0].writable,
+            "a .repo file is a passthrough, not a farm"
+        );
+        assert!(farms[0].arg_path.is_absolute());
     }
 
     #[derive(Debug, Default, Clone)]
