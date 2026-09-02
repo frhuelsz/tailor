@@ -1372,7 +1372,7 @@ async fn build(
     let runtime = establish_runtime(engine, &tool).await?;
     let base_hash_cache_dir = output_dir.join(TAILOR_STATE_DIR).join(BASE_HASH_CACHE_DIR);
     let _ = fs::create_dir_all(&base_hash_cache_dir);
-    let resolver = OciResolver::with_cache_dir(base_hash_cache_dir);
+    let resolver = OciResolver::with_cache_dir(base_hash_cache_dir.clone());
     let lock = Lockfile::read(&workspace.root.join(LOCK_FILE))?;
     let toolchains = resolve_toolchains(&targets, &tool, &runtime, &resolver, &lock).await?;
     preflight_toolchain_arches(&targets, &tool, &toolchains, &selection)?;
@@ -1387,6 +1387,7 @@ async fn build(
             &tools_dir_sources,
             &selection,
             &output_dir,
+            Some(&base_hash_cache_dir),
         )
         .await?;
     let stale = plan.stale().count();

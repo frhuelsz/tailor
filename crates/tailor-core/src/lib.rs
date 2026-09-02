@@ -9,6 +9,7 @@ pub mod deps;
 pub mod domain;
 pub mod error;
 pub mod fingerprint;
+pub mod hashcache;
 pub mod lockfile;
 pub mod orchestrator;
 pub mod ports;
@@ -23,6 +24,7 @@ pub use catalogue::{
 };
 pub use domain::{BuildPlan, Cell, CellSlug, Fingerprint, PlannedCell, Target};
 pub use error::{CoreError, ExecError, ResolveError};
+pub use hashcache::{FileHash, hash_file_cached};
 pub use lockfile::{LockedBase, LockedContainer, LockedRuntime, Lockfile};
 pub use orchestrator::{
     BuildOptions, BuildProgress, Orchestrator, ResolvedToolchain, ResolvedToolsDirSource,

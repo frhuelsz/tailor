@@ -100,6 +100,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         tools_dir_sources: &BTreeMap<String, ResolvedToolsDirSource>,
         selector: &Selector,
         output_dir: &Path,
+        hash_cache_dir: Option<&Path>,
     ) -> Result<BuildPlan, CoreError> {
         let mut planned = Vec::new();
         for target in targets {
@@ -118,12 +119,14 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     &cell.target.definition.extra_dependencies,
                     &cell.target.dir,
                     None,
+                    hash_cache_dir,
                     target.name(),
                 )?;
                 let rpm_source_hashes = deps::hash_dependencies(
                     &cell.rpm_sources,
                     &cell.target.dir,
                     Some(deps::REPODATA_DIR),
+                    hash_cache_dir,
                     target.name(),
                 )?;
                 let print = fingerprint(&FingerprintInputs {
@@ -878,6 +881,7 @@ mod tests {
                 &BTreeMap::new(),
                 &Selector::default(),
                 out.path(),
+                None,
             )
             .await
             .unwrap();
@@ -940,6 +944,7 @@ mod tests {
                     &BTreeMap::new(),
                     &Selector::default(),
                     out.path(),
+                    None,
                 )
                 .await
                 .unwrap()
@@ -996,6 +1001,7 @@ mod tests {
                 &BTreeMap::new(),
                 &Selector::default(),
                 TempDir::new().unwrap().path(),
+                None,
             )
             .await
             .unwrap_err();
@@ -1022,6 +1028,7 @@ mod tests {
                 &BTreeMap::new(),
                 &Selector::default(),
                 out.path(),
+                None,
             )
             .await
             .unwrap();
@@ -1059,6 +1066,7 @@ mod tests {
                 &BTreeMap::new(),
                 &Selector::default(),
                 out.path(),
+                None,
             )
             .await
             .unwrap();
@@ -1427,6 +1435,7 @@ mod tests {
                 &resolved_tools_dir_sources(),
                 &Selector::default(),
                 out.path(),
+                None,
             )
             .await
             .unwrap_err();

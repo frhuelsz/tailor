@@ -17,10 +17,10 @@ pub struct FingerprintInputs<'a> {
     pub operation: Operation,
     pub inject_files: bool,
     pub tools_dir_digest: Option<&'a str>,
-    /// Sorted SHA-256 hashes of `extraDependencies` files.
-    pub extra_dependency_hashes: &'a [[u8; 32]],
-    /// Sorted SHA-256 hashes of `rpmSources` contents (excluding `repodata/`).
-    pub rpm_source_hashes: &'a [[u8; 32]],
+    /// Sorted per-file hashes of `extraDependencies` files (XXH3-128 — see `deps.rs`).
+    pub extra_dependency_hashes: &'a [[u8; 16]],
+    /// Sorted per-file hashes of `rpmSources` contents (excluding `repodata/`; XXH3-128).
+    pub rpm_source_hashes: &'a [[u8; 16]],
 }
 
 /// Compute the canonical fingerprint. Each field is domain-separated and length-prefixed so distinct
