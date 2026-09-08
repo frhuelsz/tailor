@@ -134,6 +134,7 @@ mod tests {
             signing: None,
             inject_files: None,
             extra_dependencies: vec![],
+            extra_params: vec![],
             config: None,
         };
         let target = Arc::new(Target {
@@ -165,6 +166,7 @@ mod tests {
             },
             base_image: None,
             rpm_sources: vec![],
+            extra_params: vec![],
             tools_dir: None,
             skip: false,
             skip_pins: Vec::new(),

@@ -522,8 +522,24 @@ pub struct ImageDefinition {
     pub inject_files: Option<bool>,
     #[serde(default)]
     pub extra_dependencies: Vec<PathBuf>,
+    /// Extra Image Customizer command-line flags, appended verbatim after every flag tailor manages.
+    /// For experimental/non-standard IC builds that expose options tailor does not model; a flag
+    /// tailor already emits is rejected. Mergeable across fragments (concatenated, base → specific).
+    #[serde(default)]
+    pub extra_params: Vec<ExtraParam>,
     #[serde(default)]
     pub config: Option<Value>,
+}
+
+/// One extra Image Customizer command-line flag. `value` is optional and joined to `param` with a
+/// single `=` (`{param}={value}`), so `{ param: --foo, value: bar }` becomes the argv token
+/// `--foo=bar` and `{ param: --foo }` becomes the bare flag `--foo`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExtraParam {
+    pub param: String,
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 // ===== shared types (reference/types.md) =====

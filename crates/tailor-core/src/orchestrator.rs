@@ -139,6 +139,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     tools_dir_digest: resolved_tools_dir.map(|source| source.digest.as_str()),
                     extra_dependency_hashes: &extra_dependency_hashes,
                     rpm_source_hashes: &rpm_source_hashes,
+                    extra_params: &cell.extra_params,
                 });
                 let artifact =
                     output_dir.join(artifact_name(cell.slug.as_ref(), cell.output.format));
@@ -496,6 +497,7 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
                     base: base.clone(),
                     base_image: base_image.clone(),
                     rpm_sources: rc.rpm_sources.clone(),
+                    extra_params: rc.extra_params.clone(),
                     tools_dir,
                     skip: rc.skip,
                     skip_pins: rc.skip_pins.clone(),

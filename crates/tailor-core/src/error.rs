@@ -34,6 +34,12 @@ pub enum ExecError {
     #[error("unsafe directory `{}`: {reason}", .path.display())]
     UnsafeDir { path: PathBuf, reason: String },
 
+    #[error(
+        "extraParams flag `{param}` is managed by tailor and cannot be overridden; \
+         remove it from extraParams"
+    )]
+    ReservedParam { param: String },
+
     #[error("{0}")]
     Other(String),
 }

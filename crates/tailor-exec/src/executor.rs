@@ -747,6 +747,7 @@ mod tests {
             },
             base_image: None,
             rpm_sources: Vec::new(),
+            extra_params: Vec::new(),
             tools_dir: None,
             skip: false,
             skip_pins: Vec::new(),

@@ -19,6 +19,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `signing` | `true` or profile id | no | Opt in to the signed-image pipeline. `true` ⇒ the workspace `signing.default` profile; a string ⇒ that named profile; omitted ⇒ unsigned. See [Sign an image](../how-to/sign-an-image.md). |
 | `injectFiles` | boolean | no | Inert placeholder, superseded by `signing:`. Currently a no-op; do not rely on it. |
 | `extraDependencies` | path list | no | Extra files/directories to hash for incremental checks; use for IC-config-referenced assets. |
+| `extraParams` | list of `{param, value?}` | no | Extra Image Customizer command-line flags, appended verbatim after every flag tailor manages. For experimental/non-standard IC builds. See [Extra params](#extra-params). |
 | `config` | mapping or path string | conditional | Required for `customize`, forbidden for `convert`. Opaque IC config. |
 
 ## Tools dir
@@ -56,6 +57,32 @@ config:
 tailor exports the source container to `runtime.imageCacheDir/tools-dirs/<digest>` and passes the
 translated `/host/...` path to customize passes only. It never emits `--tools-dir /`, and convert or
 inject-files passes do not receive the flag.
+
+## Extra params
+
+`extraParams:` passes extra flags straight through to Image Customizer, for experimental or
+non-standard IC builds that expose options tailor does not model. Each entry is a `param` flag with
+an optional `value`, joined with a single `=`:
+
+```yaml
+extraParams:
+  - param: --experimental-thing   # → argv token: --experimental-thing=fast
+    value: fast
+  - param: --debug-stage          # → bare flag: --debug-stage
+```
+
+The flags are appended **verbatim, after every flag tailor manages**, to the `customize`/`convert`
+invocation (and to the signed-build `customize` pass). They are part of the incremental fingerprint,
+so changing a `param` or `value` rebuilds the affected cells.
+
+`extraParams` is **mergeable like `rpmSources`**: it is concatenated across the base document and
+every matched fragment, base → most-specific, so a `by-<axis>/<value>.yaml` fragment can add a flag
+for just its cells.
+
+A flag tailor already emits itself (`--config-file`, `--build-dir`, `--output-image-file`,
+`--output-image-format`, `--rpm-source`, `--tools-dir`, `--image`, `--image-file`,
+`--image-cache-dir`, `--cosi-compression-level`, and the `--log-*` flags) is **rejected** — tailor
+owns those, and a duplicate would fight its own argument. Use the modelled field instead.
 
 ## Matrix
 

@@ -5,8 +5,8 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 
 use serde_yaml_ng::Value;
 use tailor_config::{
-    Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputSpec,
-    ToolsDirSource, ToolsDirSourceInline,
+    Arch, BaseImageCatalogue, BaseSource, ExtraParam, ImageDefinition, OutputArtifactsPolicy,
+    OutputSpec, ToolsDirSource, ToolsDirSourceInline,
 };
 
 /// A resolved image — the catalogue/authoring unit, after config load and defaults are applied.
@@ -60,6 +60,8 @@ pub struct Cell {
     pub base_image: Option<String>,
     /// Local RPM sources passed to IC as `--rpm-source`.
     pub rpm_sources: Vec<PathBuf>,
+    /// Extra IC command-line flags appended verbatim after every tailor-managed flag.
+    pub extra_params: Vec<ExtraParam>,
     /// Resolved IC tools-dir source, when this image requests tailor-managed `--tools-dir`.
     pub tools_dir: Option<CellToolsDir>,
     /// When `true`, this cell is dropped from bulk selection unless specifically requested — the run

@@ -15,7 +15,11 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
-use crate::{error::ConfigError, schema::AxisValues, types::ParamValue};
+use crate::{
+    error::ConfigError,
+    schema::{AxisValues, ExtraParam},
+    types::ParamValue,
+};
 
 const FRAGMENT_DIR_PREFIX: &str = "by-";
 const FEATURE_AXIS: &str = "feature";
@@ -36,6 +40,10 @@ pub(crate) struct Fragment {
     pub(crate) params: IndexMap<String, ParamValue>,
     #[serde(default)]
     pub(crate) rpm_sources: Vec<PathBuf>,
+    /// Extra IC command-line flags this fragment contributes; concatenated across matched fragments
+    /// (base → most-specific), mirroring `rpmSources`.
+    #[serde(default)]
+    pub(crate) extra_params: Vec<ExtraParam>,
     /// Drop cells this fragment applies to from bulk selection unless the run pins the fragment's
     /// value or names the cell (`meta/docs/2026-07-22-fragment-skip.md`). Mergeable last-wins; a
     /// more-specific fragment may set `false` to un-skip.

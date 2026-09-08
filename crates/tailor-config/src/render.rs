@@ -17,7 +17,7 @@ use crate::{
     include, interpolate, matrix,
     matrix::AxisTuple,
     merge,
-    schema::{BaseSource, ImageDefinition, OutputSpec},
+    schema::{BaseSource, ExtraParam, ImageDefinition, OutputSpec},
     types::ParamValue,
 };
 
@@ -62,6 +62,8 @@ pub struct RenderedCell {
     pub outputs: Vec<OutputSpec>,
     /// Local RPM sources (directories or `.repo` files) passed to IC as `--rpm-source`.
     pub rpm_sources: Vec<PathBuf>,
+    /// Extra IC command-line flags appended verbatim, concatenated across matched fragments.
+    pub extra_params: Vec<ExtraParam>,
     /// Resolved `skip` for this cell (merged from fragment `skip:` fields, last-wins). When `true`,
     /// the cell is dropped from bulk selection unless specifically requested
     /// (`meta/docs/2026-07-22-fragment-skip.md`).
@@ -193,6 +195,10 @@ fn render_cell(
         .iter()
         .flat_map(|f| f.doc.rpm_sources.clone())
         .collect();
+    let extra_params = matched
+        .iter()
+        .flat_map(|f| f.doc.extra_params.clone())
+        .collect();
 
     // Resolve `skip` last-wins over the matched fragments (base → most-specific). When the winning
     // value is `true`, remember that fragment's predicate coordinates as the pins that can override
@@ -212,6 +218,7 @@ fn render_cell(
         base,
         outputs,
         rpm_sources,
+        extra_params,
         skip,
         skip_pins,
     })
@@ -503,6 +510,65 @@ mod tests {
         assert!(
             matches!(err, ConfigError::SelectorsWithoutMatrix { .. }),
             "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn extra_params_concatenate_base_then_fragment() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: xp
+                matrix:
+                  arch: [amd64, arm64]
+                extraParams:
+                  - param: --base-flag
+                    value: on
+                base:
+                  path: ./b.img
+                config:
+                  os: { hostname: xp }
+            "},
+        );
+        write(
+            tmp.path(),
+            "by-arch/arm64.yaml",
+            indoc! {"
+                extraParams:
+                  - param: --arm64-only
+            "},
+        );
+        let image = load_image(tmp.path().join("image.yaml")).unwrap();
+        let cells = render_image(&image, tmp.path()).unwrap();
+
+        let amd64 = cells
+            .iter()
+            .find(|c| c.tuple.get("arch") == Some("amd64"))
+            .unwrap();
+        let arm64 = cells
+            .iter()
+            .find(|c| c.tuple.get("arch") == Some("arm64"))
+            .unwrap();
+
+        let flags = |c: &RenderedCell| -> Vec<(String, Option<String>)> {
+            c.extra_params
+                .iter()
+                .map(|p| (p.param.clone(), p.value.clone()))
+                .collect()
+        };
+        assert_eq!(
+            flags(amd64),
+            [("--base-flag".to_owned(), Some("on".to_owned()))]
+        );
+        // base → most-specific: the fragment's flag is appended after the base document's.
+        assert_eq!(
+            flags(arm64),
+            [
+                ("--base-flag".to_owned(), Some("on".to_owned())),
+                ("--arm64-only".to_owned(), None),
+            ]
         );
     }
 

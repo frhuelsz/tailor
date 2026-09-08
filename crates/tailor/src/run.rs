@@ -1266,6 +1266,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         signing: None,
         inject_files: None,
         extra_dependencies: Vec::new(),
+        extra_params: Vec::new(),
         config: None,
     };
     let target = Target {
@@ -1295,6 +1296,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         },
         base_image: None,
         rpm_sources: Vec::new(),
+        extra_params: Vec::new(),
         tools_dir: None,
         skip: false,
         skip_pins: Vec::new(),

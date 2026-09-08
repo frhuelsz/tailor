@@ -3,7 +3,7 @@
 
 use serde_yaml_ng::Value;
 use sha2::{Digest, Sha256};
-use tailor_config::Operation;
+use tailor_config::{ExtraParam, Operation};
 
 use crate::{domain::Fingerprint, ports::ResolvedBase};
 
@@ -21,6 +21,8 @@ pub struct FingerprintInputs<'a> {
     pub extra_dependency_hashes: &'a [[u8; 16]],
     /// Sorted per-file hashes of `rpmSources` contents (excluding `repodata/`; XXH3-128).
     pub rpm_source_hashes: &'a [[u8; 16]],
+    /// Extra IC command-line flags, in declared (merge) order — a change to any flag rebuilds.
+    pub extra_params: &'a [ExtraParam],
 }
 
 /// Compute the canonical fingerprint. Each field is domain-separated and length-prefixed so distinct
@@ -60,6 +62,14 @@ pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
     }
     for hash in inputs.rpm_source_hashes {
         field(&mut hasher, b"rpm", hash);
+    }
+    for extra in inputs.extra_params {
+        field(&mut hasher, b"extra-param.param", extra.param.as_bytes());
+        field(
+            &mut hasher,
+            b"extra-param.value",
+            extra.value.as_deref().unwrap_or_default().as_bytes(),
+        );
     }
 
     Fingerprint(hasher.finalize().into())
@@ -112,6 +122,7 @@ mod tests {
             tools_dir_digest: None,
             extra_dependency_hashes: &[],
             rpm_source_hashes: &[],
+            extra_params: &[],
         }
     }
 
@@ -143,6 +154,25 @@ mod tests {
         a.tools_dir_digest = Some("sha256:one");
         let mut b = inputs("cell", &cfg, &base);
         b.tools_dir_digest = Some("sha256:two");
+        assert_ne!(fingerprint(&a), fingerprint(&b));
+    }
+
+    #[test]
+    fn extra_params_change_fingerprint() {
+        let base = base();
+        let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
+        let one = [ExtraParam {
+            param: "--experimental".to_owned(),
+            value: Some("a".to_owned()),
+        }];
+        let two = [ExtraParam {
+            param: "--experimental".to_owned(),
+            value: Some("b".to_owned()),
+        }];
+        let mut a = inputs("cell", &cfg, &base);
+        a.extra_params = &one;
+        let mut b = inputs("cell", &cfg, &base);
+        b.extra_params = &two;
         assert_ne!(fingerprint(&a), fingerprint(&b));
     }
 

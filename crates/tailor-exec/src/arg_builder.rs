@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tailor_config::{Access, BaseSource, Operation};
+use tailor_config::{Access, BaseSource, ExtraParam, Operation};
 use tailor_core::{Cell, ExecError, ExecutionContext, RuntimeConfig, artifact_name};
 
 use crate::{guard, path_translate, working_copy};
@@ -131,6 +131,8 @@ pub fn build_ic_args(cell: &Cell, context: &ExecutionContext) -> Result<Vec<Stri
         ));
     }
 
+    push_extra_params(&mut args, &cell.extra_params)?;
+
     Ok(args)
 }
 
@@ -187,6 +189,7 @@ pub(crate) fn build_signed_customize_args(
             path_translate::to_container_path(cache_dir, &context.runtime.host_root),
         ));
     }
+    push_extra_params(&mut args, &cell.extra_params)?;
     Ok(args)
 }
 
@@ -339,6 +342,44 @@ fn base_args(
 
 fn flag_value(flag: &str, value: String) -> Vec<String> {
     vec![flag.to_owned(), value]
+}
+
+/// Flags tailor emits itself; an `extraParams` entry naming one is rejected so a user-supplied flag
+/// can never silently duplicate or fight a tailor-managed argument.
+const RESERVED_FLAGS: &[&str] = &[
+    FLAG_CONFIG_FILE,
+    FLAG_LOG_FORMAT,
+    FLAG_LOG_COLOR,
+    FLAG_LOG_LEVEL,
+    FLAG_LOG_FILE,
+    FLAG_BUILD_DIR,
+    FLAG_OUTPUT_IMAGE_FORMAT,
+    FLAG_OUTPUT_IMAGE_FILE,
+    FLAG_COSI_COMPRESSION_LEVEL,
+    FLAG_TOOLS_DIR,
+    FLAG_RPM_SOURCE,
+    FLAG_IMAGE_CACHE_DIR,
+    FLAG_IMAGE,
+    FLAG_IMAGE_FILE,
+];
+
+/// Append the image's `extraParams` verbatim after every tailor-managed flag: each entry becomes one
+/// argv token — `--flag` alone, or `--flag=value` when a `value` is set. A flag tailor already
+/// manages is rejected (`RESERVED_FLAGS`).
+fn push_extra_params(args: &mut Vec<String>, extra_params: &[ExtraParam]) -> Result<(), ExecError> {
+    for extra in extra_params {
+        let flag = extra.param.split('=').next().unwrap_or(&extra.param).trim();
+        if RESERVED_FLAGS.contains(&flag) {
+            return Err(ExecError::ReservedParam {
+                param: extra.param.clone(),
+            });
+        }
+        match &extra.value {
+            Some(value) => args.push(format!("{}={value}", extra.param)),
+            None => args.push(extra.param.clone()),
+        }
+    }
+    Ok(())
 }
 
 fn build_dir_arg_value(cell: &Cell, context: &ExecutionContext) -> Result<String, ExecError> {
@@ -713,6 +754,57 @@ mod tests {
                 "--image-cache-dir",
                 "/host/cache",
             ]
+        );
+    }
+
+    #[test]
+    fn appends_extra_params_after_managed_flags() {
+        let mut cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        cell.extra_params = vec![
+            ExtraParam {
+                param: "--experimental-flag".to_owned(),
+                value: Some("on".to_owned()),
+            },
+            ExtraParam {
+                param: "--verbose-stage".to_owned(),
+                value: None,
+            },
+        ];
+        let context = sample_context();
+
+        let args = build_ic_args(&cell, &context).unwrap();
+
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["--experimental-flag=on", "--verbose-stage"]
+        );
+    }
+
+    #[test]
+    fn extra_params_reject_a_tailor_managed_flag() {
+        let mut cell = sample_cell(
+            Operation::Customize,
+            BaseSource::Path {
+                path: "/base.raw".into(),
+                arch: None,
+            },
+        );
+        cell.extra_params = vec![ExtraParam {
+            param: FLAG_BUILD_DIR.to_owned(),
+            value: Some("/tmp/evil".to_owned()),
+        }];
+        let context = sample_context();
+
+        let err = build_ic_args(&cell, &context).unwrap_err();
+        assert!(
+            matches!(err, ExecError::ReservedParam { ref param } if param == FLAG_BUILD_DIR),
+            "got {err:?}"
         );
     }
 
@@ -1186,6 +1278,7 @@ mod tests {
             base,
             base_image: None,
             rpm_sources: vec![PathBuf::from("/rpms/one")],
+            extra_params: Vec::new(),
             tools_dir: None,
             skip: false,
             skip_pins: Vec::new(),
