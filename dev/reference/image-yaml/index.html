@@ -1027,6 +1027,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#extra-params" class="md-nav__link">
+    <span class="md-ellipsis">
+      Extra params
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#matrix" class="md-nav__link">
     <span class="md-ellipsis">
       Matrix
@@ -1366,6 +1375,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#extra-params" class="md-nav__link">
+    <span class="md-ellipsis">
+      Extra params
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#matrix" class="md-nav__link">
     <span class="md-ellipsis">
       Matrix
@@ -1531,6 +1549,12 @@
 <td>Extra files/directories to hash for incremental checks; use for IC-config-referenced assets.</td>
 </tr>
 <tr>
+<td><code>extraParams</code></td>
+<td>list of <code>{param, value?}</code></td>
+<td>no</td>
+<td>Extra Image Customizer command-line flags, appended verbatim after every flag tailor manages. For experimental/non-standard IC builds. See <a href="#extra-params">Extra params</a>.</td>
+</tr>
+<tr>
 <td><code>config</code></td>
 <td>mapping or path string</td>
 <td>conditional</td>
@@ -1567,20 +1591,39 @@ images without a <code>RepoDigest</code> run by image <code>Id</code> and are no
 <p>tailor exports the source container to <code>runtime.imageCacheDir/tools-dirs/&lt;digest&gt;</code> and passes the
 translated <code>/host/...</code> path to customize passes only. It never emits <code>--tools-dir /</code>, and convert or
 inject-files passes do not receive the flag.</p>
+<h2 id="extra-params">Extra params<a class="headerlink" href="#extra-params" title="Permanent link">&para;</a></h2>
+<p><code>extraParams:</code> passes extra flags straight through to Image Customizer, for experimental or
+non-standard IC builds that expose options tailor does not model. Each entry is a <code>param</code> flag with
+an optional <code>value</code>, joined with a single <code>=</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">extraParams</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">param</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--experimental-thing</span><span class="w">   </span><span class="c1"># → argv token: --experimental-thing=fast</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fast</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">param</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--debug-stage</span><span class="w">          </span><span class="c1"># → bare flag: --debug-stage</span>
+</code></pre></div>
+<p>The flags are appended <strong>verbatim, after every flag tailor manages</strong>, to the <code>customize</code>/<code>convert</code>
+invocation (and to the signed-build <code>customize</code> pass). They are part of the incremental fingerprint,
+so changing a <code>param</code> or <code>value</code> rebuilds the affected cells.</p>
+<p><code>extraParams</code> is <strong>mergeable like <code>rpmSources</code></strong>: it is concatenated across the base document and
+every matched fragment, base → most-specific, so a <code>by-&lt;axis&gt;/&lt;value&gt;.yaml</code> fragment can add a flag
+for just its cells.</p>
+<p>A flag tailor already emits itself (<code>--config-file</code>, <code>--build-dir</code>, <code>--output-image-file</code>,
+<code>--output-image-format</code>, <code>--rpm-source</code>, <code>--tools-dir</code>, <code>--image</code>, <code>--image-file</code>,
+<code>--image-cache-dir</code>, <code>--cosi-compression-level</code>, and the <code>--log-*</code> flags) is <strong>rejected</strong> — tailor
+owns those, and a duplicate would fight its own argument. Use the modelled field instead.</p>
 <h2 id="matrix">Matrix<a class="headerlink" href="#matrix" title="Permanent link">&para;</a></h2>
 <p><code>matrix:</code> declares the axes; their cartesian product (in declaration order) is the candidate cells.
 The optional <code>selectors:</code> block chooses which of those cells to actually build.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">matrix</span><span class="p">:</span><span class="w">                   </span><span class="c1"># axes only — order widest → most-specific (arch first)</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">amd64</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">arm64</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">edition</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">lite</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pro</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">stable</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">edge</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">selectors</span><span class="p">:</span><span class="w">                </span><span class="c1"># omit entirely ⇒ build the full product</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">include</span><span class="p">:</span><span class="w">                </span><span class="c1"># allowlist: keep cells matched by any selector (full product if absent)</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> arch</span><span class="p">:</span><span class="w"> </span><span class="nv">amd64</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">                        </span><span class="c1"># every amd64 cell</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> arch</span><span class="p">:</span><span class="w"> </span><span class="nv">arm64</span><span class="p p-Indicator">,</span><span class="nt"> edition</span><span class="p">:</span><span class="w"> </span><span class="nv">lite</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">         </span><span class="c1"># plus the lite arm64 cells (channel expands)</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">exclude</span><span class="p">:</span><span class="w">                </span><span class="c1"># denylist: then drop cells matched by any selector (exclude wins)</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> edition</span><span class="p">:</span><span class="w"> </span><span class="nv">pro</span><span class="p p-Indicator">,</span><span class="nt"> channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">stable</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">edge</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># a value may be a list</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">matrix</span><span class="p">:</span><span class="w">                   </span><span class="c1"># axes only — order widest → most-specific (arch first)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">amd64</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">arm64</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">edition</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">lite</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pro</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">stable</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">edge</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nt">selectors</span><span class="p">:</span><span class="w">                </span><span class="c1"># omit entirely ⇒ build the full product</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">include</span><span class="p">:</span><span class="w">                </span><span class="c1"># allowlist: keep cells matched by any selector (full product if absent)</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> arch</span><span class="p">:</span><span class="w"> </span><span class="nv">amd64</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">                        </span><span class="c1"># every amd64 cell</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> arch</span><span class="p">:</span><span class="w"> </span><span class="nv">arm64</span><span class="p p-Indicator">,</span><span class="nt"> edition</span><span class="p">:</span><span class="w"> </span><span class="nv">lite</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">         </span><span class="c1"># plus the lite arm64 cells (channel expands)</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="nt">exclude</span><span class="p">:</span><span class="w">                </span><span class="c1"># denylist: then drop cells matched by any selector (exclude wins)</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> edition</span><span class="p">:</span><span class="w"> </span><span class="nv">pro</span><span class="p p-Indicator">,</span><span class="nt"> channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">stable</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">edge</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># a value may be a list</span>
 </code></pre></div>
 <p>A <strong>selector</strong> is a partial assignment over the axes: each axis is pinned to a value or a <strong>list</strong> of
 values, and <strong>omitted axes match every value</strong>. The final cell set is the union of the <code>include</code>
@@ -1647,29 +1690,29 @@ narrower single value on the same axis, so the more specific one wins). Run <cod
 &lt;slug&gt;</code> to print the exact merge order for a cell. See <code>meta/docs/2026-06-29-directive-design.md</code> §2 for the full
 model.</p>
 <h2 id="base-sources">Base sources<a class="headerlink" href="#base-sources" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">base</span><span class="p">:</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./bases/gizmo-amd64.img</span>
-</code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">base</span><span class="p">:</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">oci</span><span class="p">:</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">uri</span><span class="p">:</span><span class="w"> </span><span class="s">"registry.example/gizmo/base:edge"</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="s">"linux/${arch}"</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./bases/gizmo-amd64.img</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">base</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">azureLinux</span><span class="p">:</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s">"3.0"</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">variant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">minimal-os</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">oci</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">uri</span><span class="p">:</span><span class="w"> </span><span class="s">"registry.example/gizmo/base:edge"</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="s">"linux/${arch}"</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">base</span><span class="p">:</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">baremetal</span><span class="w">          </span><span class="c1"># a named slot in tailor.yaml `baseImages:`</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">azureLinux</span><span class="p">:</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s">"3.0"</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">variant</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">minimal-os</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">base</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">ref</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">baremetal</span><span class="w">          </span><span class="c1"># a named slot in tailor.yaml `baseImages:`</span>
 </code></pre></div>
 <p>For an <code>oci</code> or <code>azureLinux</code> base, tailor resolves the registry digest and passes IC a digest-pinned
 <code>--image oci:&lt;repo&gt;@sha256:…</code> (so the build is reproducible). Image Customizer downloads OCI input
 images behind a <strong>preview feature</strong>, and tailor never edits your IC <code>config:</code>, so you must enable it
 yourself in the image's <code>config:</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">config</span><span class="p">:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">previewFeatures</span><span class="p">:</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">input-image-oci</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">config</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">previewFeatures</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">input-image-oci</span>
 </code></pre></div>
 <p>Registry bases also need an image cache directory; tailor defaults <code>runtime.imageCacheDir</code> to
 <code>&lt;workspace&gt;/.tailor/cache</code> when you set none (see <a href="../tailor-yaml/">tailor.yaml</a>).</p>
@@ -1680,10 +1723,10 @@ that slot's local file (the path lives once, in <code>tailor.yaml</code>). Use i
 flow Trident needs — see <a href="../tailor-yaml/"><code>baseImages</code> in tailor.yaml</a>, <a href="../../how-to/use-a-base-image-catalogue/">Use a base-image catalogue</a>,
 and <a href="../../explanation/base-images/">Base images</a>.</p>
 <h2 id="output-spec">Output spec<a class="headerlink" href="#output-spec" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">outputs</span><span class="p">:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">outputs</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
 </code></pre></div>
 <p><code>format</code> is required. <code>cosiCompressionLevel</code> and <code>name</code> are optional.</p>
 
