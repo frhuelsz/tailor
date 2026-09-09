@@ -275,8 +275,16 @@ fn show(workspace: &Workspace, name: &str, field: Option<&str>) -> Result<(), Ap
 fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, names)?;
+    let all_members = all_member_targets(workspace)?;
+    // Inter-image dependencies: catch unknown-image edges and cycles, then resolve each cell's
+    // `base: { image }` so pairing/output/pin mismatches surface offline (no artifact is read — the
+    // path is only constructed). `output_dir` is the default artifacts dir, used solely for that path.
+    let closure = tailor_core::imagedep::dependency_closure(&targets, &all_members)?;
+    tailor_core::imagedep::topological_order(&closure, &all_members)?;
+    let output_dir = workspace.root.join(ARTIFACTS_DIR);
     for target in &targets {
-        let cells = cells_selected(target, selector)?;
+        let mut cells = cells_selected(target, selector)?;
+        tailor_core::imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
         validate_tools_dir_runtime(&cells, &tool)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
@@ -1320,7 +1328,7 @@ async fn build(
     apply_build_dir_base_override(&mut tool, args.build_dir_base.as_deref())?;
     let targets = build_targets(workspace, &args.images)?;
     // All workspace images supply producer definitions for resolving `base: { image }` references.
-    let all_members = build_targets(workspace, &[])?;
+    let all_members = all_member_targets(workspace)?;
     // Build the selected images plus their transitive producers, in topological order, so a consumer
     // is planned *after* its producers (its base hashes then reflect the fresh artifacts —
     // `meta/docs/2026-09-09-inter-image-dependencies.md` §4). This also detects dependency cycles. Both the
@@ -1883,6 +1891,17 @@ fn tool_config(workspace: &Workspace) -> ToolConfig {
         Some(tool) => tool.clone(),
         None => tailor_config::defaults::default_tool_config(),
     }
+}
+
+/// Every workspace image as a `Target`, **including `skip: true` images** — the resolution universe
+/// for inter-image dependencies (a producer may be a skipped image built only transitively).
+fn all_member_targets(workspace: &Workspace) -> Result<Vec<Arc<Target>>, AppError> {
+    let names: Vec<String> = workspace
+        .images
+        .iter()
+        .map(|image| image.definition.name.clone())
+        .collect();
+    build_targets(workspace, &names)
 }
 
 fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Target>>, AppError> {

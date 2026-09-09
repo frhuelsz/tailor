@@ -47,6 +47,7 @@ jobs:
           "$BIN" list
           "$BIN" matrix --format slugs
           "$BIN" validate
+          "$BIN" validate derived          # offline check of the base: { image } chain
           "$BIN" explain appliance -s flavor=net
           "$BIN" render
 
@@ -96,3 +97,34 @@ jobs:
           zstd -t "$zst"
           echo "ok: $zst ($(stat -c '%s' "$zst") bytes, owner $owner, zstd frame verified)"
 
+
+      - name: Build the inter-image base-of chain (base-os → derived)
+        working-directory: e2e
+        run: |
+          set -euxo pipefail
+          BIN="$GITHUB_WORKSPACE/target/release/tailor"
+          # `derived` bases on `base-os` (`base: { image: base-os }`). Both are `skip: true`, so the
+          # bulk build above ignored them; naming `derived` builds `base-os` first (topological
+          # order), then customizes its raw into a COSI.
+          "$BIN" build derived
+
+      - name: Assert the base-of chain produced both artifacts (producer built before consumer)
+        working-directory: e2e
+        run: |
+          set -euxo pipefail
+          producer="artifacts/base-os_amd64_raw.raw"
+          consumer="artifacts/derived_amd64_cosi.cosi"
+          for a in "$producer" "$consumer"; do
+            test -s "$a" || { echo "missing or empty artifact: $a" >&2; exit 1; }
+            owner=$(stat -c '%U' "$a")
+            if [ "$owner" = "root" ]; then
+              echo "artifact $a is still root-owned (janitor did not run)" >&2
+              exit 1
+            fi
+            echo "ok: $a ($(stat -c '%s' "$a") bytes, owner $owner)"
+          done
+          # The consumer must be newer than the producer it was built on.
+          if [ "$consumer" -ot "$producer" ]; then
+            echo "consumer $consumer is older than producer $producer — wrong build order" >&2
+            exit 1
+          fi

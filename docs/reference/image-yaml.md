@@ -11,7 +11,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `matrix` | ordered map `axis: [values]` | no | User-defined axes; their cartesian product is the candidate cells. Omit for one cell. Declaration order controls slug order and fragment precedence — order axes widest → most-specific (so `arch` is first). |
 | `selectors` | `{ include?, exclude? }` | no | Which cells of the `matrix:` product to build. Lists of **selectors** (sub-cubes); `include` is an allowlist, `exclude` a denylist. Requires `matrix:`; omitted ⇒ the full product. |
 | `outputs` | list of output specs | no | Defaults from workspace or built-in `cosi`. One artifact per cell × output. |
-| `base` | one of `path`, `oci`, `azureLinux`, `ref` | conditional | Exactly one base resolves per cell. `ref: <name>` references a `baseImages:` slot. |
+| `base` | one of `path`, `oci`, `azureLinux`, `ref`, `image` | conditional | Exactly one base resolves per cell. `ref: <name>` references a `baseImages:` slot; `image: <name>` bases on another workspace image's output (see [Inter-image dependencies](#inter-image-dependencies)). |
 | `features` | string list | no | Enables matching `by-feature/<name>.yaml` fragments. Does not multiply cells. |
 | `params` | scalar map | no | Values interpolated into `config:` strings with `${name}`. Params may reference other params. |
 | `rpmSources` | path list | no | Each path is a directory of RPMs or a `.repo` file; passed as IC `--rpm-source`. |
@@ -19,6 +19,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `signing` | `true` or profile id | no | Opt in to the signed-image pipeline. `true` ⇒ the workspace `signing.default` profile; a string ⇒ that named profile; omitted ⇒ unsigned. See [Sign an image](../how-to/sign-an-image.md). |
 | `injectFiles` | boolean | no | Inert placeholder, superseded by `signing:`. Currently a no-op; do not rely on it. |
 | `extraDependencies` | path list | no | Extra files/directories to hash for incremental checks; use for IC-config-referenced assets. |
+| `dependsOn` | string list | no | Order-only build dependencies on other workspace images. See [Inter-image dependencies](#inter-image-dependencies). |
 | `extraParams` | list of `{param, value?}` | no | Extra Image Customizer command-line flags, appended verbatim after every flag tailor manages. For experimental/non-standard IC builds. See [Extra params](#extra-params). |
 | `config` | mapping or path string | conditional | Required for `customize`, forbidden for `convert`. Opaque IC config. |
 
@@ -198,6 +199,42 @@ A `ref:` base references a named slot from the workspace `baseImages:` catalogue
 that slot's local file (the path lives once, in `tailor.yaml`). Use it for the file-based, registry-pull-free
 flow Trident needs — see [`baseImages` in tailor.yaml](tailor-yaml.md), [Use a base-image catalogue](../how-to/use-a-base-image-catalogue.md),
 and [Base images](../explanation/base-images.md).
+
+## Inter-image dependencies
+
+One image can build on another image in the same workspace. Today this is expressed as a **base**:
+
+```yaml
+# derived/image.yaml — customize another workspace image's output further
+base:
+  image: base-os          # a member image name
+  output: raw             # which producer output (format name); optional if it has one output
+  cell: { flavor: min }   # pin producer axes this image doesn't share (see below)
+```
+
+`base: { image }` resolves, **per cell**, to the producer's published artifact for the paired cell,
+then behaves exactly like a `path` base. tailor builds the producer first: a single `tailor build`
+orders the images topologically, and `tailor build derived` builds `base-os` before `derived`. A
+producer rebuild re-fingerprints its consumers (their base content-hash changes), so incremental
+builds stay correct. A dependency **cycle** is a hard error.
+
+**Cell pairing.** For each consuming cell, the producer cell is chosen by matching axes the two share
+(canonically `arch` — an `arm64` consumer pairs with the producer's `arm64` output), plus any
+`cell:` pins for producer axes the consumer lacks. An unpinned producer-only axis is ambiguous (an
+error); a coordinate that names no producer cell, an unknown output format, or a bad pin are errors —
+all surfaced by `tailor validate`.
+
+**`output`** is the producer output's **format name** (e.g. `raw`, `vhd-fixed`, `cosi`), not a file
+extension; tailor derives the extension (and appends `.zst` if that output is compressed). It is
+optional only when the producer declares a single output.
+
+`dependsOn: [<image>, …]` declares an **order-only** dependency: the listed images build first, but
+they contribute nothing to this image's fingerprint. Use it when an image must run after another but
+references none of its output. (An `image` base already implies the edge — don't restate it.)
+
+> Embedding another image's artifact *inside* `config:` (e.g. an `additionalFiles` source) via an
+> `inputs:` catalogue is designed in `meta/docs/2026-09-09-inter-image-dependencies.md` and lands in a
+> later release; today, inter-image reuse is via `base: { image }`.
 
 ## Output spec
 

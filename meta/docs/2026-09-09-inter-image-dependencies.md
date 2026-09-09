@@ -1,10 +1,13 @@
 # tailor — inter-image dependencies (design proposal)
 
-> **Status:** _proposal · 2026-09-09_ · not implemented. Motivated by two recurring shapes that
-> today force either a hand-written cross-image path (fragile) or a **nested workspace** built by two
-> ordered `tailor build` invocations (a workaround). This doc proposes a first-class dependency edge
-> between workspace images, its config surface, and — the crux — how it stays **incrementally
-> correct** under tailor's plan-then-build architecture. Open decisions in §9.
+> **Status:** _Phase 1 implemented (2026-09-09) · design for the rest._ `base: { image }` +
+> `dependsOn` + the image DAG (topological ordering, cycle detection) + per-node plan/build shipped
+> (`crates/tailor-core/src/imagedep.rs`); the `inputs:` embed (§2.1) is the remaining slice. Motivated
+> by two recurring shapes that today force either a hand-written cross-image path (fragile) or a
+> **nested workspace** built by two ordered `tailor build` invocations (a workaround). This doc
+> proposes a first-class dependency edge between workspace images, its config surface, and — the crux —
+> how it stays **incrementally correct** under tailor's plan-then-build architecture. Open decisions
+> in §9.
 
 ## 0. Motivation
 
