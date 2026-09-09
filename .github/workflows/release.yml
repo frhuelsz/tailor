@@ -41,7 +41,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4.2.0
       - name: Install musl toolchain
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+        run: |
+          # Drop preinstalled third-party apt repos (google-chrome, etc.) whose indexes
+          # intermittently fail with "Hash Sum mismatch" and break `apt-get update`. musl-tools
+          # comes from Ubuntu's own repos (kept in ubuntu.sources), so this is safe.
+          sudo rm -f /etc/apt/sources.list.d/*.list
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{ matrix.target }}
