@@ -60,12 +60,12 @@ producer rebuilds.
 1. **One source of truth for the path.** The consumer never re-encodes the producer's slug/format/
    output layout. It names the *image* (and, if ambiguous, the *output* and *cell*); tailor resolves
    the path.
-2. **Inputs are declared, then referenced by alias.** A top-level `inputs:` block binds an alias to a
-   typed source; the use-site is a bare `${inputs.<alias>}`. An `image`-kind input *is* the
+2. **Inputs are declared, then referenced by name.** A top-level `inputs:` list binds a `name` to a
+   typed source; the use-site is a bare `${inputs.<name>}`. An `image`-kind input *is* the
    dependency edge — no separate restatement. `dependsOn:` exists only for order-only edges that
    reference nothing (§2.3).
 3. **Config stays opaque.** tailor does not learn IC schema. At the use-site it only ever substitutes
-   a bare `${inputs.<alias>}` into a string value (as it already interpolates `${param}` —
+   a bare `${inputs.<name>}` into a string value (as it already interpolates `${param}` —
    `crates/tailor-config/src/interpolate.rs`) and **registers the resolved path as a content-hashed
    dependency**. It never parses `additionalFiles` or reaches into IC structure.
 4. **Incremental correctness is non-negotiable.** A producer rebuild must force any dependent to
@@ -76,59 +76,69 @@ producer rebuilds.
 
 ## 2. Config surface
 
-`inputs:` is the primary API: a typed, aliased catalogue of the things a build consumes. `base:`
+`inputs:` is the primary API: a typed, named catalogue of the things a build consumes. `base:`
 gains an `image` shorthand for the common "producer is my base" case; `dependsOn:` is the order-only
 escape hatch.
 
 ### 2.1 The `inputs:` catalogue
 
-A map of **alias → input source**, where the source is discriminated by its kind key (one-of, like
-`BaseSource` — `crates/tailor-config/src/schema.rs`). Every input, regardless of kind, resolves to a
-host path tailor binds read-only and content-hashes into the fingerprint; the kind only changes *how
-that path is produced*. v1 ships one kind — `image` (an artifact produced by another workspace image):
+A **list of named entries**, each a `name` plus a typed input source discriminated by its kind key
+(one-of, like `BaseSource` — `crates/tailor-config/src/schema.rs`). This mirrors the other workspace
+catalogues (`baseImages`, `toolchains.entries`, `toolsDirSources` — all lists of `{ name, … }`).
+Every input, regardless of kind, resolves to a host path tailor binds read-only and content-hashes
+into the fingerprint; the kind only changes *how that path is produced*. v1 ships one kind — `image`
+(an artifact produced by another workspace image):
 
 ```yaml
 # iso/image.yaml
 inputs:
-  payload:                       # alias — an identifier, the interpolation key
+  - name: payload                # the interpolation key
     image: installer-payload     # kind: produced by a workspace member image
     output: cosi                 # the producer output's format NAME (see §2.4); optional iff single-output
     cell: { flavor: min }        # structured pin for producer axes the consumer lacks (§2.4)
 ```
 
-Reference it anywhere a `${param}` is valid — including inside opaque `config:` strings:
+Reference it by name anywhere a `${param}` is valid — including inside opaque `config:` strings:
 
 ```yaml
 config:
   iso:
     additionalFiles:
-      - source: "${inputs.payload}"        # bare alias; format + cell already fixed above
+      - source: "${inputs.payload}"        # by name; format + cell already fixed above
         destination: /images/payload.cosi
 ```
 
-`${inputs.<alias>}` (a) **substitutes** the resolved host path of the producer's paired-cell artifact
+`${inputs.<name>}` (a) **substitutes** the resolved host path of the producer's paired-cell artifact
 and (b) **registers** that path in the cell's content-hashed dependency set (the set
 `extraDependencies` feeds — `crates/tailor-core/src/deps.rs`), which is what makes the embed
 staleness-correct: the *text* of `config:` is hashed, but text can't see a byte change behind a stable
 path — the registered content hash can. The user never writes `../producer/artifacts/…`, never
 restates the artifact under `extraDependencies`, and the format/cell live once, in the declaration.
 
-**Extensibility (why `inputs:` and not a bare `dependsOn`).** The alias/path/hash machinery is
+**Extensibility (why `inputs:` and not a bare `dependsOn`).** The name/path/hash machinery is
 kind-agnostic, so future input kinds slot in with **no change to any use-site**:
 
 ```yaml
 inputs:
-  payload:  { image: installer-payload, output: cosi }            # v1 — creates a DAG edge
-  seed:     { path: ./seed/data.img }                             # future — a named local file/dir
-  drivers:  { oci: example.com/drivers:1.2, file: drivers.tar }   # future — an OCI artifact
-  firmware: { url: "https://…/fw.bin", sha256: "…" }              # future — a fetched blob
+  - name: payload                                        # v1 — creates a DAG edge
+    image: installer-payload
+    output: cosi
+  - name: seed                                           # future — a named local file/dir
+    path: ./seed/data.img
+  - name: drivers                                        # future — an OCI artifact
+    oci: example.com/drivers:1.2
+    file: drivers.tar
+  - name: firmware                                       # future — a fetched blob
+    url: "https://…/fw.bin"
+    sha256: "…"
 ```
 
 Only `image` inputs create a build-order **edge** (§3); `path`/`oci`/`url` inputs are leaves — no
 edge, still hashed. So "an inter-image dependency" is just "an input whose source is another image,"
 one concept rather than two. `extraDependencies` (an unreferenced `path` input, hashed only) and
 `rpmSources` (referenceable local sources) are the natural things this converges on later (§9);
-v1 leaves them as-is.
+v1 leaves them as-is. Input `name`s are unique within an image (a duplicate is a config error, like
+the other catalogues).
 
 ### 2.2 Image-as-base — `base: { image: … }`
 
@@ -146,7 +156,7 @@ base:
 It resolves like §2.1's `image` kind, then behaves exactly like a `path` base — flowing through the
 existing resolver and **content-hashed** as `ResolvedBase::LocalFile { content_hash, size }`
 (`crates/tailor-core/src/fingerprint.rs`), so the base case needs no new fingerprint surface. Whether
-`base:` should instead reference an `inputs` alias (`base: { input: payload }`) — making `inputs:` the
+`base:` should instead reference an `inputs` name (`base: { input: payload }`) — making `inputs:` the
 single source of truth for every producer ref — is Open Decision §9.
 
 ### 2.3 Explicit `dependsOn:` (order-only escape hatch)
@@ -257,7 +267,7 @@ detail). A **dimension mismatch** takes one of four shapes:
    ```
    error: image `iso` input `payload` → `installer-payload`, but `installer-payload` has axis
           `flavor` that `iso` does not — the producer cell is ambiguous (flavor ∈ {min, net}).
-     fix: pin it — inputs.payload.cell: { flavor: <value> } — or add `flavor` to iso's matrix.
+     fix: set cell: { flavor: <value> } on input `payload` — or add `flavor` to iso's matrix.
    ```
 2. **Empty** — the resolved (inherited or pinned) coordinate names no built producer cell:
    ```
@@ -277,8 +287,8 @@ detail). A **dimension mismatch** takes one of four shapes:
    ```
 
 Plus the non-dimensional checks: unknown image name (`image`/`base.image`/`dependsOn`); a reference
-that escapes the workspace (a non-member) — rejected (§7); an unresolved `${inputs.<alias>}` (no such
-alias); and a dependency **cycle** (names the cycle, `a → b → a`).
+that escapes the workspace (a non-member) — rejected (§7); an unresolved `${inputs.<name>}` (no such
+input); and a dependency **cycle** (names the cycle, `a → b → a`).
 
 ## 7. Non-goals (v1)
 
@@ -301,13 +311,13 @@ alias); and a dependency **cycle** (names the cycle, `a → b → a`).
   strings, buries the dependency edge *inside a string*, forces a fragile grammar (image names may
   contain `.`, formats contain `-`, and cell pins would need `[axis=val]`), and restates the format at
   every use. Superseded by the `inputs:` catalogue: the edge becomes a visible typed declaration, the
-  pin is structured YAML, and the use-site is a bare `${inputs.<alias>}` — tailor substitutes only its
+  pin is structured YAML, and the use-site is a bare `${inputs.<name>}` — tailor substitutes only its
   own token, never IC schema.
 - **tailor authors the sink** (a structured `embed: [{ image, into }]` that writes the
   `additionalFiles` entry itself). Most declarative, but tailor would have to model every sink
   (`additionalFiles` is format-nested; others aren't), breaking config-opacity and not generalizing.
   Rejected.
-- **Staged stable path** (tailor reflinks each input to `./.tailor/inputs/<alias>`; config points at
+- **Staged stable path** (tailor reflinks each input to `./.tailor/inputs/<name>`; config points at
   the real path, no token). Purest re: opacity — tailor never edits `config:` — at the cost of a
   reflink. Kept as a possible per-input option off the *same* `inputs:` declaration (§9), not the
   default.
@@ -319,7 +329,7 @@ alias); and a dependency **cycle** (names the cycle, `a → b → a`).
 
 ## 9. Open decisions
 
-1. **Should `base:` reference an `inputs` alias** (`base: { input: payload }`) instead of repeating
+1. **Should `base:` reference an `inputs` name** (`base: { input: payload }`) instead of repeating
    `{ image, output, cell }`, making `inputs:` the single source of truth for every producer ref?
    (Base keeps its arch-pairing invariant either way.)
 2. **Should `extraDependencies` / `rpmSources` converge into `inputs:`** — `extraDependencies` as
@@ -329,20 +339,22 @@ alias); and a dependency **cycle** (names the cycle, `a → b → a`).
 4. **`dependsOn` spelling** — `dependsOn` vs `needs` vs `after`. `dependsOn` reads well and matches
    the common ecosystem term; confirm.
 5. **`--no-deps` semantics** — hard error vs warn when a required upstream artifact is absent.
-6. **A staged-path option** (§8) as a per-input alternative to `${inputs.<alias>}` substitution, for
+6. **A staged-path option** (§8) as a per-input alternative to `${inputs.<name>}` substitution, for
    users who want tailor to never edit `config:` strings.
 7. **Fan-in ergonomics** — a consumer cell that embeds *several* producer cells (e.g. every flavor)
-   needs one alias per artifact today; is sugar warranted (e.g. an alias that expands over an axis)?
+   needs one input per artifact today; is sugar warranted (e.g. an input whose name expands over an axis)?
 
 ## 10. Implementation sketch
 
-- **Schema** (`crates/tailor-config/src/schema.rs`): add a top-level `inputs: IndexMap<String,
-  InputSource>` on `ImageDefinition`, where `InputSource` is a one-of discriminated by kind key
-  (`image` in v1: `{ image, output?, cell? }`; `path`/`oci`/`url` reserved). Add `BaseSource::Image
-  { image, output?, cell? }` and a top-level `dependsOn: Vec<String>`.
-- **Interpolation** (`interpolate.rs`): recognize the `inputs.<alias>` namespace (a bare alias — no
-  format/coordinate grammar), substitute the resolved host path, and record the alias use so the
-  resolver can bind + hash it. Must not collide with the `params` namespace.
+- **Schema** (`crates/tailor-config/src/schema.rs`): add a top-level `inputs: Vec<InputSpec>` on
+  `ImageDefinition`, where `InputSpec` is `{ name, <one-of kind> }` — `name` plus a source
+  discriminated by kind key (`image` in v1: `{ image, output?, cell? }`; `path`/`oci`/`url` reserved),
+  matching the `{ name, … }` list shape of `baseImages`/`toolchains.entries`. Names are unique per
+  image (reuse the catalogue duplicate-name check). Add `BaseSource::Image { image, output?, cell? }`
+  and a top-level `dependsOn: Vec<String>`.
+- **Interpolation** (`interpolate.rs`): recognize the `inputs.<name>` namespace (a bare name — no
+  format/coordinate grammar), substitute the resolved host path, and record the use so the resolver
+  can bind + hash it. Must not collide with the `params` namespace.
 - **DAG** (new, `tailor-config` or `tailor-core`): build image→image edges from `image` inputs +
   `base: { image }` + `dependsOn`; topo-sort; cycle error. Reuse `Workspace` (`workspace.rs`) for the
   member set.
