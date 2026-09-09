@@ -58,107 +58,144 @@ producer rebuilds.
 ## 1. Principles
 
 1. **One source of truth for the path.** The consumer never re-encodes the producer's slug/format/
-   output layout. It names the *image* (and, if ambiguous, the *output*); tailor resolves the path.
-2. **The edge is implied by use, with an explicit escape hatch.** Referencing a producer artifact
-   (as a base, or via interpolation in `config:`) *is* the dependency — no need to also restate it in
-   a `dependsOn:` list. `dependsOn:` exists only for order-only edges that aren't otherwise expressed.
-3. **Config stays opaque.** tailor does not learn IC schema. It substitutes a resolved path into the
-   user's `config:` string values (as it already interpolates `${param}` —
-   `crates/tailor-config/src/interpolate.rs`) and **registers that path as a content-hashed
-   dependency**. It never parses `additionalFiles`.
+   output layout. It names the *image* (and, if ambiguous, the *output* and *cell*); tailor resolves
+   the path.
+2. **Inputs are declared, then referenced by alias.** A top-level `inputs:` block binds an alias to a
+   typed source; the use-site is a bare `${inputs.<alias>}`. An `image`-kind input *is* the
+   dependency edge — no separate restatement. `dependsOn:` exists only for order-only edges that
+   reference nothing (§2.3).
+3. **Config stays opaque.** tailor does not learn IC schema. At the use-site it only ever substitutes
+   a bare `${inputs.<alias>}` into a string value (as it already interpolates `${param}` —
+   `crates/tailor-config/src/interpolate.rs`) and **registers the resolved path as a content-hashed
+   dependency**. It never parses `additionalFiles` or reaches into IC structure.
 4. **Incremental correctness is non-negotiable.** A producer rebuild must force any dependent to
    re-fingerprint against the fresh bytes (§4). Fail-closed: a missing/failed producer fails its
    dependents rather than embedding stale bytes.
-5. **Intra-workspace only (v1).** Edges reference **member images** of the same workspace
+5. **Intra-workspace only (v1).** `image` inputs reference **member images** of the same workspace
    (`crates/tailor-config/src/workspace.rs`). Cross-workspace / remote producers are a non-goal (§7).
 
 ## 2. Config surface
 
-Three entry points; the first two are the ergonomic primary API (each *implies* the edge), the third
-is the escape hatch.
+`inputs:` is the primary API: a typed, aliased catalogue of the things a build consumes. `base:`
+gains an `image` shorthand for the common "producer is my base" case; `dependsOn:` is the order-only
+escape hatch.
 
-### 2.1 Image-as-base — `base: { image: … }`
+### 2.1 The `inputs:` catalogue
 
-A new `BaseSource` kind alongside `path` / `oci` / `azureLinux` / `ref`
-(`crates/tailor-config/src/schema.rs::BaseSource`):
+A map of **alias → input source**, where the source is discriminated by its kind key (one-of, like
+`BaseSource` — `crates/tailor-config/src/schema.rs`). Every input, regardless of kind, resolves to a
+host path tailor binds read-only and content-hashes into the fingerprint; the kind only changes *how
+that path is produced*. v1 ships one kind — `image` (an artifact produced by another workspace image):
+
+```yaml
+# iso/image.yaml
+inputs:
+  payload:                       # alias — an identifier, the interpolation key
+    image: installer-payload     # kind: produced by a workspace member image
+    output: cosi                 # the producer output's format NAME (see §2.4); optional iff single-output
+    cell: { flavor: min }        # structured pin for producer axes the consumer lacks (§2.4)
+```
+
+Reference it anywhere a `${param}` is valid — including inside opaque `config:` strings:
+
+```yaml
+config:
+  iso:
+    additionalFiles:
+      - source: "${inputs.payload}"        # bare alias; format + cell already fixed above
+        destination: /images/payload.cosi
+```
+
+`${inputs.<alias>}` (a) **substitutes** the resolved host path of the producer's paired-cell artifact
+and (b) **registers** that path in the cell's content-hashed dependency set (the set
+`extraDependencies` feeds — `crates/tailor-core/src/deps.rs`), which is what makes the embed
+staleness-correct: the *text* of `config:` is hashed, but text can't see a byte change behind a stable
+path — the registered content hash can. The user never writes `../producer/artifacts/…`, never
+restates the artifact under `extraDependencies`, and the format/cell live once, in the declaration.
+
+**Extensibility (why `inputs:` and not a bare `dependsOn`).** The alias/path/hash machinery is
+kind-agnostic, so future input kinds slot in with **no change to any use-site**:
+
+```yaml
+inputs:
+  payload:  { image: installer-payload, output: cosi }            # v1 — creates a DAG edge
+  seed:     { path: ./seed/data.img }                             # future — a named local file/dir
+  drivers:  { oci: example.com/drivers:1.2, file: drivers.tar }   # future — an OCI artifact
+  firmware: { url: "https://…/fw.bin", sha256: "…" }              # future — a fetched blob
+```
+
+Only `image` inputs create a build-order **edge** (§3); `path`/`oci`/`url` inputs are leaves — no
+edge, still hashed. So "an inter-image dependency" is just "an input whose source is another image,"
+one concept rather than two. `extraDependencies` (an unreferenced `path` input, hashed only) and
+`rpmSources` (referenceable local sources) are the natural things this converges on later (§9);
+v1 leaves them as-is.
+
+### 2.2 Image-as-base — `base: { image: … }`
+
+The base is a single value, not a catalogue entry, so it keeps its own structured form alongside
+`path` / `oci` / `azureLinux` / `ref` (`crates/tailor-config/src/schema.rs::BaseSource`):
 
 ```yaml
 # derived/image.yaml
 base:
-  image: hardened-base      # a member image name in this workspace
-  output: raw               # optional: which of the producer's formats to consume (see §2.4)
+  image: hardened-base      # a member image name
+  output: raw               # optional: which producer format (see §2.4)
+  cell: { flavor: min }     # optional pin (§2.4)
 ```
 
-Resolves to the producer's published artifact **for the paired cell** (§2.4), then behaves exactly
-like a `path` base — so it flows through the existing base resolver and is **content-hashed into the
-fingerprint** as `ResolvedBase::LocalFile { content_hash, size }`
-(`crates/tailor-core/src/fingerprint.rs`). No new fingerprint surface needed for the base case.
-
-### 2.2 Image-as-input — artifact interpolation
-
-Expose each producer artifact as an interpolation token usable anywhere a `${param}` is
-(`crates/tailor-config/src/interpolate.rs`), including inside opaque `config:` string values and in
-`rpmSources` / `extraDependencies`:
-
-```yaml
-# iso/image.yaml
-config:
-  iso:
-    additionalFiles:
-      - source: "${image.installer-payload.cosi}"   # resolved to the producer's artifact path
-        destination: /images/payload.cosi
-```
-
-`${image.<name>.<format>}` (or `${image.<name>}` when the producer has exactly one output) does two
-things:
-
-1. **Substitutes** the resolved host path of the producer's paired-cell artifact (§2.4), translated
-   like any other path the executor binds.
-2. **Registers** that path in the consuming cell's content-hashed dependency set (the same set
-   `extraDependencies` feeds — `crates/tailor-core/src/deps.rs`). This is what makes the embed
-   staleness-correct: the *text* of `config:` is hashed, but text alone can't see a byte change behind
-   a stable path; the registered content hash can.
-
-So a user never writes `../producer/artifacts/…` again, and never separately lists the artifact under
-`extraDependencies`.
+It resolves like §2.1's `image` kind, then behaves exactly like a `path` base — flowing through the
+existing resolver and **content-hashed** as `ResolvedBase::LocalFile { content_hash, size }`
+(`crates/tailor-core/src/fingerprint.rs`), so the base case needs no new fingerprint surface. Whether
+`base:` should instead reference an `inputs` alias (`base: { input: payload }`) — making `inputs:` the
+single source of truth for every producer ref — is Open Decision §9.
 
 ### 2.3 Explicit `dependsOn:` (order-only escape hatch)
 
-For the rare case where the consumer depends on the producer having *run* but doesn't reference its
-artifact by base or interpolation (e.g. a side effect in a shared output dir):
+For the rare case where the consumer needs the producer to have *run* but references nothing it
+produced (e.g. a side effect in a shared output dir):
 
 ```yaml
 # consumer/image.yaml
 dependsOn:
   - hardened-base
-  - installer-payload
 ```
 
 `dependsOn` only adds edges to the DAG (§3). It contributes **no** fingerprint input by itself — an
 order-only dependency that changes nothing the consumer reads must not force a rebuild.
 
-### 2.4 Output selection & matrix pairing
+### 2.4 Output selection & cell resolution
 
-A producer may have multiple outputs and/or a matrix. Resolution rules for both §2.1 and §2.2:
+A producer may have multiple outputs and/or a matrix. For every `image` input and every `base:
+{ image }` (evaluated **per consuming cell**):
 
-- **Output.** If the producer declares exactly one output, `output:`/the `.<format>` segment is
-  optional. Otherwise it is **required**; an unknown/ambiguous format is a config error.
-- **Compression.** The resolved path is the *published* artifact
-  (`crates/tailor-core/src/orchestrator.rs::published_artifact_name`), so a producer output with
-  `compression: zstd` resolves to `…​.<ext>.zst` automatically — the consumer says nothing about it.
-- **Matrix pairing.** Producer and consumer are matched **cell-wise on shared axes**:
-  - Producer has no matrix (single cell) ⇒ every consumer cell references that one artifact.
-  - Producer and consumer share an axis (canonically `arch`) ⇒ pair by value: the consumer's
-    `arch=arm64` cell references the producer's `arch=arm64` artifact. This is the common case
-    (arch-paired base or payload).
-  - Producer has an axis the consumer lacks (so pairing is ambiguous) ⇒ config error, unless the
-    reference pins it: `base: { image: p, cell: { flavor: min } }` / `${image.p.min.cosi}` (exact
-    form TBD, §9).
+- **Output — a format *name*, not an extension.** `output:` is the value from the producer's
+  `outputs[].format` (`cosi`, `raw`, `vhd-fixed`, `baremetal-image`, …), **not** the file extension.
+  This matters because the extension isn't unique — `vhd` and `vhd-fixed` both write `.vhd`
+  (`crates/tailor-core/src/orchestrator.rs::artifact_name`), so keying on the extension would be
+  ambiguous. So `output: vhd-fixed` resolves to `…_vhd-fixed.vhd`; tailor owns the extension. Optional
+  iff the producer declares exactly one output; otherwise required, and an unknown format is an error.
+- **Compression is automatic.** The path is the *published* artifact
+  (`published_artifact_name`), so a producer output with `compression: zstd` resolves to `….<ext>.zst`
+  — the consumer says nothing about it.
+- **Cell resolution — coordinate projection + explicit pins.** For a consuming cell with coordinate
+  `C` (axis→value), the producer cell is:
+  1. **inherit** — for every axis the producer *also* declares, take `C`'s value (match by axis name;
+     canonically `arch`);
+  2. **pin** — every producer axis the consumer *lacks* must be pinned by the input's `cell:` map,
+     else the reference is ambiguous (an error, never an implicit "first"/"all");
+  3. **format** — `output` selects which artifact of that fully-pinned producer cell.
+
+  The resolved coordinate yields the producer slug → `<output_dir>/<slug>.<ext>[.zst]`. A coordinate
+  that names no built producer cell (excluded by the producer's `selectors`/`skip`) is an error.
+  Explicit pin beats inherited value. For `base:` the arch pairing is an **invariant** (you cannot
+  base `arm64` on `amd64`), so a missing same-arch producer cell is a hard error, not a fallback.
+
 
 ## 3. Build semantics (the DAG)
 
 - **Nodes.** Each workspace **image** is a node (image-level DAG; §9 discusses cell-level).
-- **Edges.** Union of the edges implied by §2.1/§2.2 and any explicit §2.3 `dependsOn`.
+- **Edges.** An edge `producer → consumer` for every `image` input (§2.1), every `base: { image }`
+  (§2.2), and every explicit `dependsOn` (§2.3). `path`/`oci`/`url` inputs add no edge.
 - **Cycle detection.** Topologically sort at plan time; a cycle is a hard, fail-fast config error
   naming the cycle (`a → b → a`). This is the ordering-and-cycle guarantee consumers need.
 - **Order.** Build in topological order. Independent nodes keep today's behavior; the only *new*
@@ -211,14 +248,37 @@ post-producer-rebuild fingerprint for a consumer, which is inherent).
 
 ## 6. Validation & errors
 
-Surfaced by `tailor validate` (and at plan time):
+All checks are **static** — the matrices are known pre-build — so they fire at `tailor validate` (and
+are re-checked at plan), before anything is built. Each names the consumer cell, the producer, the
+offending axis/value, and a concrete fix, matching tailor's `ConfigError` style (slug + field +
+detail). A **dimension mismatch** takes one of four shapes:
 
-- unknown image name in `base.image` / `${image.X…}` / `dependsOn`;
-- unknown/ambiguous `output` format for a multi-output producer;
-- ambiguous matrix pairing (producer axis the consumer can't pin);
-- dependency **cycle** (names the cycle);
-- a `dependsOn`/reference that escapes the workspace (a non-member) — rejected (§7);
-- arch mismatch in a paired cell (producer has no `arch=<x>` cell for the consumer's `arch=<x>`).
+1. **Ambiguous** — the producer has an axis the consumer lacks and the input didn't pin it:
+   ```
+   error: image `iso` input `payload` → `installer-payload`, but `installer-payload` has axis
+          `flavor` that `iso` does not — the producer cell is ambiguous (flavor ∈ {min, net}).
+     fix: pin it — inputs.payload.cell: { flavor: <value> } — or add `flavor` to iso's matrix.
+   ```
+2. **Empty** — the resolved (inherited or pinned) coordinate names no built producer cell:
+   ```
+   error: image `iso` cell `arch=arm64` needs `installer-payload` cell `arch=arm64`,
+          which does not exist (installer-payload builds: arch=amd64).
+   ```
+   For a base, phrased as the arch invariant:
+   `error: cannot base `derived` (arch=arm64) on `base`: `base` produces no arch=arm64 output.`
+3. **Bad pin** — the `cell:` pin names an axis or value the producer doesn't have:
+   ```
+   error: input `payload` pins axis `edition` on `installer-payload`, which has no such axis (axes: arch, flavor).
+   error: input `payload` pins `flavor=xxl` on `installer-payload`, but `flavor` has no value `xxl` (min, net).
+   ```
+4. **Missing output** — the producer doesn't declare the requested format:
+   ```
+   error: input `payload` requests output `vhd-fixed` from `installer-payload`, which produces: cosi.
+   ```
+
+Plus the non-dimensional checks: unknown image name (`image`/`base.image`/`dependsOn`); a reference
+that escapes the workspace (a non-member) — rejected (§7); an unresolved `${inputs.<alias>}` (no such
+alias); and a dependency **cycle** (names the cycle, `a → b → a`).
 
 ## 7. Non-goals (v1)
 
@@ -236,33 +296,56 @@ Surfaced by `tailor validate` (and at plan time):
   duplication and not the plan-then-build staleness. Rejected as insufficient (it's the trap in §0).
 - **Keep the nested-workspace workaround.** Works, but institutionalizes two invocations and a
   workspace that exists only for ordering. This proposal removes the need.
+- **Inline artifact interpolation — `${image.<name>.<format>}` directly in `config:`** (an earlier
+  draft of §2.1). Terse, and the path lives at the use-site, but it makes tailor scan opaque `config:`
+  strings, buries the dependency edge *inside a string*, forces a fragile grammar (image names may
+  contain `.`, formats contain `-`, and cell pins would need `[axis=val]`), and restates the format at
+  every use. Superseded by the `inputs:` catalogue: the edge becomes a visible typed declaration, the
+  pin is structured YAML, and the use-site is a bare `${inputs.<alias>}` — tailor substitutes only its
+  own token, never IC schema.
+- **tailor authors the sink** (a structured `embed: [{ image, into }]` that writes the
+  `additionalFiles` entry itself). Most declarative, but tailor would have to model every sink
+  (`additionalFiles` is format-nested; others aren't), breaking config-opacity and not generalizing.
+  Rejected.
+- **Staged stable path** (tailor reflinks each input to `./.tailor/inputs/<alias>`; config points at
+  the real path, no token). Purest re: opacity — tailor never edits `config:` — at the cost of a
+  reflink. Kept as a possible per-input option off the *same* `inputs:` declaration (§9), not the
+  default.
 - **Fully implicit (scan `config:` for paths under sibling images' output dirs).** Magic, fragile,
-  and violates config-opacity. Rejected in favor of explicit references (§2.1/§2.2).
+  violates opacity. Rejected in favor of explicit `inputs:`.
 - **Cell-level DAG from day one.** More precise (a consumer arch cell depends only on the producer's
   same-arch cell) but heavier to model and explain. Start image-level with cell-wise *pairing* (§2.4);
   revisit if per-cell parallelism demands finer edges (§9).
 
 ## 9. Open decisions
 
-1. **Cell-pin syntax** for pairing against a producer axis the consumer lacks —
-   `base: { image, cell: { axis: value } }` and the interpolation analog `${image.p.<coord>.<fmt>}`.
-2. **Image-level vs cell-level DAG** for scheduling/parallelism (§8). Image-level is proposed; does
+1. **Should `base:` reference an `inputs` alias** (`base: { input: payload }`) instead of repeating
+   `{ image, output, cell }`, making `inputs:` the single source of truth for every producer ref?
+   (Base keeps its arch-pairing invariant either way.)
+2. **Should `extraDependencies` / `rpmSources` converge into `inputs:`** — `extraDependencies` as
+   unreferenced `path` inputs, `rpmSources` as referenceable ones — or stay as separate fields?
+3. **Image-level vs cell-level DAG** for scheduling/parallelism (§8). Image-level is proposed; does
    any real case need cell-level edges?
-3. **`dependsOn` spelling** — `dependsOn` vs `needs` vs `after`. `dependsOn` reads well and matches
+4. **`dependsOn` spelling** — `dependsOn` vs `needs` vs `after`. `dependsOn` reads well and matches
    the common ecosystem term; confirm.
-4. **`--no-deps` semantics** — hard error vs warn when a required upstream artifact is absent.
-5. **Interpolation namespace** — `${image.<name>.<format>}` vs `${images.<name>.<format>}` vs a
-   distinct `${artifact:…}`; must not collide with user `params`.
+5. **`--no-deps` semantics** — hard error vs warn when a required upstream artifact is absent.
+6. **A staged-path option** (§8) as a per-input alternative to `${inputs.<alias>}` substitution, for
+   users who want tailor to never edit `config:` strings.
+7. **Fan-in ergonomics** — a consumer cell that embeds *several* producer cells (e.g. every flavor)
+   needs one alias per artifact today; is sugar warranted (e.g. an alias that expands over an axis)?
 
 ## 10. Implementation sketch
 
-- **Schema** (`crates/tailor-config/src/schema.rs`): add `BaseSource::Image { image, output?, cell? }`
-  and a top-level `dependsOn: Vec<String>` on `ImageDefinition`. Extend the interpolation grammar
-  (`interpolate.rs`) to recognize `image.<name>[.<coord>].<format>` and emit both a substitution and a
-  registered dependency path.
-- **DAG** (new, `tailor-config` or `tailor-core`): build image→image edges from resolved base-image
-  refs + interpolation refs + `dependsOn`; topo-sort; cycle error. Reuse `Workspace`
-  (`workspace.rs`) for the member set.
+- **Schema** (`crates/tailor-config/src/schema.rs`): add a top-level `inputs: IndexMap<String,
+  InputSource>` on `ImageDefinition`, where `InputSource` is a one-of discriminated by kind key
+  (`image` in v1: `{ image, output?, cell? }`; `path`/`oci`/`url` reserved). Add `BaseSource::Image
+  { image, output?, cell? }` and a top-level `dependsOn: Vec<String>`.
+- **Interpolation** (`interpolate.rs`): recognize the `inputs.<alias>` namespace (a bare alias — no
+  format/coordinate grammar), substitute the resolved host path, and record the alias use so the
+  resolver can bind + hash it. Must not collide with the `params` namespace.
+- **DAG** (new, `tailor-config` or `tailor-core`): build image→image edges from `image` inputs +
+  `base: { image }` + `dependsOn`; topo-sort; cycle error. Reuse `Workspace` (`workspace.rs`) for the
+  member set.
 - **Resolution**: a producer artifact path = `<output_dir>/published_artifact_name(producer_slug,
   format, compression)` (`orchestrator.rs`), with `output_dir` the workspace artifacts dir
   (`run.rs::ARTIFACTS_DIR`, default `artifacts/`).
