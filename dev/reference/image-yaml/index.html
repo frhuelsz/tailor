@@ -1305,6 +1305,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Output spec">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#compression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compression
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1734,6 +1751,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Output spec">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#compression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        compression
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -2037,8 +2071,33 @@ and <a href="../../explanation/base-images/">Base images</a>.</p>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vhd-fixed</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">compression</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zstd</span><span class="w">      </span><span class="c1"># tailor compresses the artifact → &lt;slug&gt;.vhd.zst</span>
 </code></pre></div>
-<p><code>format</code> is required. <code>cosiCompressionLevel</code> and <code>name</code> are optional.</p>
+<p><code>format</code> is required. <code>cosiCompressionLevel</code>, <code>compression</code>, and <code>name</code> are optional.</p>
+<h3 id="compression"><code>compression</code><a class="headerlink" href="#compression" title="Permanent link">&para;</a></h3>
+<p>Post-build compression tailor applies to the artifact. Image Customizer writes the raw image (e.g.
+<code>&lt;slug&gt;.vhd</code>); tailor then streams it through the codec and publishes <code>&lt;slug&gt;.vhd.zst</code>, removing the
+uncompressed original. This is a <strong>tailor</strong> step, not an IC feature, and is independent of
+<code>cosiCompressionLevel</code> (which is IC's own COSI compression).</p>
+<table>
+<thead>
+<tr>
+<th>Codec</th>
+<th>Suffix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>zstd</code></td>
+<td><code>.zst</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>compression</code> is <strong>invalid</strong> for <code>cosi</code> (already compressed by IC), <code>iso</code> (compressing the image
+breaks bootability), and the <code>pxe-*</code> outputs (a directory / an already-gzipped tar) — <code>validate</code>
+rejects those combinations. It applies to the raw disk-image formats: <code>vhd</code>, <code>vhd-fixed</code>, <code>vhdx</code>,
+<code>qcow2</code>, <code>raw</code>, <code>baremetal-image</code>. Changing it re-fingerprints the cell, so the artifact rebuilds.</p>
 
 
 
