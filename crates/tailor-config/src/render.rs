@@ -283,7 +283,7 @@ fn ensure_single_base_kind(
     image: &ImageDefinition,
     tuple: &AxisTuple,
 ) -> Result<(), ConfigError> {
-    const KINDS: [&str; 4] = ["path", "oci", "azureLinux", "ref"];
+    const KINDS: [&str; 5] = ["path", "oci", "azureLinux", "ref", "image"];
     let present: Vec<&str> = KINDS
         .into_iter()
         .filter(|kind| base.get(kind).is_some())

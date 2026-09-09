@@ -134,6 +134,7 @@ mod tests {
             signing: None,
             inject_files: None,
             extra_dependencies: vec![],
+            depends_on: vec![],
             extra_params: vec![],
             config: None,
         };

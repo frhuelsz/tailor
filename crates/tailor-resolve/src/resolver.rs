@@ -46,6 +46,10 @@ impl BaseResolver for OciResolver {
             BaseSource::Ref { reference } => Err(ResolveError::Other(format!(
                 "unresolved base reference `{reference}`: a catalogue reference must be expanded before resolution"
             ))),
+            // `base: { image }` is lowered to a `path` base before resolution (orchestrator).
+            BaseSource::Image { image, .. } => Err(ResolveError::Other(format!(
+                "unresolved image base `{image}`: a workspace-image base must be lowered before resolution"
+            ))),
         }
     }
 

@@ -165,6 +165,62 @@ pub enum CoreError {
     #[error("no cells match the selection for image `{image}`")]
     NoCellsSelected { image: String },
 
+    #[error("image dependency cycle: {chain}")]
+    DependencyCycle { chain: String },
+
+    #[error(
+        "image `{image}` depends on `{dependency}`, which is not a workspace image (known: {known})"
+    )]
+    UnknownDependencyImage {
+        image: String,
+        dependency: String,
+        known: String,
+    },
+
+    #[error(
+        "image `{image}` cell `{slug}` depends on `{producer}`, but `{producer}` has axis `{axis}` \
+         that `{image}` does not — the producer cell is ambiguous ({axis} ∈ {{{values}}}); pin it \
+         with `cell: {{ {axis}: <value> }}`"
+    )]
+    AmbiguousProducerCell {
+        image: String,
+        slug: String,
+        producer: String,
+        axis: String,
+        values: String,
+    },
+
+    #[error(
+        "image `{image}` cell `{slug}` depends on `{producer}` cell `{coord}`, which does not exist \
+         ({producer} builds: {available})"
+    )]
+    MissingProducerCell {
+        image: String,
+        slug: String,
+        producer: String,
+        coord: String,
+        available: String,
+    },
+
+    #[error(
+        "image `{image}` requests output `{output}` from `{producer}`, which produces: {available}"
+    )]
+    UnknownProducerOutput {
+        image: String,
+        producer: String,
+        output: String,
+        available: String,
+    },
+
+    #[error("image `{image}` pins `{axis}={value}` on dependency `{producer}`, but {detail}")]
+    BadDependencyPin {
+        image: String,
+        producer: String,
+        axis: String,
+        value: String,
+        detail: String,
+    },
+
     #[error("failed to access `{}`: {source}", .path.display())]
     Io {
         path: PathBuf,

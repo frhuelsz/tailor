@@ -10,6 +10,7 @@ pub mod domain;
 pub mod error;
 pub mod fingerprint;
 pub mod hashcache;
+pub mod imagedep;
 pub mod lockfile;
 pub mod orchestrator;
 pub mod ports;

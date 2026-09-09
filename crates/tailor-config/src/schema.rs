@@ -524,6 +524,11 @@ pub struct ImageDefinition {
     pub inject_files: Option<bool>,
     #[serde(default)]
     pub extra_dependencies: Vec<PathBuf>,
+    /// Order-only build dependencies on other workspace images (names). An `image` base or input
+    /// already implies an edge; `dependsOn` is for images that must build first but are referenced
+    /// nowhere (`meta/docs/2026-09-09-inter-image-dependencies.md` §2.3). Contributes no fingerprint input.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
     /// Extra Image Customizer command-line flags, appended verbatim after every flag tailor manages.
     /// For experimental/non-standard IC builds that expose options tailor does not model; a flag
     /// tailor already emits is rejected. Mergeable across fragments (concatenated, base → specific).
@@ -678,6 +683,19 @@ pub enum BaseSource {
     Ref {
         #[serde(rename = "ref")]
         reference: String,
+    },
+    /// A base produced by another **workspace image** (`meta/docs/2026-09-09-inter-image-dependencies.md`).
+    /// Resolves, per consumer cell, to that image's published artifact for the paired cell (§2.4),
+    /// then behaves like a `path` base. Creates a build-order dependency edge.
+    #[serde(rename_all = "camelCase")]
+    Image {
+        image: String,
+        /// Which producer output to consume (format name). Optional iff the producer is single-output.
+        #[serde(default)]
+        output: Option<OutputFormat>,
+        /// Structured pins for producer axes the consumer lacks (§2.4).
+        #[serde(default)]
+        cell: BTreeMap<String, String>,
     },
 }
 

@@ -1269,6 +1269,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         signing: None,
         inject_files: None,
         extra_dependencies: Vec::new(),
+        depends_on: Vec::new(),
         extra_params: Vec::new(),
         config: None,
     };
@@ -1318,6 +1319,14 @@ async fn build(
     apply_log_overrides(&mut tool, logging, &workspace.root)?;
     apply_build_dir_base_override(&mut tool, args.build_dir_base.as_deref())?;
     let targets = build_targets(workspace, &args.images)?;
+    // All workspace images supply producer definitions for resolving `base: { image }` references.
+    let all_members = build_targets(workspace, &[])?;
+    // Build the selected images plus their transitive producers, in topological order, so a consumer
+    // is planned *after* its producers (its base hashes then reflect the fresh artifacts —
+    // `meta/docs/2026-09-09-inter-image-dependencies.md` §4). This also detects dependency cycles. Both the
+    // dry-run and real-build paths schedule over this order.
+    let closure = tailor_core::imagedep::dependency_closure(&targets, &all_members)?;
+    let ordered = tailor_core::imagedep::topological_order(&closure, &all_members)?;
     let selection = selector(&args.select, &args.arch)?;
     let output_dir = tailor_config::absolutize(
         args.output_dir
@@ -1346,7 +1355,8 @@ async fn build(
         let orchestrator = Orchestrator::new(IcExecutor::new(NoopRuntime), OciResolver::new());
         let results = orchestrator
             .dry_run(
-                &targets,
+                &ordered,
+                &all_members,
                 &tool,
                 &selection,
                 &workspace.root,
@@ -1384,72 +1394,71 @@ async fn build(
     preflight_toolchain_arches(&targets, &tool, &toolchains, &selection)?;
     let tools_dir_sources = resolve_tools_dir_sources(&targets, &runtime, &resolver, &lock).await?;
     let orchestrator = Orchestrator::new(IcExecutor::new(runtime), resolver);
-    let plan = orchestrator
-        .plan(
-            &targets,
-            &tool,
-            &lock,
-            &toolchains,
-            &tools_dir_sources,
-            &selection,
-            &output_dir,
-            Some(&base_hash_cache_dir),
-        )
-        .await?;
-    let stale = plan.stale().count();
 
-    // Cargo-style build report (`meta/docs/2026-06-22-design.md` §11): toolchain in use, per-cell progress,
-    // and a Finished summary. Base descriptions are looked up per slug from the plan.
-    let bases: BTreeMap<&str, String> = plan
-        .cells
-        .iter()
-        .map(|planned| {
-            (
-                planned.cell.slug.as_ref(),
-                describe_base(&planned.cell.base),
-            )
-        })
-        .collect();
     status("Toolchain", &describe_toolchains(&tool));
-    status(
-        "Building",
-        &format!("{} cell(s) selected, {stale} to build", plan.cells.len()),
-    );
-
     let started = Instant::now();
     let clones = args.clones.max(1);
     let mut built = 0usize;
-    for clone in 0..clones {
-        let options = BuildOptions {
-            force: args.force,
-            dry_run: false,
-            clone_index: (clones > 1).then_some(clone),
-        };
-        let mut on_progress = |event: tailor_core::BuildProgress<'_>| match event {
-            tailor_core::BuildProgress::Building { slug } => {
-                let base = bases.get(slug).map_or("", String::as_str);
-                status("Customizing", &format!("{slug}  ({base})"));
-            }
-            tailor_core::BuildProgress::Built { artifact, .. } => {
-                built += 1;
-                status("Built", &describe_artifact(artifact));
-            }
-        };
-        orchestrator
-            .build(
-                &plan,
+    let mut selected_cells = 0usize;
+    for node in &ordered {
+        let plan = orchestrator
+            .plan(
+                std::slice::from_ref(node),
+                &all_members,
                 &tool,
                 &lock,
                 &toolchains,
-                &workspace.root,
+                &tools_dir_sources,
+                &selection,
                 &output_dir,
-                &options,
-                cancel.clone(),
-                &mut on_progress,
-                &signer_for,
+                Some(&base_hash_cache_dir),
             )
             .await?;
+        selected_cells += plan.cells.len();
+        // Base descriptions are looked up per slug from the plan for the progress line.
+        let bases: BTreeMap<&str, String> = plan
+            .cells
+            .iter()
+            .map(|planned| {
+                (
+                    planned.cell.slug.as_ref(),
+                    describe_base(&planned.cell.base),
+                )
+            })
+            .collect();
+        for clone in 0..clones {
+            let options = BuildOptions {
+                force: args.force,
+                dry_run: false,
+                clone_index: (clones > 1).then_some(clone),
+            };
+            let mut on_progress = |event: tailor_core::BuildProgress<'_>| match event {
+                tailor_core::BuildProgress::Building { slug } => {
+                    let base = bases.get(slug).map_or("", String::as_str);
+                    status("Customizing", &format!("{slug}  ({base})"));
+                }
+                tailor_core::BuildProgress::Built { artifact, .. } => {
+                    built += 1;
+                    status("Built", &describe_artifact(artifact));
+                }
+            };
+            orchestrator
+                .build(
+                    &plan,
+                    &tool,
+                    &lock,
+                    &toolchains,
+                    &workspace.root,
+                    &output_dir,
+                    &options,
+                    cancel.clone(),
+                    &mut on_progress,
+                    &signer_for,
+                )
+                .await?;
+        }
     }
+    let _ = selected_cells;
     status(
         "Finished",
         &format!(
@@ -1621,6 +1630,10 @@ fn describe_base(base: &BaseSource) -> String {
             format!("azureLinux {}/{}", azure_linux.version, azure_linux.variant)
         }
         BaseSource::Ref { reference } => format!("ref: {reference}"),
+        BaseSource::Image { image, output, .. } => match output {
+            Some(format) => format!("image: {image} ({})", format.as_str()),
+            None => format!("image: {image}"),
+        },
     }
 }
 

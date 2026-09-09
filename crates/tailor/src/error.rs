@@ -4,7 +4,7 @@
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum AppError {
     #[error(transparent)]
-    Core(#[from] tailor_core::CoreError),
+    Core(Box<tailor_core::CoreError>),
 
     #[error(transparent)]
     Config(#[from] tailor_config::ConfigError),
@@ -23,4 +23,12 @@ pub(crate) enum AppError {
 
     #[error("{0}")]
     Message(String),
+}
+
+// `CoreError` is boxed (it carries several large variants — the inter-image dependency diagnostics);
+// a manual `From` keeps `?` ergonomic while keeping `AppError` small (`clippy::result_large_err`).
+impl From<tailor_core::CoreError> for AppError {
+    fn from(source: tailor_core::CoreError) -> Self {
+        AppError::Core(Box::new(source))
+    }
 }

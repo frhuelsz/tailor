@@ -94,6 +94,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
     pub async fn plan(
         &self,
         targets: &[Arc<Target>],
+        members: &[Arc<Target>],
         tool: &ToolConfig,
         lock: &Lockfile,
         toolchains: &BTreeMap<String, ResolvedToolchain>,
@@ -106,7 +107,12 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         for target in targets {
             let (toolchain_id, toolchain) = toolchain_for(target, tool)?;
             let resolved_toolchain = resolved_toolchain(toolchains, &toolchain_id, &toolchain)?;
-            for cell in cells_selected(target, selector)? {
+            // Lower any `base: { image }` to a concrete `path` base pointing at the producer's
+            // paired-cell artifact; per-node scheduling guarantees the producer is already built, so
+            // the base resolver below content-hashes the fresh bytes.
+            let mut target_cells = cells_selected(target, selector)?;
+            crate::imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
+            for cell in target_cells {
                 let resolved = self
                     .resolver
                     .resolve(&cell.base, cell.arch, &cell.target.dir)
@@ -227,9 +233,14 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
     /// the network — the offline `--dry-run`/debug path (`meta/docs/2026-06-22-design.md` §11). Uses the toolchain
     /// tag (not a digest) for the container reference and delegates to the executor, which
     /// short-circuits before any pull/run when `dry_run` is set.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "each parameter is a distinct, necessary render input"
+    )]
     pub async fn dry_run(
         &self,
         targets: &[Arc<Target>],
+        members: &[Arc<Target>],
         tool: &ToolConfig,
         selector: &Selector,
         workspace_root: &Path,
@@ -241,7 +252,9 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         for target in targets {
             let (_, toolchain) = toolchain_for(target, tool)?;
             let ic_image_ref = format!("{}:{}", toolchain.container, toolchain.effective_tag());
-            for cell in cells_selected(target, selector)? {
+            let mut target_cells = cells_selected(target, selector)?;
+            crate::imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
+            for cell in target_cells {
                 let context = ExecutionContext {
                     output_dir: output_dir.to_path_buf(),
                     ic_image_ref: ic_image_ref.clone(),
@@ -556,8 +569,10 @@ fn resolve_base(
             None,
             oci.platform.as_deref().and_then(platform_arch),
         )),
-        // `azureLinux` declares no arch, so the cell arch (axis or default) decides.
-        BaseSource::AzureLinux { .. } => Ok((base.clone(), None, None)),
+        // `azureLinux` declares no arch, so the cell arch (axis or default) decides. `base: { image }`
+        // likewise carries no arch — the consumer's arch axis (or default) decides, and the reference
+        // is lowered to a `path` base by `lower_image_bases` before resolution.
+        BaseSource::AzureLinux { .. } | BaseSource::Image { .. } => Ok((base.clone(), None, None)),
     }
 }
 
@@ -921,6 +936,7 @@ mod tests {
         let plan = orchestrator
             .plan(
                 &[target],
+                &[],
                 &tool,
                 &lock,
                 &toolchains,
@@ -984,6 +1000,7 @@ mod tests {
             Orchestrator::new(FakeExecutor::default(), FakeResolver)
                 .plan(
                     &[build_target()],
+                    &[],
                     &tool,
                     &lock,
                     &toolchains,
@@ -1041,6 +1058,7 @@ mod tests {
         let err = Orchestrator::new(FakeExecutor::default(), FakeResolver)
             .plan(
                 &[target],
+                &[],
                 &tool,
                 &Lockfile::default(),
                 &toolchains,
@@ -1068,6 +1086,7 @@ mod tests {
         let plan = orchestrator
             .plan(
                 &[target],
+                &[],
                 &tool,
                 &lock,
                 &toolchains,
@@ -1106,6 +1125,7 @@ mod tests {
         let replan = orchestrator
             .plan(
                 &[target2],
+                &[],
                 &tool,
                 &lock,
                 &toolchains,
@@ -1131,6 +1151,7 @@ mod tests {
         let results = orchestrator
             .dry_run(
                 &[target],
+                &[],
                 &tool_config(),
                 &Selector::default(),
                 out.path(),
@@ -1477,6 +1498,7 @@ mod tests {
         let err = orchestrator
             .plan(
                 &[target],
+                &[],
                 &tool,
                 &Lockfile::default(),
                 &toolchains,

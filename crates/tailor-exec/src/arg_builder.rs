@@ -337,6 +337,13 @@ fn base_args(
         // A catalogue reference is collapsed to a `path` base during cell expansion, so it never
         // reaches the argument builder; treat its absolute path like a `path` base if it does.
         (BaseSource::Ref { reference }, _) => flag_value(FLAG_IMAGE_FILE, reference.clone()),
+        // `base: { image }` is lowered to a `path` base before the build (orchestrator), so it never
+        // reaches the argument builder.
+        (BaseSource::Image { image, .. }, _) => {
+            unreachable!(
+                "base: {{ image: {image} }} must be lowered to a path base before arg building"
+            )
+        }
     }
 }
 

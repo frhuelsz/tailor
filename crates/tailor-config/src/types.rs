@@ -27,7 +27,7 @@ impl fmt::Display for Arch {
 }
 
 /// An Image Customizer output format (`--output-image-format`). See `meta/docs/2026-06-22-design.md` §10.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutputFormat {
     Cosi,

@@ -30,12 +30,15 @@ impl BaseResolver for FakeResolver {
     ) -> Result<ResolvedBase, ResolveError> {
         let platform = format!("linux/{arch}");
         Ok(match source {
-            // Catalogue references collapse to a `path` base before resolution; treat any leftover as
-            // a local file so test doubles stay deterministic.
-            BaseSource::Path { .. } | BaseSource::Ref { .. } => ResolvedBase::LocalFile {
-                content_hash: [0; 16],
-                size: 0,
-            },
+            // Catalogue references collapse to a `path` base before resolution; `image` bases are
+            // lowered to a `path` base too. Treat any leftover as a local file so test doubles stay
+            // deterministic.
+            BaseSource::Path { .. } | BaseSource::Ref { .. } | BaseSource::Image { .. } => {
+                ResolvedBase::LocalFile {
+                    content_hash: [0; 16],
+                    size: 0,
+                }
+            }
             BaseSource::Oci { oci } => ResolvedBase::Oci {
                 reference: oci.uri.clone(),
                 platform,
