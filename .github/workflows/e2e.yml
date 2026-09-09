@@ -7,6 +7,9 @@ name: E2E
 # Real builds pull the IC image and an Azure Linux base from MCR and run a privileged customize, so
 # this is heavier than the unit CI — it lives in its own workflow. Trigger it on main, on PRs, and
 # manually; switch to a nightly `schedule:` if the per-PR cost is too high.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
