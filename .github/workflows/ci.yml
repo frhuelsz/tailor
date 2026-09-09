@@ -76,11 +76,11 @@ jobs:
       - uses: actions/checkout@v4.2.0
       - name: Install musl toolchain
         run: |
-          # Drop preinstalled third-party apt repos (google-chrome, etc.) whose indexes
-          # intermittently fail with "Hash Sum mismatch" and break `apt-get update`. musl-tools
-          # comes from Ubuntu's own repos (kept in ubuntu.sources), so this is safe.
-          sudo rm -f /etc/apt/sources.list.d/*.list
-          sudo apt-get update
+          # The hosted runner ships third-party apt repos (e.g. google-chrome) whose indexes
+          # intermittently fail with "Hash Sum mismatch", making `apt-get update` exit non-zero.
+          # That is unrelated to musl-tools (an Ubuntu package whose index refreshes fine), so
+          # tolerate a partial update and let the install proceed from Ubuntu's own repos.
+          sudo apt-get update || true
           sudo apt-get install -y musl-tools
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
