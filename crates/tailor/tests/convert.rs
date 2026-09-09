@@ -102,6 +102,60 @@ fn a_missing_input_is_a_clear_error() {
 }
 
 #[test]
+fn dry_run_uses_container_internal_build_dir_by_default() {
+    // Regression: convert must NOT default `--build-dir` to a host temp dir. A host build-dir is
+    // bound read-write and subject to the separate-device guard, so a `/tmp`-based default fails on
+    // every system where the temp dir shares a device with `/` (CI runners, many dev machines). With
+    // no `--build-dir-base`, IC uses its container-internal `/tmp` — rendered as a bare `--build-dir
+    // /tmp`, never a translated `/host/...` path. `TMPDIR` points at the working dir to simulate a
+    // runner where the system temp dir is on the root filesystem.
+    let (tmp, input) = workspace_with_input();
+    convert_in(tmp.path())
+        .env("TMPDIR", tmp.path())
+        .args([
+            "convert",
+            input.to_str().unwrap(),
+            "--to",
+            "raw",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("--build-dir /tmp")
+                .and(predicate::str::contains("--build-dir /host").not()),
+        );
+}
+
+#[test]
+fn dry_run_honors_an_explicit_build_dir_base() {
+    // An explicit `--build-dir-base` on a separate-device scratch (tmpfs `/dev/shm`) is honored and
+    // passes the guard, rendered as a translated `/host/...` build-dir. Skips where `/dev/shm` is
+    // missing or shares a device with `/` (then the guard would correctly reject it).
+    use std::os::unix::fs::MetadataExt;
+    let shm = Path::new("/dev/shm");
+    match (fs::metadata("/"), fs::metadata(shm)) {
+        (Ok(root), Ok(scratch)) if root.dev() != scratch.dev() => {}
+        _ => return,
+    }
+    let (tmp, input) = workspace_with_input();
+    let base = shm.join(format!("tailor-convert-it-{}", std::process::id()));
+    convert_in(tmp.path())
+        .args([
+            "convert",
+            input.to_str().unwrap(),
+            "--to",
+            "raw",
+            "--build-dir-base",
+            base.to_str().unwrap(),
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--build-dir /host"));
+}
+
+#[test]
 fn convert_needs_no_workspace() {
     // No `tailor.yaml` anywhere: convert must still work (unlike the workspace verbs).
     let (tmp, input) = workspace_with_input();

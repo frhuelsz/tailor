@@ -1153,12 +1153,15 @@ async fn convert(args: &ConvertArgs, engine: &EngineOverride) -> Result<(), AppE
     // converted image on the destination filesystem so the final move is an instant rename.
     let staging = output_parent.join(format!(".tailor-convert-{}", std::process::id()));
 
-    // Scratch base for IC's own `--build-dir`: honor --build-dir-base, else a unique dir under the
-    // system temp dir. Never `/`.
-    let build_dir_base = match args.build_dir_base.clone() {
-        Some(dir) => tailor_config::absolutize(dir, &cwd),
-        None => std::env::temp_dir().join(format!("tailor-convert-{}", std::process::id())),
-    };
+    // Scratch base for IC's own `--build-dir`. Only honor an explicit `--build-dir-base` (absolutized
+    // and subject to the separate-device build-dir guard, since it is bound read-write on the host).
+    // When omitted, leave it unset so IC uses its container-internal `/tmp` — no host bind, no guard —
+    // exactly like a default workspace build. A default under the system temp dir would trip the
+    // build-dir guard on every system where the temp dir shares a device with `/` (e.g. CI runners).
+    let build_dir_base = args
+        .build_dir_base
+        .clone()
+        .map(|dir| tailor_config::absolutize(dir, &cwd));
 
     let container = args
         .container
@@ -1173,7 +1176,7 @@ async fn convert(args: &ConvertArgs, engine: &EngineOverride) -> Result<(), AppE
         &cwd,
     );
     runtime.workspace_root = input_parent;
-    runtime.build_dir_base = Some(build_dir_base);
+    runtime.build_dir_base = build_dir_base;
 
     let cell = convert_cell(&input, &runtime.workspace_root, arch, args.to, slug);
     let context = ExecutionContext {
