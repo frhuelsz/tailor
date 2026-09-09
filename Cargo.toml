@@ -98,6 +98,10 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 doc_markdown = "allow"
 too_many_lines = "allow"
+# Async is dictated by our port trait signatures (BaseResolver, Executor, BaseImageFetcher, …);
+# several legitimate impls — dry-run no-ops and test fakes/stubs — have nothing to `.await`. The
+# lint only targets trait impls, which cannot drop `async` unilaterally, so it is pure noise here.
+unused_async_trait_impl = "allow"
 
 [profile.release]
 lto = "thin"
