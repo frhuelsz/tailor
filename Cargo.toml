@@ -64,6 +64,11 @@ sha2 = "0.10"
 hex = "0.4"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
+# --- compression ---
+# Post-build artifact compression. Bundles libzstd (vendored C), so the static musl build stays
+# self-contained — no runtime `zstd` binary or shared library required.
+zstd = "0.13"
+
 # --- versioning ---
 semver = { version = "1", features = ["serde"] }
 

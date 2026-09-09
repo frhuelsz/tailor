@@ -9,8 +9,8 @@ use std::{
 };
 
 use tailor_config::{
-    Arch, BaseSource, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef, ToolsDirSourceInline,
-    ToolsDirSourceRef, cell_slug, render_image,
+    Arch, BaseSource, Compression, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef,
+    ToolsDirSourceInline, ToolsDirSourceRef, cell_slug, render_image,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -140,9 +140,14 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     extra_dependency_hashes: &extra_dependency_hashes,
                     rpm_source_hashes: &rpm_source_hashes,
                     extra_params: &cell.extra_params,
+                    compression: cell.output.compression,
+                    cosi_compression_level: cell.output.cosi_compression_level,
                 });
-                let artifact =
-                    output_dir.join(artifact_name(cell.slug.as_ref(), cell.output.format));
+                let artifact = output_dir.join(published_artifact_name(
+                    cell.slug.as_ref(),
+                    cell.output.format,
+                    cell.output.compression,
+                ));
                 let up_to_date =
                     stamp::is_up_to_date(output_dir, cell.slug.as_ref(), print, &artifact);
                 let runtime = runtime_config(tool, lock, &target.root);
@@ -761,7 +766,9 @@ fn oci_repository(reference: &str) -> &str {
     }
 }
 
-/// The artifact filename for a cell slug + format (a directory for `pxe-dir`).
+/// The artifact filename for a cell slug + format (a directory for `pxe-dir`). This is what Image
+/// Customizer writes — the **uncompressed** name; see [`published_artifact_name`] for the final
+/// artifact tailor publishes when `compression:` is set.
 pub fn artifact_name(slug: &str, format: OutputFormat) -> String {
     let extension = match format {
         OutputFormat::Cosi => "cosi",
@@ -776,6 +783,21 @@ pub fn artifact_name(slug: &str, format: OutputFormat) -> String {
     format!("{slug}.{extension}")
 }
 
+/// The final artifact tailor publishes for a cell: [`artifact_name`] plus the compression suffix
+/// when `compression:` is set (e.g. `img.vhd.zst`). Image Customizer still writes [`artifact_name`];
+/// tailor compresses it into this name after the build.
+pub fn published_artifact_name(
+    slug: &str,
+    format: OutputFormat,
+    compression: Option<Compression>,
+) -> String {
+    let base = artifact_name(slug, format);
+    match compression {
+        Some(codec) => format!("{base}.{}", codec.suffix()),
+        None => base,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -787,6 +809,28 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::testing::{FakeExecutor, FakeResolver};
+
+    #[test]
+    fn published_artifact_name_appends_compression_suffix() {
+        // Uncompressed: the plain format extension.
+        assert_eq!(
+            published_artifact_name("img_amd64_vhd", OutputFormat::VhdFixed, None),
+            "img_amd64_vhd.vhd"
+        );
+        // Compressed: the codec suffix rides on top of the format extension.
+        assert_eq!(
+            published_artifact_name(
+                "img_amd64_vhd",
+                OutputFormat::VhdFixed,
+                Some(Compression::Zstd)
+            ),
+            "img_amd64_vhd.vhd.zst"
+        );
+        assert_eq!(
+            published_artifact_name("img_amd64_raw", OutputFormat::Raw, Some(Compression::Zstd)),
+            "img_amd64_raw.raw.zst"
+        );
+    }
 
     /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
     fn write(root: &Path, rel: &str, body: &str) {
@@ -1141,6 +1185,7 @@ mod tests {
             default_outputs: vec![OutputSpec {
                 format: OutputFormat::Cosi,
                 cosi_compression_level: None,
+                compression: None,
                 name: None,
             }],
             output_artifacts: OutputArtifactsPolicy::default(),
@@ -1283,6 +1328,7 @@ mod tests {
             default_outputs: vec![OutputSpec {
                 format: OutputFormat::Cosi,
                 cosi_compression_level: None,
+                compression: None,
                 name: None,
             }],
             output_artifacts: OutputArtifactsPolicy::default(),

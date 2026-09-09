@@ -10,7 +10,9 @@ use serde_yaml_ng::Value;
 
 use crate::{
     error::ConfigError,
-    types::{Arch, LogLevel, Operation, OutputArtifactsPolicy, OutputFormat, ParamValue},
+    types::{
+        Arch, Compression, LogLevel, Operation, OutputArtifactsPolicy, OutputFormat, ParamValue,
+    },
 };
 
 // ===== tailor.yaml — workspace / tool config (reference/tailor-yaml.md) =====
@@ -701,6 +703,10 @@ pub struct OutputSpec {
     pub format: OutputFormat,
     #[serde(default)]
     pub cosi_compression_level: Option<u8>,
+    /// Post-build compression tailor applies to the artifact (e.g. `zstd` ⇒ `img.vhd.zst`). Invalid
+    /// for `cosi` (already compressed), `iso` (breaks bootability), and the `pxe-*` formats.
+    #[serde(default)]
+    pub compression: Option<Compression>,
     #[serde(default)]
     pub name: Option<String>,
 }

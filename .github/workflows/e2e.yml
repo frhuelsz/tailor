@@ -64,13 +64,35 @@ jobs:
         working-directory: e2e
         run: |
           set -euxo pipefail
-          for slug in appliance_min_amd64_cosi appliance_net_amd64_cosi; do
-            artifact="artifacts/${slug}.cosi"
-            test -s "$artifact" || { echo "missing or empty artifact: $artifact" >&2; exit 1; }
-            owner=$(stat -c '%U' "$artifact")
-            if [ "$owner" = "root" ]; then
-              echo "artifact $artifact is still root-owned (janitor did not run)" >&2
-              exit 1
-            fi
-            echo "ok: $artifact ($(stat -c '%s' "$artifact") bytes, owner $owner)"
-          done
+          # `net` keeps the default cosi output; `min` produces a zstd-compressed raw.
+          cosi="artifacts/appliance_net_amd64_cosi.cosi"
+          test -s "$cosi" || { echo "missing or empty artifact: $cosi" >&2; exit 1; }
+          owner=$(stat -c '%U' "$cosi")
+          if [ "$owner" = "root" ]; then
+            echo "artifact $cosi is still root-owned (janitor did not run)" >&2
+            exit 1
+          fi
+          echo "ok: $cosi ($(stat -c '%s' "$cosi") bytes, owner $owner)"
+
+          # The compressed artifact: tailor must publish `<slug>.raw.zst` and remove the raw original.
+          zst="artifacts/appliance_min_amd64_raw.raw.zst"
+          raw="artifacts/appliance_min_amd64_raw.raw"
+          test -s "$zst" || { echo "missing or empty compressed artifact: $zst" >&2; exit 1; }
+          if [ -e "$raw" ]; then
+            echo "uncompressed original $raw was not removed after compression" >&2
+            exit 1
+          fi
+          owner=$(stat -c '%U' "$zst")
+          if [ "$owner" = "root" ]; then
+            echo "compressed artifact $zst is still root-owned (janitor did not run)" >&2
+            exit 1
+          fi
+          # It must be a real zstd stream: check the magic number, then verify the frame integrity.
+          magic=$(head -c 4 "$zst" | od -An -tx1 | tr -d ' \n')
+          if [ "$magic" != "28b52ffd" ]; then
+            echo "compressed artifact $zst is not a zstd stream (magic=$magic)" >&2
+            exit 1
+          fi
+          zstd -t "$zst"
+          echo "ok: $zst ($(stat -c '%s' "$zst") bytes, owner $owner, zstd frame verified)"
+

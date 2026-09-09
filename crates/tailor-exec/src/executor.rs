@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::{self, BufReader},
     path::{Path, PathBuf},
     slice,
     sync::Arc,
@@ -8,10 +9,11 @@ use std::{
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use tailor_config::{OutputArtifactsPolicy, OutputFormat};
+use tailor_config::{Compression, OutputArtifactsPolicy, OutputFormat};
 use tailor_core::{
     Cell, ContainerConfig, ContainerResult, ContainerRuntime, ExecError, ExecutionContext,
     ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, ToolsDirPlan, artifact_name,
+    published_artifact_name,
 };
 
 use crate::{arg_builder, guard, janitor, output_artifacts, rpm_farm, working_copy};
@@ -44,9 +46,16 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
         context: &ExecutionContext,
         cancel: CancellationToken,
     ) -> Result<ExecutionResult, ExecError> {
-        let artifact_path = context
+        // Image Customizer writes the uncompressed artifact; when `compression:` is set, tailor
+        // compresses it into `published_path` after the build (`ic_output_path` is then removed).
+        let ic_output_path = context
             .output_dir
             .join(artifact_name(cell.slug.as_ref(), cell.output.format));
+        let published_path = context.output_dir.join(published_artifact_name(
+            cell.slug.as_ref(),
+            cell.output.format,
+            cell.output.compression,
+        ));
         if context.dry_run {
             let logs = if context.signer.is_some() {
                 arg_builder::render_signed_dry_run(cell, context)?
@@ -57,7 +66,7 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             };
             info!(cell = %cell.slug, "dry-run container invocation");
             return Ok(ExecutionResult {
-                artifact_path,
+                artifact_path: published_path,
                 exit_code: 0,
                 logs,
             });
@@ -252,8 +261,8 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
                 dump: result.failure_dump.unwrap_or_default(),
             });
         }
-        verify_artifact(&artifact_path, cell.output.format)?;
-        let mut managed_paths = vec![artifact_path.clone()];
+        verify_artifact(&ic_output_path, cell.output.format)?;
+        let mut managed_paths = vec![ic_output_path.clone()];
         // The image cache dir is written by IC inside the privileged container (root-owned); fold it
         // into the janitor sweep so the caller can read/clean it sudo-free.
         if let Some(cache_dir) = &context.runtime.image_cache_dir {
@@ -265,8 +274,14 @@ impl<R: ContainerRuntime> Executor for IcExecutor<R> {
             managed_paths.push(log_file.clone());
         }
         janitor::chown_paths(&self.runtime, &managed_paths, &context.runtime, cancel).await?;
+        // Post-build compression (`meta/docs/2026-06-22-design.md` §10): IC has no notion of it, so
+        // tailor streams its raw artifact through the codec into the published name and drops the
+        // uncompressed original. Runs after the chown so the host user owns the input it reads.
+        if let Some(compression) = cell.output.compression {
+            compress_artifact(&ic_output_path, &published_path, compression)?;
+        }
         Ok(ExecutionResult {
-            artifact_path,
+            artifact_path: published_path,
             exit_code: result.exit_code,
             logs: result.logs,
         })
@@ -699,6 +714,48 @@ fn verify_artifact(path: &PathBuf, format: OutputFormat) -> Result<(), ExecError
     Ok(())
 }
 
+/// The zstd level tailor compresses artifacts at. Level 3 is the library default — a fast,
+/// well-balanced ratio suitable for multi-GB disk images; a per-output level knob can come later.
+const ZSTD_LEVEL: i32 = 3;
+
+/// Stream `src` through the codec into `dst`, then remove `src`. Streamed (never buffered whole) so a
+/// multi-GB image compresses in bounded memory.
+fn compress_artifact(src: &Path, dst: &Path, compression: Compression) -> Result<(), ExecError> {
+    let mut reader = BufReader::new(fs::File::open(src).map_err(|source| ExecError::Io {
+        context: format!("failed to open `{}` for compression", src.display()),
+        source,
+    })?);
+    let output = fs::File::create(dst).map_err(|source| ExecError::Io {
+        context: format!("failed to create compressed artifact `{}`", dst.display()),
+        source,
+    })?;
+    match compression {
+        Compression::Zstd => {
+            let mut encoder =
+                zstd::stream::Encoder::new(output, ZSTD_LEVEL).map_err(|source| ExecError::Io {
+                    context: format!("failed to initialize zstd encoder for `{}`", dst.display()),
+                    source,
+                })?;
+            io::copy(&mut reader, &mut encoder).map_err(|source| ExecError::Io {
+                context: format!("failed to compress `{}`", src.display()),
+                source,
+            })?;
+            encoder.finish().map_err(|source| ExecError::Io {
+                context: format!("failed to finalize compressed artifact `{}`", dst.display()),
+                source,
+            })?;
+        }
+    }
+    fs::remove_file(src).map_err(|source| ExecError::Io {
+        context: format!(
+            "failed to remove uncompressed artifact `{}` after compression",
+            src.display()
+        ),
+        source,
+    })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,6 +794,7 @@ mod tests {
             output: OutputSpec {
                 format: OutputFormat::Cosi,
                 cosi_compression_level: None,
+                compression: None,
                 name: None,
             },
             slug: CellSlug("sample_cosi".to_owned()),
@@ -773,6 +831,27 @@ mod tests {
     /// **absolute** farm path — a relative farm path produces a relative bind spec, which the
     /// container engine rejects (`invalid mount path: must be absolute`). Earlier tests only used
     /// absolute source paths, so this case slipped through.
+    #[test]
+    fn compress_artifact_zstd_round_trips_and_removes_the_original() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("img.raw");
+        let dst = tmp.path().join("img.raw.zst");
+        // Repetitive but non-trivial content, larger than one buffer, so streaming is exercised.
+        let data: Vec<u8> = (0..(1u32 << 18)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&src, &data).unwrap();
+
+        compress_artifact(&src, &dst, Compression::Zstd).unwrap();
+
+        assert!(!src.exists(), "uncompressed original must be removed");
+        assert!(dst.exists(), "compressed artifact must exist");
+        // Real zstd magic number.
+        let head = std::fs::read(&dst).unwrap();
+        assert_eq!(&head[..4], &[0x28, 0xB5, 0x2F, 0xFD], "not a zstd stream");
+        // And it decodes back to the exact input.
+        let decoded = zstd::stream::decode_all(std::io::Cursor::new(head)).unwrap();
+        assert_eq!(decoded, data);
+    }
+
     #[test]
     fn a_relative_rpm_source_yields_an_absolute_writable_farm() {
         let tmp = TempDir::new().unwrap();

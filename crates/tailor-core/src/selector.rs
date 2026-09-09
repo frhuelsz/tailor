@@ -156,6 +156,7 @@ mod tests {
             output: OutputSpec {
                 format: OutputFormat::Cosi,
                 cosi_compression_level: None,
+                compression: None,
                 name: None,
             },
             slug: CellSlug(slug.to_owned()),

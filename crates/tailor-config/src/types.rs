@@ -66,6 +66,38 @@ impl fmt::Display for OutputFormat {
     }
 }
 
+/// Post-build compression tailor applies to a cell's output artifact. Image Customizer writes the
+/// raw image; tailor then streams it through the codec and publishes `<artifact>.<suffix>` (e.g.
+/// `img.vhd.zst`). Not an IC feature — see `docs/reference/image-yaml.md`. Only `zstd` today; COSI's
+/// own compression is separate (`cosiCompressionLevel`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Compression {
+    Zstd,
+}
+
+impl Compression {
+    /// The lowercase codec token (also the `compression:` value).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Compression::Zstd => "zstd",
+        }
+    }
+
+    /// The filename suffix appended after the format extension (`<name>.<ext>.<suffix>`).
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Compression::Zstd => "zst",
+        }
+    }
+}
+
+impl fmt::Display for Compression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The tailor-level IC operation. Default `customize` (`meta/docs/2026-06-22-design.md` §7.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

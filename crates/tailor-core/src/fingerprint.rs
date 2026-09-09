@@ -3,7 +3,7 @@
 
 use serde_yaml_ng::Value;
 use sha2::{Digest, Sha256};
-use tailor_config::{ExtraParam, Operation};
+use tailor_config::{Compression, ExtraParam, Operation};
 
 use crate::{domain::Fingerprint, ports::ResolvedBase};
 
@@ -23,6 +23,10 @@ pub struct FingerprintInputs<'a> {
     pub rpm_source_hashes: &'a [[u8; 16]],
     /// Extra IC command-line flags, in declared (merge) order — a change to any flag rebuilds.
     pub extra_params: &'a [ExtraParam],
+    /// Post-build artifact compression; a change rebuilds (the published artifact differs).
+    pub compression: Option<Compression>,
+    /// COSI compression level (`--cosi-compression-level`); a change rebuilds the COSI.
+    pub cosi_compression_level: Option<u8>,
 }
 
 /// Compute the canonical fingerprint. Each field is domain-separated and length-prefixed so distinct
@@ -70,6 +74,12 @@ pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
             b"extra-param.value",
             extra.value.as_deref().unwrap_or_default().as_bytes(),
         );
+    }
+    if let Some(compression) = inputs.compression {
+        field(&mut hasher, b"compression", compression.as_str().as_bytes());
+    }
+    if let Some(level) = inputs.cosi_compression_level {
+        field(&mut hasher, b"cosi-compression-level", &[level]);
     }
 
     Fingerprint(hasher.finalize().into())
@@ -123,6 +133,8 @@ mod tests {
             extra_dependency_hashes: &[],
             rpm_source_hashes: &[],
             extra_params: &[],
+            compression: None,
+            cosi_compression_level: None,
         }
     }
 
@@ -174,6 +186,22 @@ mod tests {
         let mut b = inputs("cell", &cfg, &base);
         b.extra_params = &two;
         assert_ne!(fingerprint(&a), fingerprint(&b));
+    }
+
+    #[test]
+    fn compression_and_cosi_level_change_fingerprint() {
+        let base = base();
+        let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
+        let plain = inputs("cell", &cfg, &base);
+        let mut zstd = inputs("cell", &cfg, &base);
+        zstd.compression = Some(Compression::Zstd);
+        assert_ne!(fingerprint(&plain), fingerprint(&zstd));
+
+        let mut level_one = inputs("cell", &cfg, &base);
+        level_one.cosi_compression_level = Some(1);
+        let mut level_two = inputs("cell", &cfg, &base);
+        level_two.cosi_compression_level = Some(2);
+        assert_ne!(fingerprint(&level_one), fingerprint(&level_two));
     }
 
     #[test]

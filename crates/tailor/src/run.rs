@@ -1284,6 +1284,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
     let output = OutputSpec {
         format,
         cosi_compression_level: None,
+        compression: None,
         name: None,
     };
     Cell {
@@ -1933,6 +1934,7 @@ fn default_cosi() -> Vec<OutputSpec> {
     vec![OutputSpec {
         format: OutputFormat::Cosi,
         cosi_compression_level: None,
+        compression: None,
         name: None,
     }]
 }

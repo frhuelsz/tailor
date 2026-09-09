@@ -206,6 +206,25 @@ outputs:
   - format: cosi
     cosiCompressionLevel: 6
     name: "${name}-${arch}"
+  - format: vhd-fixed
+    compression: zstd      # tailor compresses the artifact → <slug>.vhd.zst
 ```
 
-`format` is required. `cosiCompressionLevel` and `name` are optional.
+`format` is required. `cosiCompressionLevel`, `compression`, and `name` are optional.
+
+### `compression`
+
+Post-build compression tailor applies to the artifact. Image Customizer writes the raw image (e.g.
+`<slug>.vhd`); tailor then streams it through the codec and publishes `<slug>.vhd.zst`, removing the
+uncompressed original. This is a **tailor** step, not an IC feature, and is independent of
+`cosiCompressionLevel` (which is IC's own COSI compression).
+
+| Codec | Suffix |
+| --- | --- |
+| `zstd` | `.zst` |
+
+`compression` is **invalid** for `cosi` (already compressed by IC), `iso` (compressing the image
+breaks bootability), and the `pxe-*` outputs (a directory / an already-gzipped tar) — `validate`
+rejects those combinations. It applies to the raw disk-image formats: `vhd`, `vhd-fixed`, `vhdx`,
+`qcow2`, `raw`, `baremetal-image`. Changing it re-fingerprints the cell, so the artifact rebuilds.
+

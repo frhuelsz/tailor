@@ -18,7 +18,7 @@ use crate::{
     matrix::AxisTuple,
     merge,
     schema::{BaseSource, ExtraParam, ImageDefinition, OutputSpec},
-    types::ParamValue,
+    types::{OutputFormat, ParamValue},
 };
 
 const BASE_FIELD: &str = "base";
@@ -191,6 +191,9 @@ fn render_cell(
 
     let base = resolve_base(image, &tuple, &matched, &context)?;
     let outputs = resolve_outputs(image, &tuple, &matched)?;
+    for output in &outputs {
+        validate_output_compression(image, &tuple, output)?;
+    }
     let rpm_sources = matched
         .iter()
         .flat_map(|f| f.doc.rpm_sources.clone())
@@ -317,6 +320,34 @@ fn resolve_outputs(
         Some(value) => deserialize_field(value, image, tuple, OUTPUTS_FIELD),
         None => Ok(Vec::new()),
     }
+}
+
+/// Reject `compression:` on formats where it makes no sense: `cosi` (IC already compresses it),
+/// `iso` (compressing the image breaks bootability), and the `pxe-*` outputs (a directory / an
+/// already-gzipped tar). Compression is a tailor post-step over a single raw disk image.
+fn validate_output_compression(
+    image: &ImageDefinition,
+    tuple: &AxisTuple,
+    output: &OutputSpec,
+) -> Result<(), ConfigError> {
+    let Some(compression) = output.compression else {
+        return Ok(());
+    };
+    if matches!(
+        output.format,
+        OutputFormat::Cosi | OutputFormat::Iso | OutputFormat::PxeDir | OutputFormat::PxeTar
+    ) {
+        return Err(ConfigError::InvalidField {
+            slug: slug(image, tuple),
+            field: OUTPUTS_FIELD,
+            detail: format!(
+                "compression `{compression}` is not supported for format `{}` (only raw disk-image \
+                 formats: vhd, vhd-fixed, vhdx, qcow2, raw, baremetal-image)",
+                output.format
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn deserialize_field<T: DeserializeOwned>(
@@ -448,6 +479,61 @@ mod tests {
             .iter()
             .filter_map(serde_yaml_ng::Value::as_str)
             .collect()
+    }
+
+    #[test]
+    fn compression_parses_and_is_validated_against_the_format() {
+        // A raw disk-image format accepts compression; the parsed OutputSpec carries it.
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "image.yaml",
+            indoc! {"
+                name: comp
+                base:
+                  path: ./b.img
+                outputs:
+                  - format: raw
+                    compression: zstd
+                config:
+                  os: { hostname: comp }
+            "},
+        );
+        let image = load_image(tmp.path().join("image.yaml")).unwrap();
+        let cells = render_image(&image, tmp.path()).unwrap();
+        assert_eq!(
+            cells[0].outputs[0].compression,
+            Some(crate::types::Compression::Zstd)
+        );
+
+        // COSI is already compressed by IC — `compression:` on it is rejected.
+        let bad = TempDir::new().unwrap();
+        write(
+            bad.path(),
+            "image.yaml",
+            indoc! {"
+                name: comp
+                base:
+                  path: ./b.img
+                outputs:
+                  - format: cosi
+                    compression: zstd
+                config:
+                  os: { hostname: comp }
+            "},
+        );
+        let image = load_image(bad.path().join("image.yaml")).unwrap();
+        let err = render_image(&image, bad.path()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ConfigError::InvalidField {
+                    field: "outputs",
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
     }
 
     #[test]
