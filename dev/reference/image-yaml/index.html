@@ -1297,6 +1297,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inter-image-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inter-image dependencies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-spec" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1743,6 +1754,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inter-image-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inter-image dependencies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-spec" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1846,9 +1868,9 @@
 </tr>
 <tr>
 <td><code>base</code></td>
-<td>one of <code>path</code>, <code>oci</code>, <code>azureLinux</code>, <code>ref</code></td>
+<td>one of <code>path</code>, <code>oci</code>, <code>azureLinux</code>, <code>ref</code>, <code>image</code></td>
 <td>conditional</td>
-<td>Exactly one base resolves per cell. <code>ref: &lt;name&gt;</code> references a <code>baseImages:</code> slot.</td>
+<td>Exactly one base resolves per cell. <code>ref: &lt;name&gt;</code> references a <code>baseImages:</code> slot; <code>image: &lt;name&gt;</code> bases on another workspace image's output (see <a href="#inter-image-dependencies">Inter-image dependencies</a>).</td>
 </tr>
 <tr>
 <td><code>features</code></td>
@@ -1891,6 +1913,12 @@
 <td>path list</td>
 <td>no</td>
 <td>Extra files/directories to hash for incremental checks; use for IC-config-referenced assets.</td>
+</tr>
+<tr>
+<td><code>dependsOn</code></td>
+<td>string list</td>
+<td>no</td>
+<td>Order-only build dependencies on other workspace images. See <a href="#inter-image-dependencies">Inter-image dependencies</a>.</td>
 </tr>
 <tr>
 <td><code>extraParams</code></td>
@@ -2066,13 +2094,42 @@ spelling. Pinning a fixed <code>platform: linux/arm64</code> on an amd64 cell is
 that slot's local file (the path lives once, in <code>tailor.yaml</code>). Use it for the file-based, registry-pull-free
 flow Trident needs — see <a href="../tailor-yaml/"><code>baseImages</code> in tailor.yaml</a>, <a href="../../how-to/use-a-base-image-catalogue/">Use a base-image catalogue</a>,
 and <a href="../../explanation/base-images/">Base images</a>.</p>
+<h2 id="inter-image-dependencies">Inter-image dependencies<a class="headerlink" href="#inter-image-dependencies" title="Permanent link">&para;</a></h2>
+<p>One image can build on another image in the same workspace. Today this is expressed as a <strong>base</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># derived/image.yaml — customize another workspace image's output further</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">base</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">base-os</span><span class="w">          </span><span class="c1"># a member image name</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">raw</span><span class="w">             </span><span class="c1"># which producer output (format name); optional if it has one output</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="nt">cell</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> flavor</span><span class="p">:</span><span class="w"> </span><span class="nv">min</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># pin producer axes this image doesn't share (see below)</span>
+</code></pre></div>
+<p><code>base: { image }</code> resolves, <strong>per cell</strong>, to the producer's published artifact for the paired cell,
+then behaves exactly like a <code>path</code> base. tailor builds the producer first: a single <code>tailor build</code>
+orders the images topologically, and <code>tailor build derived</code> builds <code>base-os</code> before <code>derived</code>. A
+producer rebuild re-fingerprints its consumers (their base content-hash changes), so incremental
+builds stay correct. A dependency <strong>cycle</strong> is a hard error.</p>
+<p><strong>Cell pairing.</strong> For each consuming cell, the producer cell is chosen by matching axes the two share
+(canonically <code>arch</code> — an <code>arm64</code> consumer pairs with the producer's <code>arm64</code> output), plus any
+<code>cell:</code> pins for producer axes the consumer lacks. An unpinned producer-only axis is ambiguous (an
+error); a coordinate that names no producer cell, an unknown output format, or a bad pin are errors —
+all surfaced by <code>tailor validate</code>.</p>
+<p><strong><code>output</code></strong> is the producer output's <strong>format name</strong> (e.g. <code>raw</code>, <code>vhd-fixed</code>, <code>cosi</code>), not a file
+extension; tailor derives the extension (and appends <code>.zst</code> if that output is compressed). It is
+optional only when the producer declares a single output.</p>
+<p><code>dependsOn: [&lt;image&gt;, …]</code> declares an <strong>order-only</strong> dependency: the listed images build first, but
+they contribute nothing to this image's fingerprint. Use it when an image must run after another but
+references none of its output. (An <code>image</code> base already implies the edge — don't restate it.)</p>
+<blockquote>
+<p>Embedding another image's artifact <em>inside</em> <code>config:</code> (e.g. an <code>additionalFiles</code> source) via an
+<code>inputs:</code> catalogue is designed in <code>meta/docs/2026-09-09-inter-image-dependencies.md</code> and lands in a
+later release; today, inter-image reuse is via <code>base: { image }</code>.</p>
+</blockquote>
 <h2 id="output-spec">Output spec<a class="headerlink" href="#output-spec" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">outputs</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vhd-fixed</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">compression</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zstd</span><span class="w">      </span><span class="c1"># tailor compresses the artifact → &lt;slug&gt;.vhd.zst</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">outputs</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vhd-fixed</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">    </span><span class="nt">compression</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zstd</span><span class="w">      </span><span class="c1"># tailor compresses the artifact → &lt;slug&gt;.vhd.zst</span>
 </code></pre></div>
 <p><code>format</code> is required. <code>cosiCompressionLevel</code>, <code>compression</code>, and <code>name</code> are optional.</p>
 <h3 id="compression"><code>compression</code><a class="headerlink" href="#compression" title="Permanent link">&para;</a></h3>
