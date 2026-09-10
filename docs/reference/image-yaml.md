@@ -20,6 +20,7 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `injectFiles` | boolean | no | Inert placeholder, superseded by `signing:`. Currently a no-op; do not rely on it. |
 | `extraDependencies` | path list | no | Extra files/directories to hash for incremental checks; use for IC-config-referenced assets. |
 | `dependsOn` | string list | no | Order-only build dependencies on other workspace images. See [Inter-image dependencies](#inter-image-dependencies). |
+| `inputs` | list of `{name, image, output?, cell?}` | no | Named producer artifacts embedded in `config:` via `${inputs.<name>}`. See [Embedding an artifact with `inputs:`](#embedding-an-artifact-with-inputs). |
 | `extraParams` | list of `{param, value?}` | no | Extra Image Customizer command-line flags, appended verbatim after every flag tailor manages. For experimental/non-standard IC builds. See [Extra params](#extra-params). |
 | `config` | mapping or path string | conditional | Required for `customize`, forbidden for `convert`. Opaque IC config. |
 
@@ -230,11 +231,32 @@ optional only when the producer declares a single output.
 
 `dependsOn: [<image>, …]` declares an **order-only** dependency: the listed images build first, but
 they contribute nothing to this image's fingerprint. Use it when an image must run after another but
-references none of its output. (An `image` base already implies the edge — don't restate it.)
+references none of its output. (An `image` base or input already implies the edge — don't restate it.)
 
-> Embedding another image's artifact *inside* `config:` (e.g. an `additionalFiles` source) via an
-> `inputs:` catalogue is designed in `meta/docs/2026-09-09-inter-image-dependencies.md` and lands in a
-> later release; today, inter-image reuse is via `base: { image }`.
+### Embedding an artifact with `inputs:`
+
+To consume a producer's artifact *inside* `config:` (e.g. as an IC `additionalFiles` source or a
+local `rpmSources` entry), declare it in `inputs:` and reference it by name as `${inputs.<name>}`:
+
+```yaml
+inputs:
+  - name: payload            # the interpolation key
+    image: installer-payload # producer image
+    output: cosi             # format name; optional if single-output
+    cell: { flavor: min }    # pin producer axes this image doesn't share
+
+config:
+  os:
+    additionalFiles:
+      - source: "${inputs.payload}"   # → the resolved producer artifact path
+        destination: /images/payload.cosi
+```
+
+`${inputs.<name>}` is substituted with the resolved producer artifact path (same per-cell pairing and
+`output`/`cell` rules as `base: { image }` above), and the artifact is content-hashed into the
+fingerprint — so a producer rebuild rebuilds this image, and you never hand-write a
+`../…/artifacts/…` path. A `${inputs.<name>}` that names no declared input is an error. `inputs`
+entries whose kind is `image` add a build-order edge; each input `name` is unique per image.
 
 ## Output spec
 
