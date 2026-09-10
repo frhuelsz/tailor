@@ -16,6 +16,11 @@ use crate::error::ConfigError;
 const OPEN: &str = "${";
 const CLOSE: char = '}';
 
+/// Interpolation names under this namespace are **deferred**: `interpolate` leaves `${inputs.<name>}`
+/// verbatim (rather than erroring on an undefined var) so a later workspace-aware pass can resolve
+/// them to producer artifact paths (`meta/docs/2026-09-09-inter-image-dependencies.md` §2.1).
+const DEFERRED_NAMESPACE: &str = "inputs.";
+
 /// A flat lookup of every interpolation name: matrix axis values plus fully-resolved parameters.
 pub(crate) type Context = BTreeMap<String, String>;
 
@@ -99,6 +104,12 @@ fn interpolate(
         let name = &after[..end];
         match lookup(name) {
             Some(value) => out.push_str(&value),
+            // Deferred namespace: re-emit `${inputs.<name>}` verbatim for a later resolution pass.
+            None if name.starts_with(DEFERRED_NAMESPACE) => {
+                out.push_str(OPEN);
+                out.push_str(name);
+                out.push(CLOSE);
+            }
             None => {
                 return Err(ConfigError::UndefinedVar {
                     name: name.to_owned(),
@@ -169,6 +180,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ctx.get("osTag").map(String::as_str), Some("3.0-grub"));
+    }
+
+    #[test]
+    fn defers_the_inputs_namespace() {
+        // `${inputs.*}` must survive interpolation verbatim for the later resolution pass, rather
+        // than erroring as an undefined var.
+        let ctx = build_context(&axes(&[("arch", "amd64")]), &params(&[])).unwrap();
+        let mut value: Value =
+            serde_yaml_ng::from_str("source: \"${inputs.payload}\"\nplatform: linux/${arch}\n")
+                .unwrap();
+        interpolate_tree(&mut value, &ctx).unwrap();
+        assert_eq!(value["source"].as_str(), Some("${inputs.payload}"));
+        assert_eq!(value["platform"].as_str(), Some("linux/amd64"));
     }
 
     #[test]

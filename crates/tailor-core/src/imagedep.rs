@@ -14,6 +14,8 @@ use std::{
 
 use tailor_config::{BaseSource, OutputFormat, render_image};
 
+use serde_yaml_ng::Value;
+
 use crate::{
     domain::{Cell, Target},
     error::CoreError,
@@ -60,9 +62,13 @@ pub fn dependency_closure(
 }
 
 /// The workspace-image names `target` directly depends on: every `base: { image }` referenced by any
-/// of its cells (a base may be set per-fragment), plus its explicit `dependsOn`. Deduplicated.
+/// of its cells (a base may be set per-fragment), every `image` input, plus its explicit `dependsOn`.
+/// Deduplicated.
 pub fn dependencies(target: &Target) -> Result<Vec<String>, CoreError> {
     let mut names: BTreeSet<String> = target.definition.depends_on.iter().cloned().collect();
+    for input in &target.definition.inputs {
+        names.insert(input.image.clone());
+    }
     for rc in render_image(&target.definition, &target.dir)? {
         if let BaseSource::Image { image, .. } = &rc.base {
             names.insert(image.clone());
@@ -147,6 +153,84 @@ pub fn lower_image_bases(
     Ok(())
 }
 
+/// Resolve every image's declared `inputs:` for each of its `cells`: resolve each input to the
+/// producer's paired-cell artifact path, substitute `${inputs.<name>}` occurrences in the cell's
+/// `ic_config`, and record the resolved paths in `cell.input_deps` (content-hashed + already bound
+/// via the output dir). A `${inputs.<name>}` referencing an undeclared input is an error.
+pub fn resolve_inputs(
+    cells: &mut [Cell],
+    members: &[Arc<Target>],
+    output_dir: &Path,
+) -> Result<(), CoreError> {
+    for cell in cells.iter_mut() {
+        let specs = cell.target.definition.inputs.clone();
+        if specs.is_empty() {
+            continue;
+        }
+        // Resolve each declared input for this cell's coordinate (immutable borrows finish here).
+        let mut resolved: BTreeMap<String, std::path::PathBuf> = BTreeMap::new();
+        for spec in &specs {
+            let path = resolve_image_ref(
+                cell,
+                &spec.image,
+                spec.output,
+                &spec.cell,
+                members,
+                output_dir,
+            )?;
+            resolved.insert(spec.name.clone(), path);
+        }
+        let image = cell.target.name().to_owned();
+        substitute_inputs(&mut cell.ic_config, &resolved, &image)?;
+        // Every declared input is a dependency of this cell — hashed and (via the output dir) bound,
+        // whether or not `config:` references it.
+        cell.input_deps = specs
+            .iter()
+            .filter_map(|spec| resolved.get(&spec.name).cloned())
+            .collect();
+    }
+    Ok(())
+}
+
+/// Replace `${inputs.<name>}` in every string scalar of `value` with the resolved path. An
+/// `${inputs.<name>}` whose `name` is not a declared input is [`CoreError::UnknownInput`].
+fn substitute_inputs(
+    value: &mut Value,
+    resolved: &BTreeMap<String, std::path::PathBuf>,
+    image: &str,
+) -> Result<(), CoreError> {
+    match value {
+        Value::String(text) if text.contains(INPUT_TOKEN_OPEN) => {
+            for (name, path) in resolved {
+                let token = format!("{INPUT_TOKEN_OPEN}{name}}}");
+                *text = text.replace(&token, &path.to_string_lossy());
+            }
+            if let Some(rest) = text.split(INPUT_TOKEN_OPEN).nth(1) {
+                let name: String = rest.chars().take_while(|&c| c != '}').collect();
+                return Err(CoreError::UnknownInput {
+                    image: image.to_owned(),
+                    name,
+                    declared: resolved.keys().cloned().collect::<Vec<_>>().join(", "),
+                });
+            }
+        }
+        Value::Sequence(items) => {
+            for item in items.iter_mut() {
+                substitute_inputs(item, resolved, image)?;
+            }
+        }
+        Value::Mapping(map) => {
+            for (_key, item) in map.iter_mut() {
+                substitute_inputs(item, resolved, image)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+const INPUT_TOKEN_OPEN: &str = "${inputs.";
+
 /// Resolve one `base: { image }` reference for a single consumer cell to a concrete `path` base.
 fn resolve_image_base(
     consumer: &Cell,
@@ -156,6 +240,24 @@ fn resolve_image_base(
     members: &[Arc<Target>],
     output_dir: &Path,
 ) -> Result<BaseSource, CoreError> {
+    let path = resolve_image_ref(consumer, image, output, pins, members, output_dir)?;
+    Ok(BaseSource::Path {
+        path,
+        arch: Some(consumer.arch),
+    })
+}
+
+/// Resolve one `image` reference (a `base: { image }` or an `${inputs}` entry) for a single consumer
+/// cell to the producer's paired-cell published artifact path (§2.4). The path lives under
+/// `output_dir`; whether it exists yet is the scheduler's concern (per-node ordering builds it first).
+fn resolve_image_ref(
+    consumer: &Cell,
+    image: &str,
+    output: Option<OutputFormat>,
+    pins: &BTreeMap<String, String>,
+    members: &[Arc<Target>],
+    output_dir: &Path,
+) -> Result<std::path::PathBuf, CoreError> {
     let image_name = consumer.target.name().to_owned();
     let producer = members.iter().find(|t| t.name() == image).ok_or_else(|| {
         CoreError::UnknownDependencyImage {
@@ -197,10 +299,7 @@ fn resolve_image_base(
                 only.output.format,
                 only.output.compression,
             );
-            Ok(BaseSource::Path {
-                path: output_dir.join(name),
-                arch: Some(consumer.arch),
-            })
+            Ok(output_dir.join(name))
         }
         many => Err(ambiguous_error(&image_name, consumer, image, pins, many)),
     }
@@ -480,6 +579,84 @@ mod tests {
                 "name: {name}\n{MATRIX_ARCH}base:\n{base}config:\n  os: {{ hostname: {name} }}\n"
             ),
         )
+    }
+
+    #[test]
+    fn resolve_inputs_substitutes_and_records_the_producer_path() {
+        let tmp = TempDir::new().unwrap();
+        let payload = producer(tmp.path(), "payload", true);
+        // A consumer with a path base and a `${inputs.payload}` reference in its config.
+        let iso = target(
+            tmp.path(),
+            "iso",
+            &format!(
+                "name: iso\n{MATRIX_ARCH}base:\n  path: ./iso.img\ninputs:\n  - name: payload\n    \
+                 image: payload\n    output: cosi\nconfig:\n  os:\n    additionalFiles:\n      \
+                 - source: \"${{inputs.payload}}\"\n        destination: /images/payload.cosi\n"
+            ),
+        );
+        let members = vec![Arc::clone(&payload), Arc::clone(&iso)];
+        let output_dir = tmp.path().join("artifacts");
+
+        let mut cells = cells(&iso).unwrap();
+        resolve_inputs(&mut cells, &members, &output_dir).unwrap();
+
+        for cell in &cells {
+            let arch = cell.axes.get("arch").unwrap();
+            let expected = output_dir.join(format!("payload_{arch}_cosi.cosi"));
+            // The token is replaced with the arch-paired producer artifact path...
+            let source = cell.ic_config["os"]["additionalFiles"][0]["source"]
+                .as_str()
+                .unwrap();
+            assert_eq!(source, expected.to_string_lossy());
+            // ...and the path is recorded as a content-hashed dependency.
+            assert_eq!(cell.input_deps, vec![expected]);
+        }
+    }
+
+    #[test]
+    fn an_unknown_input_reference_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let payload = producer(tmp.path(), "payload", false);
+        let iso = target(
+            tmp.path(),
+            "iso",
+            "name: iso\nbase:\n  path: ./iso.img\ninputs:\n  - name: payload\n    image: payload\n\
+             config:\n  os:\n    additionalFiles:\n      - source: \"${inputs.missing}\"\n        \
+             destination: /x\n",
+        );
+        let members = vec![Arc::clone(&payload), Arc::clone(&iso)];
+        let mut cells = cells(&iso).unwrap();
+        let err = resolve_inputs(&mut cells, &members, tmp.path()).unwrap_err();
+        assert!(
+            matches!(err, CoreError::UnknownInput { ref name, .. } if name == "missing"),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn an_image_input_creates_a_dependency_edge() {
+        let tmp = TempDir::new().unwrap();
+        let payload = producer(tmp.path(), "payload", false);
+        // `iso` references `payload` only via `inputs`, with an unrelated path base.
+        let iso = target(
+            tmp.path(),
+            "iso",
+            "name: iso\nbase:\n  path: ./iso.img\ninputs:\n  - name: payload\n    image: payload\n\
+             config:\n  os: { hostname: iso }\n",
+        );
+        let members = vec![Arc::clone(&payload), Arc::clone(&iso)];
+        let ordered = topological_order(
+            &dependency_closure(&[Arc::clone(&iso)], &members).unwrap(),
+            &members,
+        )
+        .unwrap();
+        let names: Vec<&str> = ordered.iter().map(|t| t.name()).collect();
+        assert_eq!(
+            names,
+            ["payload", "iso"],
+            "input producer must precede consumer"
+        );
     }
 
     #[test]

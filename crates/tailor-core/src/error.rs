@@ -221,6 +221,16 @@ pub enum CoreError {
         detail: String,
     },
 
+    #[error(
+        "image `{image}` references `${{inputs.{name}}}` in its config, but declares no input named \
+         `{name}` (declared: {declared})"
+    )]
+    UnknownInput {
+        image: String,
+        name: String,
+        declared: String,
+    },
+
     #[error("failed to access `{}`: {source}", .path.display())]
     Io {
         path: PathBuf,

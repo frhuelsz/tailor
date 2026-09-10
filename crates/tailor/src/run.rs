@@ -285,6 +285,7 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
     for target in &targets {
         let mut cells = cells_selected(target, selector)?;
         tailor_core::imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
+        tailor_core::imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
         validate_tools_dir_runtime(&cells, &tool)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
@@ -298,8 +299,15 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
 }
 
 fn render(workspace: &Workspace, names: &[String], selector: &Selector) -> Result<(), AppError> {
+    let all_members = all_member_targets(workspace)?;
+    // Resolve `${inputs.*}` so the rendered golden config carries concrete producer paths (a
+    // downstream pipeline consuming the export needs real paths, not tokens).
+    let output_dir = workspace.root.join(ARTIFACTS_DIR);
     for target in build_targets(workspace, names)? {
-        for cell in cells_selected(&target, selector)? {
+        let mut cells = cells_selected(&target, selector)?;
+        tailor_core::imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
+        tailor_core::imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
+        for cell in cells {
             let path = write_golden(&target.dir, cell.slug.as_ref(), &cell.ic_config)?;
             println!("rendered {}", path.display());
         }
@@ -1278,6 +1286,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         inject_files: None,
         extra_dependencies: Vec::new(),
         depends_on: Vec::new(),
+        inputs: Vec::new(),
         extra_params: Vec::new(),
         config: None,
     };
@@ -1310,6 +1319,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         base_image: None,
         rpm_sources: Vec::new(),
         extra_params: Vec::new(),
+        input_deps: Vec::new(),
         tools_dir: None,
         skip: false,
         skip_pins: Vec::new(),

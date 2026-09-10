@@ -112,6 +112,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
             // the base resolver below content-hashes the fresh bytes.
             let mut target_cells = cells_selected(target, selector)?;
             crate::imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
+            crate::imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
             for cell in target_cells {
                 let resolved = self
                     .resolver
@@ -135,6 +136,15 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     hash_cache_dir,
                     target.name(),
                 )?;
+                // Content-hash the resolved `${inputs.*}` producer artifacts so a producer rebuild
+                // invalidates this cell (paths are absolute, so the base dir is irrelevant).
+                let input_dep_hashes = deps::hash_dependencies(
+                    &cell.input_deps,
+                    &cell.target.dir,
+                    None,
+                    hash_cache_dir,
+                    target.name(),
+                )?;
                 let print = fingerprint(&FingerprintInputs {
                     slug: cell.slug.as_ref(),
                     toolchain_digest: &resolved_toolchain.ic_image_ref,
@@ -145,6 +155,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     tools_dir_digest: resolved_tools_dir.map(|source| source.digest.as_str()),
                     extra_dependency_hashes: &extra_dependency_hashes,
                     rpm_source_hashes: &rpm_source_hashes,
+                    input_dep_hashes: &input_dep_hashes,
                     extra_params: &cell.extra_params,
                     compression: cell.output.compression,
                     cosi_compression_level: cell.output.cosi_compression_level,
@@ -254,6 +265,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
             let ic_image_ref = format!("{}:{}", toolchain.container, toolchain.effective_tag());
             let mut target_cells = cells_selected(target, selector)?;
             crate::imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
+            crate::imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
             for cell in target_cells {
                 let context = ExecutionContext {
                     output_dir: output_dir.to_path_buf(),
@@ -516,6 +528,7 @@ pub fn cells(target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
                     base_image: base_image.clone(),
                     rpm_sources: rc.rpm_sources.clone(),
                     extra_params: rc.extra_params.clone(),
+                    input_deps: Vec::new(),
                     tools_dir,
                     skip: rc.skip,
                     skip_pins: rc.skip_pins.clone(),

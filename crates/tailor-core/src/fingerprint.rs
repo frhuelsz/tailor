@@ -21,6 +21,8 @@ pub struct FingerprintInputs<'a> {
     pub extra_dependency_hashes: &'a [[u8; 16]],
     /// Sorted per-file hashes of `rpmSources` contents (excluding `repodata/`; XXH3-128).
     pub rpm_source_hashes: &'a [[u8; 16]],
+    /// Sorted per-file hashes of the resolved `${inputs.*}` producer artifacts (XXH3-128).
+    pub input_dep_hashes: &'a [[u8; 16]],
     /// Extra IC command-line flags, in declared (merge) order — a change to any flag rebuilds.
     pub extra_params: &'a [ExtraParam],
     /// Post-build artifact compression; a change rebuilds (the published artifact differs).
@@ -66,6 +68,9 @@ pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
     }
     for hash in inputs.rpm_source_hashes {
         field(&mut hasher, b"rpm", hash);
+    }
+    for hash in inputs.input_dep_hashes {
+        field(&mut hasher, b"input", hash);
     }
     for extra in inputs.extra_params {
         field(&mut hasher, b"extra-param.param", extra.param.as_bytes());
@@ -132,6 +137,7 @@ mod tests {
             tools_dir_digest: None,
             extra_dependency_hashes: &[],
             rpm_source_hashes: &[],
+            input_dep_hashes: &[],
             extra_params: &[],
             compression: None,
             cosi_compression_level: None,
@@ -202,6 +208,17 @@ mod tests {
         let mut level_two = inputs("cell", &cfg, &base);
         level_two.cosi_compression_level = Some(2);
         assert_ne!(fingerprint(&level_one), fingerprint(&level_two));
+    }
+
+    #[test]
+    fn input_dep_hashes_change_the_fingerprint() {
+        let base = base();
+        let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
+        let mut a = inputs("cell", &cfg, &base);
+        let one = [[9u8; 16]];
+        a.input_dep_hashes = &one;
+        let b = inputs("cell", &cfg, &base);
+        assert_ne!(fingerprint(&a), fingerprint(&b));
     }
 
     #[test]

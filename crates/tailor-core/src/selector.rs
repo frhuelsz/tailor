@@ -135,6 +135,7 @@ mod tests {
             inject_files: None,
             extra_dependencies: vec![],
             depends_on: vec![],
+            inputs: vec![],
             extra_params: vec![],
             config: None,
         };
@@ -169,6 +170,7 @@ mod tests {
             base_image: None,
             rpm_sources: vec![],
             extra_params: vec![],
+            input_deps: vec![],
             tools_dir: None,
             skip: false,
             skip_pins: Vec::new(),

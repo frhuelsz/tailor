@@ -62,6 +62,11 @@ pub struct Cell {
     pub rpm_sources: Vec<PathBuf>,
     /// Extra IC command-line flags appended verbatim after every tailor-managed flag.
     pub extra_params: Vec<ExtraParam>,
+    /// Resolved `${inputs.<name>}` producer artifact paths substituted into `ic_config`, in declared
+    /// order. Content-hashed into the fingerprint (like `extraDependencies`) so a producer rebuild
+    /// invalidates this cell (`meta/docs/2026-09-09-inter-image-dependencies.md`). Live in the (already
+    /// bound) output dir, so they need no extra container bind.
+    pub input_deps: Vec<PathBuf>,
     /// Resolved IC tools-dir source, when this image requests tailor-managed `--tools-dir`.
     pub tools_dir: Option<CellToolsDir>,
     /// When `true`, this cell is dropped from bulk selection unless specifically requested — the run

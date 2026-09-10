@@ -524,6 +524,11 @@ pub struct ImageDefinition {
     pub inject_files: Option<bool>,
     #[serde(default)]
     pub extra_dependencies: Vec<PathBuf>,
+    /// The named inputs this image consumes (`meta/docs/2026-09-09-inter-image-dependencies.md` §2.1).
+    /// Each binds a `name` to a typed source (v1: an `image` — another workspace image's output),
+    /// referenced in `config:` as `${inputs.<name>}`. An `image` input also creates a dependency edge.
+    #[serde(default)]
+    pub inputs: Vec<InputSpec>,
     /// Order-only build dependencies on other workspace images (names). An `image` base or input
     /// already implies an edge; `dependsOn` is for images that must build first but are referenced
     /// nowhere (`meta/docs/2026-09-09-inter-image-dependencies.md` §2.3). Contributes no fingerprint input.
@@ -547,6 +552,24 @@ pub struct ExtraParam {
     pub param: String,
     #[serde(default)]
     pub value: Option<String>,
+}
+
+/// One entry in an image's `inputs:` catalogue (`meta/docs/2026-09-09-inter-image-dependencies.md` §2.1):
+/// a `name` bound to a typed source. v1 ships the `image` kind — another workspace image's output.
+/// Resolved, per consuming cell, to the producer's paired-cell published artifact and referenced in
+/// `config:` as `${inputs.<name>}`; the substituted path is content-hashed into the fingerprint.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InputSpec {
+    pub name: String,
+    /// The producer workspace image (the `image` input kind).
+    pub image: String,
+    /// Which producer output to consume (format name); optional iff the producer is single-output.
+    #[serde(default)]
+    pub output: Option<OutputFormat>,
+    /// Structured pins for producer axes the consumer lacks (§2.4).
+    #[serde(default)]
+    pub cell: BTreeMap<String, String>,
 }
 
 // ===== shared types (reference/types.md) =====
