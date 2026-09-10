@@ -20,7 +20,10 @@ use std::{
 
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::{error::CoreError, hashcache};
+use crate::{
+    error::{CoreError, ExecError},
+    hashcache,
+};
 
 /// Per-file dependency hash width (XXH3-128 → 16 bytes).
 pub const DEP_HASH_BYTES: usize = 16;
@@ -75,14 +78,14 @@ fn walk_dir(
     hashes: &mut Vec<[u8; DEP_HASH_BYTES]>,
 ) -> Result<(), CoreError> {
     let entries = fs::read_dir(dir).map_err(|source| {
-        CoreError::Exec(crate::error::ExecError::Io {
+        CoreError::Exec(ExecError::Io {
             context: format!("failed to read dependency directory `{}`", dir.display()),
             source,
         })
     })?;
     for entry in entries {
         let entry = entry.map_err(|source| {
-            CoreError::Exec(crate::error::ExecError::Io {
+            CoreError::Exec(ExecError::Io {
                 context: format!(
                     "failed to read a dependency entry under `{}`",
                     dir.display()
@@ -91,7 +94,7 @@ fn walk_dir(
             })
         })?;
         let file_type = entry.file_type().map_err(|source| {
-            CoreError::Exec(crate::error::ExecError::Io {
+            CoreError::Exec(ExecError::Io {
                 context: format!("failed to stat `{}`", entry.path().display()),
                 source,
             })
@@ -118,7 +121,7 @@ fn hash_one(
     cache_dir: Option<&Path>,
 ) -> Result<[u8; DEP_HASH_BYTES], CoreError> {
     let file = hashcache::hash_file_cached(path, cache_dir).map_err(|source| {
-        CoreError::Exec(crate::error::ExecError::Io {
+        CoreError::Exec(ExecError::Io {
             context: format!("failed to read dependency file `{}`", path.display()),
             source,
         })
@@ -165,7 +168,7 @@ mod tests {
         write(dir.path(), "files/a.sh", "before");
         let paths = vec![PathBuf::from("files")];
         let before = hash_dependencies(&paths, dir.path(), None, None, "img").unwrap();
-        write(dir.path(), "files/a.sh", "after"); // same path, new content
+        write(dir.path(), "files/a.sh", "after");
         let after = hash_dependencies(&paths, dir.path(), None, None, "img").unwrap();
         assert_ne!(
             before, after,

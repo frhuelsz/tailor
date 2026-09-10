@@ -22,8 +22,8 @@ use tailor_core::{
     Executor, LocalImage, LockedBase, LockedContainer, Lockfile, MissingPrerequisite, Orchestrator,
     ResolvedBase, ResolvedToolchain, ResolvedToolsDirSource, Selector, SignError, Signer,
     SigningRequirement, SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download,
-    is_valid_var_name, runtime_config, summarize, toolchain_for, toolchain_key, tools_dir_key,
-    verify,
+    imagedep, is_valid_var_name, runtime_config, summarize, toolchain_for, toolchain_key,
+    tools_dir_key, verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
@@ -279,13 +279,13 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
     // Inter-image dependencies: catch unknown-image edges and cycles, then resolve each cell's
     // `base: { image }` so pairing/output/pin mismatches surface offline (no artifact is read — the
     // path is only constructed). `output_dir` is the default artifacts dir, used solely for that path.
-    let closure = tailor_core::imagedep::dependency_closure(&targets, &all_members)?;
-    tailor_core::imagedep::topological_order(&closure, &all_members)?;
+    let closure = imagedep::dependency_closure(&targets, &all_members)?;
+    imagedep::topological_order(&closure, &all_members)?;
     let output_dir = workspace.root.join(ARTIFACTS_DIR);
     for target in &targets {
         let mut cells = cells_selected(target, selector)?;
-        tailor_core::imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
-        tailor_core::imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
+        imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
+        imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
         validate_tools_dir_runtime(&cells, &tool)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
@@ -305,8 +305,8 @@ fn render(workspace: &Workspace, names: &[String], selector: &Selector) -> Resul
     let output_dir = workspace.root.join(ARTIFACTS_DIR);
     for target in build_targets(workspace, names)? {
         let mut cells = cells_selected(&target, selector)?;
-        tailor_core::imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
-        tailor_core::imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
+        imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
+        imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
         for cell in cells {
             let path = write_golden(&target.dir, cell.slug.as_ref(), &cell.ic_config)?;
             println!("rendered {}", path.display());
@@ -1343,8 +1343,8 @@ async fn build(
     // is planned *after* its producers (its base hashes then reflect the fresh artifacts —
     // `meta/docs/2026-09-09-inter-image-dependencies.md` §4). This also detects dependency cycles. Both the
     // dry-run and real-build paths schedule over this order.
-    let closure = tailor_core::imagedep::dependency_closure(&targets, &all_members)?;
-    let ordered = tailor_core::imagedep::topological_order(&closure, &all_members)?;
+    let closure = imagedep::dependency_closure(&targets, &all_members)?;
+    let ordered = imagedep::topological_order(&closure, &all_members)?;
     let selection = selector(&args.select, &args.arch)?;
     let output_dir = tailor_config::absolutize(
         args.output_dir

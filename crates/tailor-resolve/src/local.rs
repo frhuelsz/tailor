@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use tailor_core::{ResolveError, ResolvedBase, hash_file_cached};
+use tailor_core::{ResolveError, ResolvedBase, hashcache};
 use tracing::debug;
 
 pub(crate) async fn resolve(
@@ -18,10 +18,11 @@ fn resolve_blocking(path: &Path, cache_dir: Option<&Path>) -> Result<ResolvedBas
     // The shared hasher (`tailor-core::hashcache`) XXH3-hashes the file, reusing a cached hash when
     // the base's (size, mtime) is unchanged so a repeat build skips the (potentially multi-GB) read.
     debug!(path = %path.display(), "resolving local base hash (size+mtime cache)");
-    let hashed = hash_file_cached(path, cache_dir).map_err(|source| ResolveError::LocalRead {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let hashed =
+        hashcache::hash_file_cached(path, cache_dir).map_err(|source| ResolveError::LocalRead {
+            path: path.to_path_buf(),
+            source,
+        })?;
     Ok(ResolvedBase::LocalFile {
         content_hash: hashed.hash,
         size: hashed.size,

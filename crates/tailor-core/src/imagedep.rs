@@ -1,20 +1,22 @@
 //! Inter-image dependencies (`meta/docs/2026-09-09-inter-image-dependencies.md`).
 //!
-//! An image may consume another workspace image's **output** — today as its `base: { image: … }`.
-//! Two jobs live here: (1) order the images so a producer builds before its consumers
-//! ([`topological_order`], with cycle detection), and (2) lower each `base: { image }` cell to a
-//! concrete `path` base pointing at the producer's paired-cell artifact ([`lower_image_bases`]), so
-//! everything downstream (content-hashing, binding, arg building) sees an ordinary local-file base.
+//! An image may consume another workspace image's **output** — as its `base: { image: … }`, or
+//! embedded in `config:` via `${inputs.<name>}`. Three jobs live here: (1) order the images so a
+//! producer builds before its consumers ([`topological_order`], with cycle detection); (2) lower
+//! each `base: { image }` cell to a concrete `path` base pointing at the producer's paired-cell
+//! artifact ([`lower_image_bases`]); and (3) resolve each `${inputs.<name>}` to that artifact's path,
+//! substitute it into the config, and record it as a dependency ([`resolve_inputs`]). Everything
+//! downstream (content-hashing, binding, arg building) then sees ordinary local-file paths.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use tailor_config::{BaseSource, OutputFormat, render_image};
-
 use serde_yaml_ng::Value;
+
+use tailor_config::{BaseSource, OutputFormat, render_image};
 
 use crate::{
     domain::{Cell, Target},
@@ -168,7 +170,7 @@ pub fn resolve_inputs(
             continue;
         }
         // Resolve each declared input for this cell's coordinate (immutable borrows finish here).
-        let mut resolved: BTreeMap<String, std::path::PathBuf> = BTreeMap::new();
+        let mut resolved: BTreeMap<String, PathBuf> = BTreeMap::new();
         for spec in &specs {
             let path = resolve_image_ref(
                 cell,
@@ -196,7 +198,7 @@ pub fn resolve_inputs(
 /// `${inputs.<name>}` whose `name` is not a declared input is [`CoreError::UnknownInput`].
 fn substitute_inputs(
     value: &mut Value,
-    resolved: &BTreeMap<String, std::path::PathBuf>,
+    resolved: &BTreeMap<String, PathBuf>,
     image: &str,
 ) -> Result<(), CoreError> {
     match value {
@@ -257,7 +259,7 @@ fn resolve_image_ref(
     pins: &BTreeMap<String, String>,
     members: &[Arc<Target>],
     output_dir: &Path,
-) -> Result<std::path::PathBuf, CoreError> {
+) -> Result<PathBuf, CoreError> {
     let image_name = consumer.target.name().to_owned();
     let producer = members.iter().find(|t| t.name() == image).ok_or_else(|| {
         CoreError::UnknownDependencyImage {
@@ -530,14 +532,15 @@ mod tests {
 
     use std::fs;
 
+    use tempfile::TempDir;
+
     use tailor_config::{
         BaseImageCatalogue, OutputArtifactsPolicy, OutputFormat, OutputSpec, load_image,
     };
-    use tempfile::TempDir;
 
     /// Build a `Target` from an on-disk `image.yaml` (rendering reads fragments + the base document
     /// from disk, so the directory must exist). Default output is a single `cosi`.
-    fn target(root: &std::path::Path, name: &str, yaml: &str) -> Arc<Target> {
+    fn target(root: &Path, name: &str, yaml: &str) -> Arc<Target> {
         let dir = root.join(name);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("image.yaml"), yaml).unwrap();
@@ -560,7 +563,7 @@ mod tests {
 
     const MATRIX_ARCH: &str = "matrix:\n  arch: [amd64, arm64]\n";
 
-    fn producer(root: &std::path::Path, name: &str, matrix: bool) -> Arc<Target> {
+    fn producer(root: &Path, name: &str, matrix: bool) -> Arc<Target> {
         let matrix = if matrix { MATRIX_ARCH } else { "" };
         target(
             root,
@@ -571,7 +574,7 @@ mod tests {
         )
     }
 
-    fn consumer_on(root: &std::path::Path, name: &str, base: &str) -> Arc<Target> {
+    fn consumer_on(root: &Path, name: &str, base: &str) -> Arc<Target> {
         target(
             root,
             name,

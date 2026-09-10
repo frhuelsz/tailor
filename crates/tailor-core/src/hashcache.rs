@@ -188,7 +188,6 @@ mod tests {
         // A cache entry now exists for this (size, mtime); a second call returns the same hash.
         let second = hash_file_cached(&file, Some(cache.path())).unwrap();
         assert_eq!(first, second);
-        // The entry file is present.
         assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 1);
     }
 

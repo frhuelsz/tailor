@@ -19,6 +19,7 @@ use crate::{
     domain::{BuildPlan, Cell, CellSlug, CellToolsDir, PlannedCell, Target},
     error::CoreError,
     fingerprint::{FingerprintInputs, fingerprint},
+    imagedep,
     lockfile::Lockfile,
     ports::{
         BaseResolver, ExecutionContext, ExecutionResult, Executor, ResolvedBase, RuntimeConfig,
@@ -111,8 +112,8 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
             // paired-cell artifact; per-node scheduling guarantees the producer is already built, so
             // the base resolver below content-hashes the fresh bytes.
             let mut target_cells = cells_selected(target, selector)?;
-            crate::imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
-            crate::imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
+            imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
+            imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
             for cell in target_cells {
                 let resolved = self
                     .resolver
@@ -264,8 +265,8 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
             let (_, toolchain) = toolchain_for(target, tool)?;
             let ic_image_ref = format!("{}:{}", toolchain.container, toolchain.effective_tag());
             let mut target_cells = cells_selected(target, selector)?;
-            crate::imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
-            crate::imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
+            imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
+            imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
             for cell in target_cells {
                 let context = ExecutionContext {
                     output_dir: output_dir.to_path_buf(),
