@@ -260,6 +260,27 @@ fn resolve_image_ref(
     members: &[Arc<Target>],
     output_dir: &Path,
 ) -> Result<PathBuf, CoreError> {
+    let (_producer, matched) = resolve_producer(consumer, image, output, pins, members)?;
+    let name = published_artifact_name(
+        matched.slug.as_ref(),
+        matched.output.format,
+        matched.output.compression,
+    );
+    Ok(output_dir.join(name))
+}
+
+/// The producer target name and matched producer cell for one `image` reference of `consumer` (a
+/// `base: { image }` or an `${inputs.*}` entry). A producer cell matches when its format equals the
+/// requested one and every one of its axes is satisfied by a pin (highest priority) or by the
+/// consumer's value for a shared axis. An axis the producer has but neither pins nor the consumer
+/// constrains is left free — the source of the ambiguity error below.
+fn resolve_producer(
+    consumer: &Cell,
+    image: &str,
+    output: Option<OutputFormat>,
+    pins: &BTreeMap<String, String>,
+    members: &[Arc<Target>],
+) -> Result<(String, Cell), CoreError> {
     let image_name = consumer.target.name().to_owned();
     let producer = members.iter().find(|t| t.name() == image).ok_or_else(|| {
         CoreError::UnknownDependencyImage {
@@ -278,10 +299,6 @@ fn resolve_image_ref(
     let producer_axes = axis_domain(&producer_cells);
     validate_pins(&image_name, image, pins, &producer_axes)?;
 
-    // A producer cell matches when its format equals the requested one and every one of its axes is
-    // satisfied by a pin (highest priority) or by the consumer's value for a shared axis. An axis the
-    // producer has but neither pins nor the consumer constrains is left free — a source of ambiguity
-    // detected below.
     let matched: Vec<&Cell> = producer_cells
         .iter()
         .filter(|pc| pc.output.format == format && axes_satisfied(pc, consumer, pins))
@@ -295,16 +312,35 @@ fn resolve_image_ref(
             coord: requested_coord(consumer, pins, &producer_axes),
             available: available_coords(&producer_cells, format),
         }),
-        [only] => {
-            let name = published_artifact_name(
-                only.slug.as_ref(),
-                only.output.format,
-                only.output.compression,
-            );
-            Ok(output_dir.join(name))
-        }
+        [only] => Ok((producer.name().to_owned(), (*only).clone())),
         many => Err(ambiguous_error(&image_name, consumer, image, pins, many)),
     }
+}
+
+/// The `(producer image name, producer cell slug)` pairs that `consumer` requires — one per
+/// `base: { image }` and per declared `inputs:` entry. The scheduler unions these into each
+/// producer's build set so a dependency is always built even when a `-s/--cell` selection would
+/// otherwise exclude it (or the producer lacks the selected axis entirely).
+pub fn required_producers(
+    consumer: &Cell,
+    members: &[Arc<Target>],
+) -> Result<Vec<(String, String)>, CoreError> {
+    let mut required = Vec::new();
+    if let BaseSource::Image {
+        image,
+        output,
+        cell: pins,
+    } = &consumer.base
+    {
+        let (producer, matched) = resolve_producer(consumer, image, *output, pins, members)?;
+        required.push((producer, matched.slug.as_ref().to_owned()));
+    }
+    for spec in &consumer.target.definition.inputs {
+        let (producer, matched) =
+            resolve_producer(consumer, &spec.image, spec.output, &spec.cell, members)?;
+        required.push((producer, matched.slug.as_ref().to_owned()));
+    }
+    Ok(required)
 }
 
 fn resolve_output(
@@ -751,21 +787,58 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_output_is_rejected() {
+    fn required_producers_pairs_the_consumer_to_the_matching_producer_cell() {
+        // The scheduler uses this to build a producer's paired cell even when a `-s`/`--cell`
+        // selection meant for the consumer would exclude it. Each arch-paired consumer cell must
+        // require exactly its arch-matched producer cell.
         let tmp = TempDir::new().unwrap();
-        let base = producer(tmp.path(), "base", true); // single cosi output
-        let derived = consumer_on(
-            tmp.path(),
-            "derived",
-            "  image: base\n  output: vhd-fixed\n",
-        );
+        let base = producer(tmp.path(), "base", true);
+        let derived = consumer_on(tmp.path(), "derived", "  image: base\n");
         let members = vec![Arc::clone(&base), Arc::clone(&derived)];
 
-        let mut cells = cells(&derived).unwrap();
-        let err = lower_image_bases(&mut cells, &members, tmp.path()).unwrap_err();
-        assert!(
-            matches!(err, CoreError::UnknownProducerOutput { .. }),
-            "got {err:?}"
+        for cell in cells(&derived).unwrap() {
+            let arch = cell.axes.get("arch").unwrap();
+            let required = required_producers(&cell, &members).unwrap();
+            assert_eq!(
+                required,
+                vec![("base".to_owned(), format!("base_{arch}_cosi"))],
+                "consumer {} must require its arch-paired producer cell",
+                cell.slug.as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn required_producers_covers_both_base_and_inputs() {
+        let tmp = TempDir::new().unwrap();
+        let base = producer(tmp.path(), "base", true);
+        let payload = producer(tmp.path(), "payload", true);
+        // `derived` both bases on `base` and embeds `payload` as an input.
+        let derived = target(
+            tmp.path(),
+            "derived",
+            &format!(
+                "name: derived\n{MATRIX_ARCH}base:\n  image: base\ninputs:\n  - name: payload\n    \
+                 image: payload\n    output: cosi\nconfig:\n  os: {{ hostname: derived }}\n"
+            ),
         );
+        let members = vec![
+            Arc::clone(&base),
+            Arc::clone(&payload),
+            Arc::clone(&derived),
+        ];
+
+        for cell in cells(&derived).unwrap() {
+            let arch = cell.axes.get("arch").unwrap();
+            let required = required_producers(&cell, &members).unwrap();
+            assert_eq!(
+                required,
+                vec![
+                    ("base".to_owned(), format!("base_{arch}_cosi")),
+                    ("payload".to_owned(), format!("payload_{arch}_cosi")),
+                ],
+                "consumer must require both its base and input producer cells"
+            );
+        }
     }
 }

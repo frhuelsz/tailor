@@ -20,12 +20,13 @@ use tailor_config::{
     write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, BuildProgress, Cell, CellSlug, ContainerRuntime, CoreError,
-    ExecutionContext, Executor, LocalImage, LockedBase, LockedContainer, Lockfile,
+    BaseResolver, BuildOptions, BuildProgress, BuildSelection, Cell, CellSlug, ContainerRuntime,
+    CoreError, ExecutionContext, Executor, LocalImage, LockedBase, LockedContainer, Lockfile,
     MissingPrerequisite, Orchestrator, ResolveError, ResolvedBase, ResolvedToolchain,
     ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement, SlotSource,
     SlotSummary, Target, ado_matrix, cells_selected, download, imagedep, is_valid_var_name,
-    runtime_config, summarize, toolchain_for, toolchain_key, tools_dir_key, verify,
+    runtime_config, select_node_cells, summarize, toolchain_for, toolchain_key, tools_dir_key,
+    verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
@@ -1346,6 +1347,28 @@ async fn build(
     let closure = imagedep::dependency_closure(&targets, &all_members)?;
     let ordered = imagedep::topological_order(&closure, &all_members)?;
     let selection = selector(&args.select, &args.arch)?;
+    // The user selector applies only to the explicitly requested images; a transitively pulled-in
+    // producer instead builds exactly the cells its consumers need. Walk the schedule upstream
+    // (reverse topological order) so each consumer registers the producer coordinates it requires
+    // *before* those producers are planned, so a `-s`/`--cell` selection meant for a consumer never
+    // drops (or errors on) a producer's paired cell (`inter-image-dependencies.md` §4).
+    let requested: BTreeSet<String> = targets.iter().map(|t| t.name().to_owned()).collect();
+    let mut required: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for node in ordered.iter().rev() {
+        let apply_selector = requested.contains(node.name());
+        let node_cells =
+            select_node_cells(node, &selection, apply_selector, required.get(node.name()))?;
+        for cell in &node_cells {
+            for (producer, slug) in imagedep::required_producers(cell, &all_members)? {
+                required.entry(producer).or_default().insert(slug);
+            }
+        }
+    }
+    let build_selection = BuildSelection {
+        selector: &selection,
+        requested,
+        required,
+    };
     let output_dir = tailor_config::absolutize(
         args.output_dir
             .clone()
@@ -1376,7 +1399,7 @@ async fn build(
                 &ordered,
                 &all_members,
                 &tool,
-                &selection,
+                &build_selection,
                 &workspace.root,
                 &output_dir,
                 &signer_for,
@@ -1427,7 +1450,7 @@ async fn build(
                 &lock,
                 &toolchains,
                 &tools_dir_sources,
-                &selection,
+                &build_selection,
                 &output_dir,
                 Some(&base_hash_cache_dir),
             )

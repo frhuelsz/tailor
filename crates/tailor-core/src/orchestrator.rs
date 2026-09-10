@@ -101,7 +101,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         lock: &Lockfile,
         toolchains: &BTreeMap<String, ResolvedToolchain>,
         tools_dir_sources: &BTreeMap<String, ResolvedToolsDirSource>,
-        selector: &Selector,
+        selection: &BuildSelection<'_>,
         output_dir: &Path,
         hash_cache_dir: Option<&Path>,
     ) -> Result<BuildPlan, CoreError> {
@@ -112,7 +112,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
             // Lower any `base: { image }` to a concrete `path` base pointing at the producer's
             // paired-cell artifact; per-node scheduling guarantees the producer is already built, so
             // the base resolver below content-hashes the fresh bytes.
-            let mut target_cells = cells_selected(target, selector)?;
+            let mut target_cells = selection.cells_for(target)?;
             imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
             imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
             for cell in target_cells {
@@ -255,7 +255,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         targets: &[Arc<Target>],
         members: &[Arc<Target>],
         tool: &ToolConfig,
-        selector: &Selector,
+        selection: &BuildSelection<'_>,
         workspace_root: &Path,
         output_dir: &Path,
         signer_for: &dyn Fn(&Cell) -> Option<Arc<dyn Signer>>,
@@ -265,7 +265,7 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         for target in targets {
             let (_, toolchain) = toolchain_for(target, tool)?;
             let ic_image_ref = format!("{}:{}", toolchain.container, toolchain.effective_tag());
-            let mut target_cells = cells_selected(target, selector)?;
+            let mut target_cells = selection.cells_for(target)?;
             imagedep::lower_image_bases(&mut target_cells, members, output_dir)?;
             imagedep::resolve_inputs(&mut target_cells, members, output_dir)?;
             for cell in target_cells {
@@ -676,6 +676,73 @@ pub fn cells_selected(target: &Arc<Target>, selector: &Selector) -> Result<Vec<C
     Ok(drop_skipped(matched, selector))
 }
 
+/// How a build run chooses each node's cells. The user `selector` applies only to explicitly
+/// **requested** targets; a target pulled in purely as a transitive producer instead builds exactly
+/// the cells a downstream consumer `required` (by slug). This prevents a `-s/--cell` selection meant
+/// for a consumer from excluding a producer's paired cell — or erroring because the producer lacks
+/// the selected axis (`meta/docs/2026-09-09-inter-image-dependencies.md` §4).
+pub struct BuildSelection<'a> {
+    /// The user's cell selection.
+    pub selector: &'a Selector,
+    /// Names of explicitly requested targets; empty means "every target is requested" (the selector
+    /// applies everywhere, preserving the plain single-image behavior).
+    pub requested: BTreeSet<String>,
+    /// Per-target set of cell slugs a downstream consumer requires — always built regardless of the
+    /// selector or a cell's `skip`.
+    pub required: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl<'a> BuildSelection<'a> {
+    /// A selection that applies `selector` to every target with no extra dependency requirements —
+    /// the plain, single-target behavior.
+    pub fn from_selector(selector: &'a Selector) -> Self {
+        Self {
+            selector,
+            requested: BTreeSet::new(),
+            required: BTreeMap::new(),
+        }
+    }
+
+    /// This target's build cells under this selection.
+    fn cells_for(&self, target: &Arc<Target>) -> Result<Vec<Cell>, CoreError> {
+        let apply_selector = self.requested.is_empty() || self.requested.contains(target.name());
+        select_node_cells(
+            target,
+            self.selector,
+            apply_selector,
+            self.required.get(target.name()),
+        )
+    }
+}
+
+/// Choose a node's cells: the `selector`-matched cells (only when `apply_selector` — i.e. the node
+/// was explicitly requested) unioned with any dependency-`required` cells (looked up by slug and
+/// always included, even when `skip`ped or excluded by the selector). A pure transitive producer is
+/// built with `apply_selector = false`, so a consumer's `-s` selection never filters it.
+pub fn select_node_cells(
+    target: &Arc<Target>,
+    selector: &Selector,
+    apply_selector: bool,
+    required: Option<&BTreeSet<String>>,
+) -> Result<Vec<Cell>, CoreError> {
+    let mut chosen = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    if apply_selector {
+        for cell in cells_selected(target, selector)? {
+            seen.insert(cell.slug.as_ref().to_owned());
+            chosen.push(cell);
+        }
+    }
+    if let Some(required) = required {
+        for cell in cells(target)? {
+            if required.contains(cell.slug.as_ref()) && seen.insert(cell.slug.as_ref().to_owned()) {
+                chosen.push(cell);
+            }
+        }
+    }
+    Ok(chosen)
+}
+
 /// Drop cells with a fragment-level `skip` (non-empty `skip_pins`) unless the selector specifically
 /// requests them (`meta/docs/2026-07-22-fragment-skip.md`). Image-wide `skip` carries no pins and is
 /// handled during image selection, so it is never dropped here.
@@ -959,7 +1026,7 @@ mod tests {
                 &lock,
                 &toolchains,
                 &BTreeMap::new(),
-                &Selector::default(),
+                &BuildSelection::from_selector(&Selector::default()),
                 out.path(),
                 None,
             )
@@ -1023,7 +1090,7 @@ mod tests {
                     &lock,
                     &toolchains,
                     &BTreeMap::new(),
-                    &Selector::default(),
+                    &BuildSelection::from_selector(&Selector::default()),
                     out.path(),
                     None,
                 )
@@ -1081,7 +1148,7 @@ mod tests {
                 &Lockfile::default(),
                 &toolchains,
                 &BTreeMap::new(),
-                &Selector::default(),
+                &BuildSelection::from_selector(&Selector::default()),
                 TempDir::new().unwrap().path(),
                 None,
             )
@@ -1109,7 +1176,7 @@ mod tests {
                 &lock,
                 &toolchains,
                 &BTreeMap::new(),
-                &Selector::default(),
+                &BuildSelection::from_selector(&Selector::default()),
                 out.path(),
                 None,
             )
@@ -1148,7 +1215,7 @@ mod tests {
                 &lock,
                 &toolchains,
                 &BTreeMap::new(),
-                &Selector::default(),
+                &BuildSelection::from_selector(&Selector::default()),
                 out.path(),
                 None,
             )
@@ -1171,7 +1238,7 @@ mod tests {
                 &[target],
                 &[],
                 &tool_config(),
-                &Selector::default(),
+                &BuildSelection::from_selector(&Selector::default()),
                 out.path(),
                 out.path(),
                 &|_| None,
@@ -1521,7 +1588,7 @@ mod tests {
                 &Lockfile::default(),
                 &toolchains,
                 &resolved_tools_dir_sources(),
-                &Selector::default(),
+                &BuildSelection::from_selector(&Selector::default()),
                 out.path(),
                 None,
             )

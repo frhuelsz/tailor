@@ -28,9 +28,9 @@ pub use error::{CoreError, ExecError, ResolveError};
 pub use hashcache::{FileHash, hash_file_cached};
 pub use lockfile::{LockedBase, LockedContainer, LockedRuntime, Lockfile};
 pub use orchestrator::{
-    BuildOptions, BuildProgress, Orchestrator, ResolvedToolchain, ResolvedToolsDirSource,
-    artifact_name, cells, cells_selected, published_artifact_name, runtime_config, toolchain_for,
-    toolchain_key, tools_dir_key,
+    BuildOptions, BuildProgress, BuildSelection, Orchestrator, ResolvedToolchain,
+    ResolvedToolsDirSource, artifact_name, cells, cells_selected, published_artifact_name,
+    runtime_config, select_node_cells, toolchain_for, toolchain_key, tools_dir_key,
 };
 pub use ports::{
     BaseImageFetcher, BaseResolver, ContainerConfig, ContainerResult, ContainerRuntime, DaemonInfo,
