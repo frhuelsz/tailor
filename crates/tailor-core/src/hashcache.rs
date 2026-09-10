@@ -18,6 +18,8 @@ use std::{
 
 use xxhash_rust::xxh3::{self, Xxh3};
 
+use crate::atomic;
+
 /// Width of a content hash in bytes (XXH3-128 → 16).
 pub const CONTENT_HASH_BYTES: usize = 16;
 
@@ -140,7 +142,7 @@ fn write_cache_entry(
     let line = format!(
         "{CACHE_VERSION}{CACHE_FIELD_SEPARATOR}{size}{CACHE_FIELD_SEPARATOR}{mtime_ns}{CACHE_FIELD_SEPARATOR}{hash_hex}{CACHE_FIELD_SEPARATOR}{abs_path}\n"
     );
-    fs::write(cache_entry_path(cache_dir, abs_path), line)
+    atomic::write(cache_entry_path(cache_dir, abs_path), line.as_bytes())
 }
 
 fn cache_entry_path(cache_dir: &Path, abs_path: &str) -> PathBuf {

@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{domain::Fingerprint, error::CoreError};
+use crate::{atomic, domain::Fingerprint, error::CoreError};
 
 const STAMP_DIR: &str = ".tailor/stamps";
 
@@ -36,19 +36,16 @@ pub fn read(output_dir: &Path, slug: &str) -> Option<BuildStamp> {
 /// Write a cell's stamp, creating the stamp directory if needed.
 pub fn write(output_dir: &Path, slug: &str, fingerprint: Fingerprint) -> Result<(), CoreError> {
     let path = stamp_path(output_dir, slug);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| CoreError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    }
     let stamp = BuildStamp {
         slug: slug.to_owned(),
         fingerprint: fingerprint.to_hex(),
         tailor_version: env!("CARGO_PKG_VERSION").to_owned(),
     };
     let text = serde_json::to_string_pretty(&stamp).unwrap_or_default();
-    fs::write(&path, text).map_err(|source| CoreError::Io { path, source })
+    // The stamp is written last, after the artifact is fully published, and atomically — so a
+    // reader (a later run's up-to-date check) sees a matching stamp only when the artifact is
+    // complete, never a torn stamp left by an interrupted build.
+    atomic::write(&path, text.as_bytes()).map_err(|source| CoreError::Io { path, source })
 }
 
 /// Whether a cell is up to date: its artifact exists and the stamp records the same fingerprint.

@@ -13,7 +13,7 @@ use tailor_config::{Compression, OutputArtifactsPolicy, OutputFormat};
 use tailor_core::{
     Cell, ContainerConfig, ContainerResult, ContainerRuntime, ExecError, ExecutionContext,
     ExecutionResult, Executor, RuntimeConfig, Signer, SigningPlan, ToolsDirPlan, artifact_name,
-    published_artifact_name,
+    atomic, published_artifact_name,
 };
 
 use crate::{arg_builder, guard, janitor, output_artifacts, rpm_farm, working_copy};
@@ -719,33 +719,26 @@ fn verify_artifact(path: &PathBuf, format: OutputFormat) -> Result<(), ExecError
 const ZSTD_LEVEL: i32 = 3;
 
 /// Stream `src` through the codec into `dst`, then remove `src`. Streamed (never buffered whole) so a
-/// multi-GB image compresses in bounded memory.
+/// multi-GB image compresses in bounded memory. The compressed output is staged through a temp file
+/// and renamed into place, so an interrupted build never leaves a truncated published artifact.
 fn compress_artifact(src: &Path, dst: &Path, compression: Compression) -> Result<(), ExecError> {
     let mut reader = BufReader::new(fs::File::open(src).map_err(|source| ExecError::Io {
         context: format!("failed to open `{}` for compression", src.display()),
         source,
     })?);
-    let output = fs::File::create(dst).map_err(|source| ExecError::Io {
-        context: format!("failed to create compressed artifact `{}`", dst.display()),
+    let temp = atomic::temp_sibling(dst);
+    atomic::finish(&temp, dst, |output| match compression {
+        Compression::Zstd => {
+            let mut encoder = zstd::stream::Encoder::new(&mut *output, ZSTD_LEVEL)?;
+            io::copy(&mut reader, &mut encoder)?;
+            encoder.finish()?;
+            Ok(())
+        }
+    })
+    .map_err(|source| ExecError::Io {
+        context: format!("failed to write compressed artifact `{}`", dst.display()),
         source,
     })?;
-    match compression {
-        Compression::Zstd => {
-            let mut encoder =
-                zstd::stream::Encoder::new(output, ZSTD_LEVEL).map_err(|source| ExecError::Io {
-                    context: format!("failed to initialize zstd encoder for `{}`", dst.display()),
-                    source,
-                })?;
-            io::copy(&mut reader, &mut encoder).map_err(|source| ExecError::Io {
-                context: format!("failed to compress `{}`", src.display()),
-                source,
-            })?;
-            encoder.finish().map_err(|source| ExecError::Io {
-                context: format!("failed to finalize compressed artifact `{}`", dst.display()),
-                source,
-            })?;
-        }
-    }
     fs::remove_file(src).map_err(|source| ExecError::Io {
         context: format!(
             "failed to remove uncompressed artifact `{}` after compression",

@@ -4,6 +4,7 @@
 //! Customizer's config schema or version capabilities — those are the user↔IC contract.
 
 pub mod ado;
+pub mod atomic;
 pub mod catalogue;
 pub mod deps;
 pub mod domain;
