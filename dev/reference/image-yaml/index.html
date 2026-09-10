@@ -1305,6 +1305,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Inter-image dependencies">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#embedding-an-artifact-with-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding an artifact with inputs:
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1762,6 +1779,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Inter-image dependencies">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#embedding-an-artifact-with-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding an artifact with inputs:
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1919,6 +1953,12 @@
 <td>string list</td>
 <td>no</td>
 <td>Order-only build dependencies on other workspace images. See <a href="#inter-image-dependencies">Inter-image dependencies</a>.</td>
+</tr>
+<tr>
+<td><code>inputs</code></td>
+<td>list of <code>{name, image, output?, cell?}</code></td>
+<td>no</td>
+<td>Named producer artifacts embedded in <code>config:</code> via <code>${inputs.&lt;name&gt;}</code>. See <a href="#embedding-an-artifact-with-inputs">Embedding an artifact with <code>inputs:</code></a>.</td>
 </tr>
 <tr>
 <td><code>extraParams</code></td>
@@ -2117,19 +2157,34 @@ extension; tailor derives the extension (and appends <code>.zst</code> if that o
 optional only when the producer declares a single output.</p>
 <p><code>dependsOn: [&lt;image&gt;, …]</code> declares an <strong>order-only</strong> dependency: the listed images build first, but
 they contribute nothing to this image's fingerprint. Use it when an image must run after another but
-references none of its output. (An <code>image</code> base already implies the edge — don't restate it.)</p>
-<blockquote>
-<p>Embedding another image's artifact <em>inside</em> <code>config:</code> (e.g. an <code>additionalFiles</code> source) via an
-<code>inputs:</code> catalogue is designed in <code>meta/docs/2026-09-09-inter-image-dependencies.md</code> and lands in a
-later release; today, inter-image reuse is via <code>base: { image }</code>.</p>
-</blockquote>
+references none of its output. (An <code>image</code> base or input already implies the edge — don't restate it.)</p>
+<h3 id="embedding-an-artifact-with-inputs">Embedding an artifact with <code>inputs:</code><a class="headerlink" href="#embedding-an-artifact-with-inputs" title="Permanent link">&para;</a></h3>
+<p>To consume a producer's artifact <em>inside</em> <code>config:</code> (e.g. as an IC <code>additionalFiles</code> source or a
+local <code>rpmSources</code> entry), declare it in <code>inputs:</code> and reference it by name as <code>${inputs.&lt;name&gt;}</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">inputs</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">payload</span><span class="w">            </span><span class="c1"># the interpolation key</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">installer-payload</span><span class="w"> </span><span class="c1"># producer image</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span><span class="w">             </span><span class="c1"># format name; optional if single-output</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="nt">cell</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> flavor</span><span class="p">:</span><span class="w"> </span><span class="nv">min</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">    </span><span class="c1"># pin producer axes this image doesn't share</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="nt">config</span><span class="p">:</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">  </span><span class="nt">os</span><span class="p">:</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">    </span><span class="nt">additionalFiles</span><span class="p">:</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="s">"${inputs.payload}"</span><span class="w">   </span><span class="c1"># → the resolved producer artifact path</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">        </span><span class="nt">destination</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/images/payload.cosi</span>
+</code></pre></div>
+<p><code>${inputs.&lt;name&gt;}</code> is substituted with the resolved producer artifact path (same per-cell pairing and
+<code>output</code>/<code>cell</code> rules as <code>base: { image }</code> above), and the artifact is content-hashed into the
+fingerprint — so a producer rebuild rebuilds this image, and you never hand-write a
+<code>../…/artifacts/…</code> path. A <code>${inputs.&lt;name&gt;}</code> that names no declared input is an error. <code>inputs</code>
+entries whose kind is <code>image</code> add a build-order edge; each input <code>name</code> is unique per image.</p>
 <h2 id="output-spec">Output spec<a class="headerlink" href="#output-spec" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">outputs</span><span class="p">:</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vhd-fixed</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">    </span><span class="nt">compression</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zstd</span><span class="w">      </span><span class="c1"># tailor compresses the artifact → &lt;slug&gt;.vhd.zst</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">outputs</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">cosiCompressionLevel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"${name}-${arch}"</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vhd-fixed</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">compression</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">zstd</span><span class="w">      </span><span class="c1"># tailor compresses the artifact → &lt;slug&gt;.vhd.zst</span>
 </code></pre></div>
 <p><code>format</code> is required. <code>cosiCompressionLevel</code>, <code>compression</code>, and <code>name</code> are optional.</p>
 <h3 id="compression"><code>compression</code><a class="headerlink" href="#compression" title="Permanent link">&para;</a></h3>
