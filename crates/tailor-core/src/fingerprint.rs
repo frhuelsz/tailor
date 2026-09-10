@@ -7,6 +7,17 @@ use tailor_config::{Compression, ExtraParam, Operation};
 
 use crate::{domain::Fingerprint, ports::ResolvedBase};
 
+/// Version of tailor's own build semantics. Bump when a tailor change alters the *bytes* of a
+/// produced artifact for unchanged inputs (e.g. a change to how the IC invocation is assembled or
+/// how outputs are post-processed) so that already-stamped artifacts are correctly rebuilt after an
+/// upgrade. Patch/feature releases that do not change build semantics leave this untouched, so they
+/// do not force a workspace-wide rebuild.
+///
+/// The IC *engine* version deliberately is **not** encoded here: it is already captured with full
+/// precision by [`FingerprintInputs::toolchain_digest`], which is the digest-pinned IC image
+/// reference (a different IC build is a different image digest, hence a different fingerprint).
+pub const BUILD_SCHEMA_VERSION: u32 = 1;
+
 /// All inputs that determine a cell's output. Registry digests come from resolution/the lock; local
 /// hashes are computed at build time.
 pub struct FingerprintInputs<'a> {
@@ -36,6 +47,11 @@ pub struct FingerprintInputs<'a> {
 pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
     let mut hasher = Sha256::new();
 
+    field(
+        &mut hasher,
+        b"build-schema",
+        &BUILD_SCHEMA_VERSION.to_le_bytes(),
+    );
     field(&mut hasher, b"slug", inputs.slug.as_bytes());
     field(
         &mut hasher,
@@ -165,8 +181,20 @@ mod tests {
     }
 
     #[test]
-    fn tools_dir_digest_changes_fingerprint() {
+    fn toolchain_digest_change_changes_fingerprint() {
+        // The IC engine version is captured via the digest-pinned toolchain image reference, so a
+        // new IC build (a different digest) invalidates the incremental fingerprint.
         let base = base();
+        let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
+        let mut a = inputs("cell", &cfg, &base);
+        a.toolchain_digest = "ic@sha256:one";
+        let mut b = inputs("cell", &cfg, &base);
+        b.toolchain_digest = "ic@sha256:two";
+        assert_ne!(fingerprint(&a), fingerprint(&b));
+    }
+
+    #[test]
+    fn tools_dir_digest_changes_fingerprint() {        let base = base();
         let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
         let mut a = inputs("cell", &cfg, &base);
         a.tools_dir_digest = Some("sha256:one");
