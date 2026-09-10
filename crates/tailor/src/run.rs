@@ -28,7 +28,9 @@ use tailor_core::{
     runtime_config, select_node_cells, summarize, toolchain_for, toolchain_key, tools_dir_key,
     verify,
 };
-use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
+use tailor_exec::{
+    BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, WorktreeLock, ca_cert_name, resolve,
+};
 use tailor_resolve::{OciFetcher, OciResolver};
 use tokio_util::sync::CancellationToken;
 
@@ -1418,6 +1420,26 @@ async fn build(
     // Fail fast on every signing prerequisite — including the `openssl`/`sbsign` binaries — before any
     // (slow, privileged) IC run (meta/docs/2026-06-29-signing.md §5.1).
     preflight_signers(&signers)?;
+
+    // Admit a single build per output directory: a build writes shared state there (stamps, the hash
+    // cache, artifacts), so two concurrent builds would race on those writes. Held for the rest of
+    // the build and released automatically on exit (even on a crash).
+    let _build_lock = match WorktreeLock::acquire(output_dir.join(TAILOR_STATE_DIR)) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            return Err(AppError::Message(format!(
+                "another tailor build is already running for output directory `{}`; wait for it to \
+                 finish or use a separate `--output-dir`",
+                output_dir.display()
+            )));
+        }
+        Err(source) => {
+            return Err(AppError::Message(format!(
+                "failed to acquire the build lock under `{}`: {source}",
+                output_dir.join(TAILOR_STATE_DIR).display()
+            )));
+        }
+    };
 
     // Wire Ctrl+C / SIGTERM to a cancellation token so an interrupted build tears down its running
     // container instead of orphaning it in the daemon (the container runtime removes the container on

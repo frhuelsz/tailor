@@ -194,7 +194,8 @@ mod tests {
     }
 
     #[test]
-    fn tools_dir_digest_changes_fingerprint() {        let base = base();
+    fn tools_dir_digest_changes_fingerprint() {
+        let base = base();
         let cfg: Value = serde_yaml_ng::from_str("os:\n  hostname: a\n").unwrap();
         let mut a = inputs("cell", &cfg, &base);
         a.tools_dir_digest = Some("sha256:one");
