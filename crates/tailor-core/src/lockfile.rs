@@ -3,7 +3,7 @@
 //! container digests and registry (`oci`/`azureLinux`) base digests. Local inputs live in build
 //! stamps, never here.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, fs, io::ErrorKind, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -96,9 +96,9 @@ impl Lockfile {
 
     /// Read a lockfile, returning the default (empty) lock if the file does not exist.
     pub fn read(path: &Path) -> Result<Self, CoreError> {
-        let text = match std::fs::read_to_string(path) {
+        let text = match fs::read_to_string(path) {
             Ok(text) => text,
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            Err(source) if source.kind() == ErrorKind::NotFound => {
                 return Ok(Self::default());
             }
             Err(source) => {
@@ -120,7 +120,7 @@ impl Lockfile {
             path: path.to_path_buf(),
             source,
         })?;
-        std::fs::write(path, text).map_err(|source| CoreError::Io {
+        fs::write(path, text).map_err(|source| CoreError::Io {
             path: path.to_path_buf(),
             source,
         })

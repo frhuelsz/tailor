@@ -7,6 +7,8 @@
 //! bare token `$unset` is removed entirely. `$include` is resolved in an earlier pass and must never
 //! reach the merger; `$select` is reserved and currently errors here.
 
+use std::mem;
+
 use serde_yaml_ng::{Mapping, Value};
 
 use crate::error::ConfigError;
@@ -135,7 +137,7 @@ fn merge_mapping(
             continue;
         }
         if let Some(slot) = base.get_mut(&key) {
-            let taken = std::mem::replace(slot, Value::Null);
+            let taken = mem::replace(slot, Value::Null);
             let merged = merge_value(Some(taken), over_val, ctx)?;
             if let Some(slot) = base.get_mut(&key) {
                 *slot = merged;
@@ -210,7 +212,7 @@ fn classify_directives(overlay: &mut Value, ctx: &Ctx<'_>) -> Result<Directive, 
         });
     }
     if dollar.iter().all(|k| LIST_OPS.contains(&k.as_str())) {
-        let taken = std::mem::replace(map, Mapping::new());
+        let taken = mem::replace(map, Mapping::new());
         return Ok(Directive::ListOps(taken));
     }
     match dollar.as_slice() {

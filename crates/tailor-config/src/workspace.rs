@@ -4,7 +4,11 @@
 //! member image (`*/image.yaml` auto-discovered at depth 1, or curated via the `images` catalogue)
 //! belongs to that workspace. With no manifest, a lone `image.yaml` is a standalone image.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     error::ConfigError,
@@ -99,7 +103,7 @@ fn discover_members(root: &Path, tool: &ToolConfig) -> Result<Vec<DiscoveredImag
     };
 
     let mut images = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen = BTreeSet::new();
     for dir in member_dirs {
         // The `*` glob and an explicit member entry can name the same directory; keep it once.
         if !seen.insert(dir.clone()) {
@@ -134,7 +138,7 @@ fn discover_members(root: &Path, tool: &ToolConfig) -> Result<Vec<DiscoveredImag
 /// Immediate subdirectories of `root` that contain an `image.yaml`, sorted for determinism.
 fn depth_one_image_dirs(root: &Path) -> Result<Vec<PathBuf>, ConfigError> {
     let mut dirs = Vec::new();
-    let entries = std::fs::read_dir(root).map_err(|source| ConfigError::Read {
+    let entries = fs::read_dir(root).map_err(|source| ConfigError::Read {
         path: root.to_path_buf(),
         source,
     })?;
@@ -171,8 +175,8 @@ mod tests {
     /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
     fn write(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     const TOOL: &str = indoc! {"
@@ -231,7 +235,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         write(tmp.path(), "tailor.yaml", TOOL);
         let nested = tmp.path().join("member/deep/nested");
-        std::fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&nested).unwrap();
         assert_eq!(find_manifest(&nested), Some(tmp.path().join("tailor.yaml")));
     }
 

@@ -812,6 +812,8 @@ pub type AxisValues = IndexMap<String, Vec<String>>;
 mod tests {
     use super::*;
 
+    use std::path::Path;
+
     #[test]
     fn engine_deserializes_lowercase_tokens() {
         assert_eq!(
@@ -908,7 +910,7 @@ toolsDirSources:
             serde_yaml_ng::from_str("buildDirBase: /mnt/tailor-build\n").unwrap();
         assert_eq!(
             runtime.build_dir_base.as_deref(),
-            Some(std::path::Path::new("/mnt/tailor-build"))
+            Some(Path::new("/mnt/tailor-build"))
         );
     }
 
@@ -934,15 +936,9 @@ toolsDirSources:
         let mounts = runtime.mounts.unwrap();
 
         assert_eq!(mounts.extra_paths.len(), 2);
-        assert_eq!(
-            mounts.extra_paths[0].path,
-            std::path::Path::new("shared/scripts")
-        );
+        assert_eq!(mounts.extra_paths[0].path, Path::new("shared/scripts"));
         assert_eq!(mounts.extra_paths[0].access, Access::Ro);
-        assert_eq!(
-            mounts.extra_paths[1].path,
-            std::path::Path::new("/data/scratch")
-        );
+        assert_eq!(mounts.extra_paths[1].path, Path::new("/data/scratch"));
         assert_eq!(mounts.extra_paths[1].access, Access::Rw);
     }
 
@@ -1127,7 +1123,7 @@ toolsDirSources:
         .unwrap();
         assert_eq!(
             cat.get("baremetal").unwrap().path,
-            std::path::Path::new("bases/baremetal.vhdx")
+            Path::new("bases/baremetal.vhdx")
         );
         assert!(cat.get("missing").is_none());
     }

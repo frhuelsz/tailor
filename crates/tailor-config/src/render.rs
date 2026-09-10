@@ -4,6 +4,7 @@
 
 use std::{
     collections::BTreeMap,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -33,7 +34,7 @@ pub fn write_golden(
     ic_config: &Value,
 ) -> Result<PathBuf, ConfigError> {
     let dir = image_dir.join(RENDERED_DIR);
-    std::fs::create_dir_all(&dir).map_err(|source| ConfigError::Write {
+    fs::create_dir_all(&dir).map_err(|source| ConfigError::Write {
         path: dir.clone(),
         source,
     })?;
@@ -42,7 +43,7 @@ pub fn write_golden(
         path: path.clone(),
         source,
     })?;
-    std::fs::write(&path, text).map_err(|source| ConfigError::Write {
+    fs::write(&path, text).map_err(|source| ConfigError::Write {
         path: path.clone(),
         source,
     })?;
@@ -393,8 +394,8 @@ mod tests {
     /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
     fn write(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     /// A small matrix image exercising every render operation: list append, `$remove`, `$replace`,
@@ -477,7 +478,7 @@ mod tests {
             .as_sequence()
             .unwrap()
             .iter()
-            .filter_map(serde_yaml_ng::Value::as_str)
+            .filter_map(Value::as_str)
             .collect()
     }
 

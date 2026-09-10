@@ -10,7 +10,10 @@
 use std::path::Path;
 
 use oci_client::{manifest::OciDescriptor, secrets::RegistryAuth};
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::{
+    fs::File,
+    io::{AsyncWriteExt, BufWriter},
+};
 
 use tailor_config::{Arch, BaseImageSource};
 use tailor_core::{BaseImageFetcher, FetchedBase, ResolveError};
@@ -57,7 +60,7 @@ impl BaseImageFetcher for OciFetcher {
                 path: dest.to_path_buf(),
                 source,
             })?;
-        let mut writer = tokio::io::BufWriter::new(file);
+        let mut writer = BufWriter::new(file);
         // `pull_blob` streams the layer and verifies it against `layer.digest`; the raw layer bytes are
         // the disk image, so they land at `dest` directly.
         client
@@ -140,9 +143,9 @@ fn registry_error(reference: &str, detail: String) -> ResolveError {
 mod tests {
     use super::*;
 
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, fs};
 
-    use tailor_config::AzureLinuxBase;
+    use tailor_config::{AzureLinuxBase, OciBase};
 
     fn layer(title: Option<&str>, size: i64) -> OciDescriptor {
         OciDescriptor {
@@ -203,7 +206,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("layer.bin");
         let source = BaseImageSource::Oci {
-            oci: tailor_config::OciBase {
+            oci: OciBase {
                 uri: "docker.io/library/busybox:latest".to_owned(),
                 platform: None,
             },
@@ -213,6 +216,6 @@ mod tests {
             .await
             .unwrap();
         assert!(dest.exists());
-        assert_eq!(fetched.size, std::fs::metadata(&dest).unwrap().len());
+        assert_eq!(fetched.size, fs::metadata(&dest).unwrap().len());
     }
 }

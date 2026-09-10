@@ -3,7 +3,9 @@
 //! composition root wires concrete adapters as generics, so the traits need not be dyn-compatible.
 
 use std::{
+    env, fmt,
     future::Future,
+    io,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -84,7 +86,7 @@ pub struct ToolsDirPlan {
 /// so IC's `inject-files` pass can re-inject them (`meta/docs/2026-06-29-signing.md` §6). Object-safe and
 /// **synchronous** — held as `dyn Signer` in [`ExecutionContext`]; the executor invokes it on a
 /// blocking thread so the async runtime is never blocked on `openssl`/`sbsign`.
-pub trait Signer: Send + Sync + std::fmt::Debug {
+pub trait Signer: Send + Sync + fmt::Debug {
     /// Cheap, side-effect-free check that this backend can sign: required host binaries present
     /// (`openssl`, and `sbsign` when PE artifacts are expected) and key material resolvable. Called
     /// once per build, before any IC run (`meta/docs/2026-06-29-signing.md` §5.1).
@@ -159,7 +161,7 @@ impl Default for RuntimeConfig {
             host_root: PathBuf::from("/host"),
             // Avoid a fail-open `/` workspace in ad-hoc test/default contexts; the orchestrator
             // always overwrites this with the discovered workspace root.
-            workspace_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            workspace_root: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             privileged: true,
             mount_dev: true,
             build_dir_base: None,
@@ -318,16 +320,8 @@ pub struct FetchedBase {
 pub trait FilesystemOps: Send + Sync {
     /// Build an **adjacent** reflink/hardlink/copy farm for an `rpmSources` directory, skipping any
     /// existing `repodata/` (`meta/docs/2026-06-22-design.md` §7.8).
-    fn build_rpm_farm(
-        &self,
-        source: &std::path::Path,
-        dest: &std::path::Path,
-    ) -> Result<(), std::io::Error>;
+    fn build_rpm_farm(&self, source: &Path, dest: &Path) -> Result<(), io::Error>;
 
     /// Write the working-copy IC config (with injected `previewFeatures`).
-    fn write_working_copy(
-        &self,
-        content: &[u8],
-        path: &std::path::Path,
-    ) -> Result<(), std::io::Error>;
+    fn write_working_copy(&self, content: &[u8], path: &Path) -> Result<(), io::Error>;
 }

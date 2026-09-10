@@ -6,7 +6,10 @@
 //! (flattened) in place. `$include` must be the sole key of its mapping and may itself contain
 //! `$include` (resolved recursively; cycles are an error).
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs, mem,
+    path::{Path, PathBuf},
+};
 
 use serde_yaml_ng::Value;
 
@@ -43,7 +46,7 @@ fn resolve(
         }
         Value::Sequence(items) => {
             let mut out = Vec::with_capacity(items.len());
-            for mut item in std::mem::take(items) {
+            for mut item in mem::take(items) {
                 if let Some(target) = include_target(&item, path)? {
                     match load(root, &target, path, stack)? {
                         Value::Sequence(spliced) => out.extend(spliced),
@@ -100,7 +103,7 @@ fn load(
             .join(" → ");
         return Err(ConfigError::IncludeCycle { chain });
     }
-    let text = std::fs::read_to_string(&file).map_err(|source| ConfigError::Read {
+    let text = fs::read_to_string(&file).map_err(|source| ConfigError::Read {
         path: file.clone(),
         source,
     })?;
@@ -124,8 +127,8 @@ mod tests {
 
     fn write(dir: &Path, rel: &str, body: &str) {
         let path = dir.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     #[test]

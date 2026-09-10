@@ -3,8 +3,9 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry},
-    fs,
+    env, fs,
     future::Future,
+    io,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -13,17 +14,18 @@ use std::{
 use indexmap::IndexMap;
 use serde::Serialize;
 use tailor_config::{
-    Arch, BaseSource, ImageDefinition, Operation, OutputArtifactsPolicy, OutputFormat, OutputSpec,
-    PullPolicy, RenderedCell, ToolConfig, ToolchainEntry, ToolsDirSourceInline, Workspace,
-    discover, expand, find_manifest, merge_plan, render_image, write_golden,
+    Arch, BaseImageCatalogue, BaseSource, ImageDefinition, Operation, OutputArtifactsPolicy,
+    OutputFormat, OutputSpec, PullPolicy, RenderedCell, Runtime, ToolConfig, ToolchainEntry,
+    ToolsDirSourceInline, Workspace, discover, expand, find_manifest, merge_plan, render_image,
+    write_golden,
 };
 use tailor_core::{
-    BaseResolver, BuildOptions, Cell, CellSlug, ContainerRuntime, CoreError, ExecutionContext,
-    Executor, LocalImage, LockedBase, LockedContainer, Lockfile, MissingPrerequisite, Orchestrator,
-    ResolvedBase, ResolvedToolchain, ResolvedToolsDirSource, Selector, SignError, Signer,
-    SigningRequirement, SlotSource, SlotSummary, Target, ado_matrix, cells_selected, download,
-    imagedep, is_valid_var_name, runtime_config, summarize, toolchain_for, toolchain_key,
-    tools_dir_key, verify,
+    BaseResolver, BuildOptions, BuildProgress, Cell, CellSlug, ContainerRuntime, CoreError,
+    ExecutionContext, Executor, LocalImage, LockedBase, LockedContainer, Lockfile,
+    MissingPrerequisite, Orchestrator, ResolveError, ResolvedBase, ResolvedToolchain,
+    ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement, SlotSource,
+    SlotSummary, Target, ado_matrix, cells_selected, download, imagedep, is_valid_var_name,
+    runtime_config, summarize, toolchain_for, toolchain_key, tools_dir_key, verify,
 };
 use tailor_exec::{BollardRuntime, IcExecutor, NoopRuntime, ResolveInputs, ca_cert_name, resolve};
 use tailor_resolve::{OciFetcher, OciResolver};
@@ -83,7 +85,7 @@ fn resolve_log_dir(
 
 /// Read `TAILOR_LOG_DIR`, treating an empty value as unset.
 fn log_dir_from_env() -> Option<PathBuf> {
-    std::env::var_os(LOG_DIR_ENV)
+    env::var_os(LOG_DIR_ENV)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
@@ -179,8 +181,7 @@ fn print_version() {
 }
 
 fn load_workspace(cli: &Cli) -> Result<Workspace, AppError> {
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     let start = match &cli.manifest {
         Some(path) if path.is_file() => path
             .parent()
@@ -403,7 +404,7 @@ fn check_export(output_dir: &Path, produced: &BTreeMap<String, String>) -> Resul
         match fs::read_to_string(&path) {
             Ok(existing) if &existing == yaml => {}
             Ok(_) => drift.push(format!("changed: {}", path.display())),
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
                 drift.push(format!("missing: {}", path.display()));
             }
             Err(source) => {
@@ -436,7 +437,7 @@ fn stale_exports(
 ) -> Result<Vec<PathBuf>, AppError> {
     let entries = match fs::read_dir(output_dir) {
         Ok(entries) => entries,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(source) => {
             return Err(AppError::Message(format!(
                 "failed to read export dir {}: {source}",
@@ -750,7 +751,7 @@ async fn resolve_container_image<R, F, Fut>(
 where
     R: ContainerRuntime,
     F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<String, tailor_core::ResolveError>>,
+    Fut: Future<Output = Result<String, ResolveError>>,
 {
     if let Some(digest) = lock_digest {
         return Ok(ResolvedContainerImage {
@@ -789,7 +790,7 @@ where
                 None => {
                     let name =
                         id.map_or_else(|| reference.to_owned(), std::borrow::ToOwned::to_owned);
-                    Err(CoreError::Resolve(tailor_core::ResolveError::Other(format!(
+                    Err(CoreError::Resolve(ResolveError::Other(format!(
                         "image `{reference}` (source `{name}`) not found locally and pull policy is never"
                     )))
                     .into())
@@ -955,7 +956,7 @@ fn preflight_toolchain_cell_arch(
     if image_arch == cell_arch {
         return Ok(());
     }
-    Err(CoreError::Resolve(tailor_core::ResolveError::Other(format!(
+    Err(CoreError::Resolve(ResolveError::Other(format!(
         "toolchain `{toolchain_id}` local image is `{architecture}` but cell `{cell_slug}` targets `{cell_arch}`; no local image for that arch and pull policy won't fetch it"
     )))
     .into())
@@ -1120,8 +1121,7 @@ const DEFAULT_CONVERT_CONTAINER: &str = "mcr.microsoft.com/azurelinux/imagecusto
 /// same container/janitor machinery as `build` (so the output is sudo-free). See
 /// `meta/docs/2026-06-22-design.md` §7.4 (the `convert` operation).
 async fn convert(args: &ConvertArgs, engine: &EngineOverride) -> Result<(), AppError> {
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     let input = tailor_config::absolutize(&args.input, &cwd);
     if !input.is_file() {
         return Err(AppError::Message(format!(
@@ -1296,7 +1296,7 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         default_outputs: Vec::new(),
         output_artifacts: OutputArtifactsPolicy::default(),
         root: dir.to_path_buf(),
-        base_images: tailor_config::BaseImageCatalogue::default(),
+        base_images: BaseImageCatalogue::default(),
         tools_dir_sources: Vec::new(),
     };
     let output = OutputSpec {
@@ -1350,7 +1350,7 @@ async fn build(
         args.output_dir
             .clone()
             .unwrap_or_else(|| workspace.root.join(ARTIFACTS_DIR)),
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?,
+        env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?,
     );
     let signing = signing_requirements(&targets, tool.signing.as_ref())?;
     // Build one signer per required profile (a shared CA per build); `signer_for` resolves a cell to
@@ -1450,12 +1450,12 @@ async fn build(
                 dry_run: false,
                 clone_index: (clones > 1).then_some(clone),
             };
-            let mut on_progress = |event: tailor_core::BuildProgress<'_>| match event {
-                tailor_core::BuildProgress::Building { slug } => {
+            let mut on_progress = |event: BuildProgress<'_>| match event {
+                BuildProgress::Building { slug } => {
                     let base = bases.get(slug).map_or("", String::as_str);
                     status("Customizing", &format!("{slug}  ({base})"));
                 }
-                tailor_core::BuildProgress::Built { artifact, .. } => {
+                BuildProgress::Built { artifact, .. } => {
                     built += 1;
                     status("Built", &describe_artifact(artifact));
                 }
@@ -1558,7 +1558,7 @@ async fn establish_runtime(
 
 /// A set, non-empty environment variable, else `None`.
 fn non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|value| !value.is_empty())
+    env::var(key).ok().filter(|value| !value.is_empty())
 }
 
 // ───────────────────────────── build reporting (cargo-style) ─────────────────────────────
@@ -1657,7 +1657,7 @@ fn describe_base(base: &BaseSource) -> String {
 
 /// `<artifact> (<size>)`, with the artifact shown relative to the current directory when possible.
 fn describe_artifact(artifact: &Path) -> String {
-    let shown = std::env::current_dir()
+    let shown = env::current_dir()
         .ok()
         .and_then(|cwd| artifact.strip_prefix(&cwd).ok().map(Path::to_path_buf))
         .unwrap_or_else(|| artifact.to_path_buf());
@@ -1701,9 +1701,7 @@ fn format_duration(elapsed: Duration) -> String {
 /// the path is both translated into the `/host` mount for IC and used as a verbatim container bind by
 /// the janitor sweep, and Docker rejects a relative bind source (e.g. `./.tailor/cache`).
 fn resolve_image_cache_dir(tool: &mut ToolConfig, workspace_root: &Path) {
-    let runtime = tool
-        .runtime
-        .get_or_insert_with(tailor_config::Runtime::default);
+    let runtime = tool.runtime.get_or_insert_with(Runtime::default);
     let dir = runtime
         .image_cache_dir
         .clone()
@@ -1723,8 +1721,7 @@ fn apply_log_overrides(
     // Absolutize each source against its own base BEFORE it reaches path translation: a relative log
     // dir would otherwise become `/host/` + `./…` = the host root's directory (the same host-root
     // escape class as the wipe). Flag/env resolve against the CWD, the manifest against the workspace.
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     let flag = logging
         .log_dir
         .clone()
@@ -1739,9 +1736,7 @@ fn apply_log_overrides(
     if log_dir.is_none() && logging.ic_log_level.is_none() {
         return Ok(());
     }
-    let runtime = tool
-        .runtime
-        .get_or_insert_with(tailor_config::Runtime::default);
+    let runtime = tool.runtime.get_or_insert_with(Runtime::default);
     runtime.log_dir = log_dir;
     if let Some(level) = logging.ic_log_level {
         runtime.log_level = Some(level);
@@ -1761,10 +1756,9 @@ fn apply_build_dir_base_override(
     let Some(base) = flag else {
         return Ok(());
     };
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     tool.runtime
-        .get_or_insert_with(tailor_config::Runtime::default)
+        .get_or_insert_with(Runtime::default)
         .build_dir_base = Some(tailor_config::absolutize(base, &cwd));
     Ok(())
 }
@@ -2016,8 +2010,7 @@ const NAME_TOKEN: &str = "__IMAGE_NAME__";
 fn init(args: &InitArgs) -> Result<(), AppError> {
     let name = args.name.trim();
     validate_name(name)?;
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
 
     match args.template {
         InitTemplate::Simple => {
@@ -2094,8 +2087,7 @@ fn add(what: &AddCommand) -> Result<(), AppError> {
 /// `tailor add image <name>` — scaffold a new member image and register it in the workspace manifest.
 fn add_image(name: &str) -> Result<(), AppError> {
     validate_name(name)?;
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     let manifest = find_manifest(&cwd).ok_or_else(|| {
         AppError::Message(
             "no tailor.yaml in this directory or any parent — run `tailor init` first".to_owned(),
@@ -2129,8 +2121,7 @@ fn add_image(name: &str) -> Result<(), AppError> {
 /// `by-<axis>/` directory.
 fn add_axis(image: Option<&str>, axis: &str) -> Result<(), AppError> {
     validate_name(axis)?;
-    let cwd =
-        std::env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
+    let cwd = env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?;
     let workspace = discover(cwd)?;
     let target = match image {
         Some(name) => workspace
@@ -2417,7 +2408,9 @@ mod tests {
     };
 
     use tailor_config::{AzureLinuxBase, BaseSource, OciBase, defaults::default_tool_config};
-    use tailor_core::{ContainerConfig, ContainerResult, ExecError, LocalImage};
+    use tailor_core::{
+        ContainerConfig, ContainerResult, DaemonInfo, ExecError, LocalImage, testing::FakeResolver,
+    };
     use tokio_util::sync::CancellationToken;
 
     #[derive(Debug, Clone, Default)]
@@ -2442,8 +2435,8 @@ mod tests {
             Err(ExecError::Other("not used".to_owned()))
         }
 
-        async fn daemon_info(&self) -> Result<tailor_core::DaemonInfo, ExecError> {
-            Ok(tailor_core::DaemonInfo::default())
+        async fn daemon_info(&self) -> Result<DaemonInfo, ExecError> {
+            Ok(DaemonInfo::default())
         }
 
         async fn export_container(
@@ -2496,7 +2489,7 @@ mod tests {
             "ic",
             &local_entry("registry.example/ic", PullPolicy::Missing),
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &Lockfile::default(),
         )
         .await
@@ -2517,7 +2510,7 @@ mod tests {
             "ic",
             &local_entry("acl-imagecustomizer", PullPolicy::Missing),
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &Lockfile::default(),
         )
         .await
@@ -2551,7 +2544,7 @@ mod tests {
             "ic",
             &local_entry("registry.example/ic", PullPolicy::Missing),
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &lock,
         )
         .await
@@ -2569,7 +2562,7 @@ mod tests {
             "ic",
             &local_entry("registry.example/ic", PullPolicy::Missing),
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &Lockfile::default(),
         )
         .await
@@ -2594,7 +2587,7 @@ mod tests {
             "ic",
             &local_entry("acl-imagecustomizer", PullPolicy::Never),
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &Lockfile::default(),
         )
         .await
@@ -2622,7 +2615,7 @@ mod tests {
             Some("acl"),
             &source,
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &Lockfile::default(),
         )
         .await
@@ -2715,7 +2708,7 @@ toolsDirSources:
             &targets,
             &tool,
             &runtime,
-            &tailor_core::testing::FakeResolver,
+            &FakeResolver,
             &Lockfile::default(),
         )
         .await
@@ -2834,9 +2827,9 @@ toolsDirSources:
         // A relative `runtime.logDir` must be absolutized against the workspace root — never left
         // relative, or path translation turns it into `/host/./…` (the host root's dir).
         let mut tool = default_tool_config();
-        tool.runtime = Some(tailor_config::Runtime {
+        tool.runtime = Some(Runtime {
             log_dir: Some(PathBuf::from("./.tailor/logs")),
-            ..tailor_config::Runtime::default()
+            ..Runtime::default()
         });
 
         apply_log_overrides(&mut tool, &LogOverrides::default(), Path::new("/ws")).unwrap();
@@ -2858,7 +2851,7 @@ toolsDirSources:
         apply_log_overrides(&mut tool, &logging, Path::new("/ws")).unwrap();
 
         let log_dir = tool.runtime.and_then(|r| r.log_dir).expect("log dir set");
-        let expected = std::env::current_dir().unwrap().join("mylogs");
+        let expected = env::current_dir().unwrap().join("mylogs");
         assert_eq!(log_dir, expected);
     }
 
@@ -2885,7 +2878,7 @@ toolsDirSources:
     fn build_dir_base_override_absolutizes_a_relative_flag_against_cwd() {
         let mut tool = default_tool_config();
         apply_build_dir_base_override(&mut tool, Some(Path::new("pool-scratch"))).unwrap();
-        let expected = std::env::current_dir().unwrap().join("pool-scratch");
+        let expected = env::current_dir().unwrap().join("pool-scratch");
         assert_eq!(
             tool.runtime
                 .and_then(|runtime| runtime.build_dir_base)
@@ -2966,35 +2959,35 @@ toolsDirSources:
     #[test]
     fn resolve_image_cache_dir_defaults_absent_and_absolutizes_relative_against_workspace() {
         let mut tool = default_tool_config();
-        resolve_image_cache_dir(&mut tool, std::path::Path::new("/ws"));
+        resolve_image_cache_dir(&mut tool, Path::new("/ws"));
         assert_eq!(
             tool.runtime.as_ref().unwrap().image_cache_dir.as_deref(),
-            Some(std::path::Path::new("/ws/.tailor/cache"))
+            Some(Path::new("/ws/.tailor/cache"))
         );
 
         // A manifest-relative value is absolutized against the workspace root (so it never reaches
         // Docker as a relative bind source like `./.tailor/cache`).
         let mut relative = default_tool_config();
-        relative.runtime = Some(tailor_config::Runtime {
+        relative.runtime = Some(Runtime {
             image_cache_dir: Some(PathBuf::from("./.tailor/cache")),
             ..Default::default()
         });
-        resolve_image_cache_dir(&mut relative, std::path::Path::new("/ws"));
+        resolve_image_cache_dir(&mut relative, Path::new("/ws"));
         assert_eq!(
             relative.runtime.unwrap().image_cache_dir.as_deref(),
-            Some(std::path::Path::new("/ws/.tailor/cache"))
+            Some(Path::new("/ws/.tailor/cache"))
         );
 
         // An absolute value is left untouched.
         let mut configured = default_tool_config();
-        configured.runtime = Some(tailor_config::Runtime {
+        configured.runtime = Some(Runtime {
             image_cache_dir: Some(PathBuf::from("/custom/cache")),
             ..Default::default()
         });
-        resolve_image_cache_dir(&mut configured, std::path::Path::new("/ws"));
+        resolve_image_cache_dir(&mut configured, Path::new("/ws"));
         assert_eq!(
             configured.runtime.unwrap().image_cache_dir.as_deref(),
-            Some(std::path::Path::new("/custom/cache"))
+            Some(Path::new("/custom/cache"))
         );
     }
 }

@@ -322,7 +322,10 @@ fn resolve_output(
             output: format.as_str().to_owned(),
             available: join_formats(&formats),
         }),
-        None if formats.len() == 1 => Ok(formats.into_iter().next().expect("one format")),
+        None if formats.len() == 1 => Ok(formats
+            .into_iter()
+            .next()
+            .expect("invariant: formats.len() == 1")),
         None => Err(CoreError::UnknownProducerOutput {
             image: image.to_owned(),
             producer: producer.to_owned(),

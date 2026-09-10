@@ -8,6 +8,7 @@
 
 use std::{
     collections::BTreeMap,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -422,7 +423,7 @@ fn canonical_values(values: &[&str], declared: &[String]) -> String {
 }
 
 fn parse_fragment(path: &Path) -> Result<Fragment, ConfigError> {
-    let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+    let text = fs::read_to_string(path).map_err(|source| ConfigError::Read {
         path: path.to_path_buf(),
         source,
     })?;
@@ -434,7 +435,7 @@ fn parse_fragment(path: &Path) -> Result<Fragment, ConfigError> {
 
 fn read_dir_sorted(dir: &Path) -> Result<Vec<PathBuf>, ConfigError> {
     let mut entries = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|source| ConfigError::Read {
+    for entry in fs::read_dir(dir).map_err(|source| ConfigError::Read {
         path: dir.to_path_buf(),
         source,
     })? {
@@ -519,11 +520,11 @@ mod tests {
     /// Build a temp image dir containing `image.yaml` plus the given `by-*` fragment files.
     fn image(files: &[&str]) -> TempDir {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join(BASE_DOCUMENT), "config: {}\n").unwrap();
+        fs::write(dir.path().join(BASE_DOCUMENT), "config: {}\n").unwrap();
         for rel in files {
             let path = dir.path().join(rel);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, "config: {}\n").unwrap();
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "config: {}\n").unwrap();
         }
         dir
     }

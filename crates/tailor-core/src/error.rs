@@ -4,7 +4,7 @@
 //! port traits in `ports` can name them without `tailor-core` depending on its own adapters
 //! (`meta/docs/2026-06-22-architecture.md` §6). Adapters map their internal failures into these.
 
-use std::path::PathBuf;
+use std::{io::Error as IoError, path::PathBuf};
 
 use tailor_config::Arch;
 
@@ -28,7 +28,7 @@ pub enum ExecError {
     Io {
         context: String,
         #[source]
-        source: std::io::Error,
+        source: IoError,
     },
 
     #[error("unsafe directory `{}`: {reason}", .path.display())]
@@ -51,7 +51,7 @@ pub enum ResolveError {
     LocalRead {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: IoError,
     },
 
     #[error("registry resolution failed for `{reference}`: {detail}")]
@@ -235,7 +235,7 @@ pub enum CoreError {
     Io {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: IoError,
     },
 
     #[error("failed to (de)serialize `{}`: {source}", .path.display())]
@@ -248,7 +248,7 @@ pub enum CoreError {
 
 #[cfg(test)]
 mod tests {
-    use super::ExecError;
+    use super::*;
 
     #[test]
     fn ic_failure_surfaces_the_categorized_dump() {

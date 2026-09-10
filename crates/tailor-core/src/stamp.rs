@@ -2,7 +2,10 @@
 //! `<output-dir>/.tailor/stamps/<cell-slug>.json` recording the canonical fingerprint, so rebuild
 //! decisions compare against the last *built* inputs (immune to a just-refreshed lock).
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +29,7 @@ pub fn stamp_path(output_dir: &Path, slug: &str) -> PathBuf {
 
 /// Read a cell's stamp, returning `None` if absent or unparseable (treated as "rebuild").
 pub fn read(output_dir: &Path, slug: &str) -> Option<BuildStamp> {
-    let text = std::fs::read_to_string(stamp_path(output_dir, slug)).ok()?;
+    let text = fs::read_to_string(stamp_path(output_dir, slug)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
@@ -34,7 +37,7 @@ pub fn read(output_dir: &Path, slug: &str) -> Option<BuildStamp> {
 pub fn write(output_dir: &Path, slug: &str, fingerprint: Fingerprint) -> Result<(), CoreError> {
     let path = stamp_path(output_dir, slug);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| CoreError::Io {
+        fs::create_dir_all(parent).map_err(|source| CoreError::Io {
             path: parent.to_path_buf(),
             source,
         })?;
@@ -45,7 +48,7 @@ pub fn write(output_dir: &Path, slug: &str, fingerprint: Fingerprint) -> Result<
         tailor_version: env!("CARGO_PKG_VERSION").to_owned(),
     };
     let text = serde_json::to_string_pretty(&stamp).unwrap_or_default();
-    std::fs::write(&path, text).map_err(|source| CoreError::Io { path, source })
+    fs::write(&path, text).map_err(|source| CoreError::Io { path, source })
 }
 
 /// Whether a cell is up to date: its artifact exists and the stamp records the same fingerprint.
@@ -78,7 +81,7 @@ mod tests {
     fn up_to_date_requires_matching_fingerprint_and_artifact() {
         let dir = TempDir::new().unwrap();
         let artifact = dir.path().join("out.cosi");
-        std::fs::write(&artifact, b"x").unwrap();
+        fs::write(&artifact, b"x").unwrap();
         let fp = Fingerprint([1; 32]);
         write(dir.path(), "cell", fp).unwrap();
 

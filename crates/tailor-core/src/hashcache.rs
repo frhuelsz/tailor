@@ -152,6 +152,11 @@ fn cache_entry_path(cache_dir: &Path, abs_path: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    use std::{
+        thread,
+        time::{Duration, SystemTime},
+    };
+
     use tempfile::{TempDir, tempdir};
 
     #[test]
@@ -199,7 +204,7 @@ mod tests {
         fs::write(&file, b"before").unwrap();
         let before = hash_file_cached(&file, Some(cache.path())).unwrap();
         // Rewrite with new content and a bumped mtime so the (size, mtime) key differs.
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(10));
         fs::write(&file, b"different-length-content").unwrap();
         filetime_bump(&file);
         let after = hash_file_cached(&file, Some(cache.path())).unwrap();
@@ -208,7 +213,7 @@ mod tests {
 
     fn filetime_bump(path: &Path) {
         // Touch mtime to now+1s so the cache key changes deterministically in the test.
-        let now = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
+        let now = SystemTime::now() + Duration::from_secs(1);
         let f = File::options().write(true).open(path).unwrap();
         f.set_modified(now).unwrap();
     }

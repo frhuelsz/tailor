@@ -104,16 +104,18 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::sync::Arc;
 
     use indexmap::IndexMap;
     use serde_yaml_ng::Value;
+
     use tailor_config::{
         Arch, BaseImageCatalogue, BaseSource, ImageDefinition, OutputArtifactsPolicy, OutputFormat,
         OutputSpec,
     };
 
-    use super::*;
     use crate::domain::{CellSlug, Target};
 
     fn cell(slug: &str, axes: &[(&str, &str)]) -> Cell {

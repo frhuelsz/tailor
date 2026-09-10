@@ -10,7 +10,11 @@
 //! (`meta/docs/2026-06-29-signing.md` §11, S1-remainder). Until it lands, `tailor` refuses a signed build rather
 //! than silently emit an unsigned image.
 
-use std::{io::Read as _, path::Path};
+use std::{
+    fmt, fs,
+    io::{self, Read as _},
+    path::Path,
+};
 
 use tailor_config::{SigningBackend, SigningProfile};
 
@@ -42,8 +46,8 @@ pub enum SignError {
     Execution { detail: String },
 }
 
-impl std::fmt::Display for SignError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for SignError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SignError::Preflight { missing } => {
                 write!(
@@ -106,8 +110,8 @@ fn check_pem(path: Option<&Path>, label: &str, base_dir: &Path) -> Result<(), St
     let path = path.ok_or_else(|| format!("`{label}` path is not set"))?;
     let resolved = base_dir.join(path);
     let unreadable =
-        |err: std::io::Error| format!("cannot read `{label}` `{}`: {err}", resolved.display());
-    let file = std::fs::File::open(&resolved).map_err(unreadable)?;
+        |err: io::Error| format!("cannot read `{label}` `{}`: {err}", resolved.display());
+    let file = fs::File::open(&resolved).map_err(unreadable)?;
     let mut head = Vec::new();
     file.take(PEM_PROBE_BYTES)
         .read_to_end(&mut head)
@@ -158,10 +162,11 @@ pub fn preflight(
 mod tests {
     use super::*;
 
-    use std::fs;
+    use std::{fs, path::PathBuf};
+
+    use tempfile::tempdir;
 
     use tailor_config::SigningProfile;
-    use tempfile::tempdir;
 
     fn profile(backend: SigningBackend) -> SigningProfile {
         SigningProfile {
@@ -216,8 +221,8 @@ mod tests {
         )
         .unwrap();
         let mut keypair = profile(SigningBackend::Keypair);
-        keypair.key = Some(std::path::PathBuf::from("./keys/db.key"));
-        keypair.cert = Some(std::path::PathBuf::from("./keys/db.crt"));
+        keypair.key = Some(PathBuf::from("./keys/db.key"));
+        keypair.cert = Some(PathBuf::from("./keys/db.crt"));
         // Relative paths resolve against base_dir, not the process CWD.
         assert!(preflight_profile(&keypair, dir.path()).is_empty());
     }

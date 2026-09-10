@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{io, path::Path, pin::Pin};
 
 use bollard::{
     API_DEFAULT_VERSION, Docker,
@@ -26,10 +26,7 @@ use tailor_core::{
 
 use crate::ic_log::{self, IcCapture};
 
-use super::connection::{
-    ConnectionPlan, Endpoint, EngineMatch, PreflightError, Resolution, detect_engine,
-    mismatch_warning, preflight_message, reconcile,
-};
+use super::connection::{self, ConnectionPlan, Endpoint, EngineMatch, PreflightError, Resolution};
 
 const ATTACH_LOGS: bool = true;
 const WAIT_CONDITION_NOT_RUNNING: &str = "not-running";
@@ -81,7 +78,7 @@ impl BollardRuntime {
             }
         };
         connected.map(|docker| Self { docker }).map_err(|err| {
-            ExecError::Runtime(preflight_message(
+            ExecError::Runtime(connection::preflight_message(
                 classify(&err),
                 declared,
                 &endpoint.label(),
@@ -115,7 +112,11 @@ impl BollardRuntime {
     /// the declared engine disagrees with the one the endpoint actually reports (§5).
     async fn verify(&self, declared: Engine, label: &str) -> Result<(), ExecError> {
         let version = self.docker.version().await.map_err(|err| {
-            ExecError::Runtime(preflight_message(classify(&err), declared, label))
+            ExecError::Runtime(connection::preflight_message(
+                classify(&err),
+                declared,
+                label,
+            ))
         })?;
         let names: Vec<&str> = version
             .components
@@ -127,9 +128,12 @@ impl BollardRuntime {
             .platform
             .as_ref()
             .map(|platform| platform.name.as_str());
-        let outcome = reconcile(declared, detect_engine(names.iter().copied(), platform));
+        let outcome = connection::reconcile(
+            declared,
+            connection::detect_engine(names.iter().copied(), platform),
+        );
         if let EngineMatch::Mismatch { declared, actual } = outcome {
-            warn!("{}", mismatch_warning(declared, actual, label));
+            warn!("{}", connection::mismatch_warning(declared, actual, label));
         }
         debug!(engine = %outcome.effective(), endpoint = label, "engine preflight ok");
         Ok(())
@@ -271,7 +275,7 @@ impl ContainerRuntime for BollardRuntime {
         let stream = self
             .docker
             .export_container(&name)
-            .map_err(|err| std::io::Error::other(err.to_string()));
+            .map_err(|err| io::Error::other(err.to_string()));
         let reader = StreamReader::new(stream);
         let dest = dest_dir.to_path_buf();
         let unpack = tokio::task::spawn_blocking(move || {
@@ -372,9 +376,9 @@ fn classify(err: &BollardError) -> PreflightError {
     match err {
         BollardError::SocketNotFoundError(_) => PreflightError::SocketMissing,
         BollardError::IOError { err } => match err.kind() {
-            std::io::ErrorKind::NotFound => PreflightError::SocketMissing,
-            std::io::ErrorKind::ConnectionRefused => PreflightError::ConnectionRefused,
-            std::io::ErrorKind::PermissionDenied => PreflightError::PermissionDenied,
+            io::ErrorKind::NotFound => PreflightError::SocketMissing,
+            io::ErrorKind::ConnectionRefused => PreflightError::ConnectionRefused,
+            io::ErrorKind::PermissionDenied => PreflightError::PermissionDenied,
             _ => PreflightError::Unreachable,
         },
         BollardError::DockerResponseServerError { status_code, .. }
@@ -404,7 +408,7 @@ async fn wait_for_container(docker: Docker, name: String) -> Result<i64, ExecErr
 }
 
 fn stream_logs(
-    mut output: std::pin::Pin<
+    mut output: Pin<
         Box<
             dyn futures_util::Stream<Item = Result<bollard::container::LogOutput, BollardError>>
                 + Send,
@@ -473,8 +477,7 @@ fn map_runtime_error(err: &BollardError) -> ExecError {
 
 #[cfg(test)]
 mod tests {
-    use super::{PreflightError, classify, parse_daemon_info};
-    use bollard::errors::Error as BollardError;
+    use super::*;
 
     #[test]
     fn parse_daemon_info_detects_docker_rootless_and_userns() {
@@ -510,19 +513,19 @@ mod tests {
         );
         assert_eq!(
             classify(&BollardError::IOError {
-                err: std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
+                err: io::Error::from(io::ErrorKind::ConnectionRefused),
             }),
             PreflightError::ConnectionRefused
         );
         assert_eq!(
             classify(&BollardError::IOError {
-                err: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+                err: io::Error::from(io::ErrorKind::PermissionDenied),
             }),
             PreflightError::PermissionDenied
         );
         assert_eq!(
             classify(&BollardError::IOError {
-                err: std::io::Error::from(std::io::ErrorKind::NotFound),
+                err: io::Error::from(io::ErrorKind::NotFound),
             }),
             PreflightError::SocketMissing
         );

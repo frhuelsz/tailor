@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use serde_yaml_ng::Value;
 use tailor_config::{
     Arch, BaseSource, Compression, OutputFormat, ToolConfig, ToolchainEntry, ToolchainRef,
     ToolsDirSourceInline, ToolsDirSourceRef, cell_slug, render_image,
@@ -396,7 +397,7 @@ fn validate_tools_dir_preview(target: &Target) -> Result<(), CoreError> {
     let Some(config) = &target.definition.config else {
         return Ok(());
     };
-    if !matches!(config, serde_yaml_ng::Value::Mapping(_)) {
+    if !matches!(config, Value::Mapping(_)) {
         return Ok(());
     }
     if tools_dir_preview_enabled(config) {
@@ -408,10 +409,10 @@ fn validate_tools_dir_preview(target: &Target) -> Result<(), CoreError> {
     }
 }
 
-fn tools_dir_preview_enabled(config: &serde_yaml_ng::Value) -> bool {
+fn tools_dir_preview_enabled(config: &Value) -> bool {
     config
         .get(PREVIEW_FEATURES_KEY)
-        .and_then(serde_yaml_ng::Value::as_sequence)
+        .and_then(Value::as_sequence)
         .is_some_and(|features| {
             features
                 .iter()
@@ -831,11 +832,14 @@ pub fn published_artifact_name(
 mod tests {
     use super::*;
 
+    use std::fs;
+
     use indoc::indoc;
+    use tempfile::TempDir;
+
     use tailor_config::{
         BaseImageCatalogue, BaseImageSlot, OutputArtifactsPolicy, OutputSpec, load_image,
     };
-    use tempfile::TempDir;
 
     use crate::testing::{FakeExecutor, FakeResolver};
 
@@ -864,8 +868,8 @@ mod tests {
     /// Write `body` to `<root>/<rel>`, creating parent directories as needed.
     fn write(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     /// A small two-axis matrix target (edition[2] × arch[2] = 4 cells) backed by a tempdir. The

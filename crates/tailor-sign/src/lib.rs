@@ -8,17 +8,19 @@
 //! re-inject the now-signed files.
 
 use std::{
-    fs,
+    env, fs,
+    io::Error as IoError,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
 };
 
 use serde::Deserialize;
-use tailor_config::{SigningBackend, SigningProfile};
-use tailor_core::{MissingPrerequisite, SignError, Signer, SigningPlan, SigningResult};
 use tempfile::TempDir;
 use tracing::debug;
+
+use tailor_config::{SigningBackend, SigningProfile};
+use tailor_core::{MissingPrerequisite, SignError, Signer, SigningPlan, SigningResult};
 
 /// The `openssl` binary — CA/leaf minting and verity-hash CMS signing.
 const OPENSSL: &str = "openssl";
@@ -451,8 +453,8 @@ fn sign_verity(file: &Path, key: &Path, cert: &Path) -> Result<(), SignError> {
 
 /// Is `name` an executable file on `PATH`? A cheap, side-effect-free presence probe for preflight.
 fn tool_on_path(name: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
+    env::var_os("PATH")
+        .is_some_and(|paths| env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
 }
 
 /// Run an external tool, mapping a spawn failure or non-zero exit to [`SignError::Execution`] with
@@ -500,7 +502,7 @@ fn lossy(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn io_err(context: &str, path: &Path, source: &std::io::Error) -> SignError {
+fn io_err(context: &str, path: &Path, source: &IoError) -> SignError {
     SignError::Execution {
         detail: format!("{context} `{}`: {source}", path.display()),
     }

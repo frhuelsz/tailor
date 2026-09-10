@@ -34,13 +34,15 @@ fn parse_yaml<T: DeserializeOwned>(path: &Path) -> Result<T, ConfigError> {
 mod tests {
     use super::*;
 
+    use std::path::{Path, PathBuf};
+
     use indoc::indoc;
     use tempfile::TempDir;
 
     use crate::matrix;
 
     /// Write `body` to `<tmp>/<name>` and return the path.
-    fn write(tmp: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
+    fn write(tmp: &TempDir, name: &str, body: &str) -> PathBuf {
         let path = tmp.path().join(name);
         fs::write(&path, body).unwrap();
         path
@@ -255,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_reported_as_a_read_error() {
-        let err = load_image(std::path::Path::new("/no/such/dir/image.yaml")).unwrap_err();
+        let err = load_image(Path::new("/no/such/dir/image.yaml")).unwrap_err();
         assert!(matches!(err, ConfigError::Read { .. }), "got {err:?}");
     }
 }

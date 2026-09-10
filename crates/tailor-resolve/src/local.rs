@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use tailor_core::{ResolveError, ResolvedBase, hashcache};
+use tokio::task;
 use tracing::debug;
+
+use tailor_core::{ResolveError, ResolvedBase, hashcache};
 
 pub(crate) async fn resolve(
     path: impl AsRef<Path>,
@@ -9,7 +11,7 @@ pub(crate) async fn resolve(
 ) -> Result<ResolvedBase, ResolveError> {
     let path = path.as_ref().to_path_buf();
     let cache_dir = cache_dir.map(Path::to_path_buf);
-    tokio::task::spawn_blocking(move || resolve_blocking(&path, cache_dir.as_deref()))
+    task::spawn_blocking(move || resolve_blocking(&path, cache_dir.as_deref()))
         .await
         .map_err(|source| ResolveError::Other(format!("local base hash task failed: {source}")))?
 }

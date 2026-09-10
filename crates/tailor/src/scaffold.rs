@@ -263,6 +263,6 @@ base:
     #[test]
     fn add_axis_rejects_a_duplicate() {
         let image = "name: img\nmatrix:\n  variant: [a]\nbase:\n  path: ./b.img\n";
-        assert!(add_axis(image, "variant", "TODO").is_err());
+        add_axis(image, "variant", "TODO").unwrap_err();
     }
 }

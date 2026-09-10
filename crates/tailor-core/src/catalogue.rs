@@ -193,10 +193,15 @@ fn select_slots<'a>(
 mod tests {
     use super::*;
 
-    use std::{path::PathBuf, sync::Mutex};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
+
+    use tempfile::TempDir;
 
     use tailor_config::{Arch, BaseImageSlot, BaseImageSource, OciBase};
-    use tempfile::TempDir;
 
     use crate::error::ResolveError;
     use crate::ports::FetchedBase;
@@ -212,9 +217,9 @@ mod tests {
             &self,
             _source: &BaseImageSource,
             _arch: Arch,
-            dest: &std::path::Path,
+            dest: &Path,
         ) -> Result<FetchedBase, ResolveError> {
-            std::fs::write(dest, b"stub").unwrap();
+            fs::write(dest, b"stub").unwrap();
             self.filled.lock().unwrap().push(dest.to_path_buf());
             Ok(FetchedBase {
                 source_digest: "sha256:stub".to_owned(),
@@ -276,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn download_skips_present_unless_forced() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("baremetal.vhdx"), b"old").unwrap();
+        fs::write(dir.path().join("baremetal.vhdx"), b"old").unwrap();
         let reports = download(
             &catalogue(),
             dir.path(),
@@ -326,14 +331,14 @@ mod tests {
             matches!(err, CoreError::BaseImageMissing { .. }),
             "got {err:?}"
         );
-        std::fs::write(dir.path().join("baremetal.vhdx"), b"x").unwrap();
+        fs::write(dir.path().join("baremetal.vhdx"), b"x").unwrap();
         verify(&catalogue(), dir.path(), &names).unwrap();
     }
 
     #[test]
     fn summarize_reports_arch_source_and_presence() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("baremetal.vhdx"), b"x").unwrap();
+        fs::write(dir.path().join("baremetal.vhdx"), b"x").unwrap();
         let summary = summarize(&catalogue(), dir.path());
         assert_eq!(summary.len(), 2);
         let baremetal = &summary[0];
