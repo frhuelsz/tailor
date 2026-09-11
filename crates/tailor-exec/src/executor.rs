@@ -770,8 +770,7 @@ mod tests {
 
     fn dry_run_cell() -> Cell {
         let definition: ImageDefinition =
-            serde_yaml_ng::from_str("name: sample\noperation: customize\ninjectFiles: false\n")
-                .unwrap();
+            serde_yaml_ng::from_str("name: sample\noperation: customize\n").unwrap();
         Cell {
             target: Arc::new(Target {
                 definition,

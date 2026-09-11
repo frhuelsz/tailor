@@ -1286,7 +1286,6 @@ fn convert_cell(input: &Path, dir: &Path, arch: Arch, format: OutputFormat, slug
         operation: Some(Operation::Convert),
         output_artifacts: None,
         signing: None,
-        inject_files: None,
         extra_dependencies: Vec::new(),
         depends_on: Vec::new(),
         inputs: Vec::new(),

@@ -153,7 +153,6 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                     base: &resolved,
                     ic_config: &cell.ic_config,
                     operation: target.definition.operation.unwrap_or_default(),
-                    inject_files: target.definition.inject_files.unwrap_or(false),
                     tools_dir_digest: resolved_tools_dir.map(|source| source.digest.as_str()),
                     extra_dependency_hashes: &extra_dependency_hashes,
                     rpm_source_hashes: &rpm_source_hashes,

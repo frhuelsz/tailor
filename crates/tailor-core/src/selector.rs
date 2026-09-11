@@ -134,7 +134,6 @@ mod tests {
             operation: None,
             output_artifacts: None,
             signing: None,
-            inject_files: None,
             extra_dependencies: vec![],
             depends_on: vec![],
             inputs: vec![],

@@ -535,8 +535,6 @@ pub struct ImageDefinition {
     #[serde(default)]
     pub signing: Option<SigningRef>,
     #[serde(default)]
-    pub inject_files: Option<bool>,
-    #[serde(default)]
     pub extra_dependencies: Vec<PathBuf>,
     /// The named inputs this image consumes (`meta/docs/2026-09-09-inter-image-dependencies.md` §2.1).
     /// Each binds a `name` to a typed source (v1: an `image` — another workspace image's output),

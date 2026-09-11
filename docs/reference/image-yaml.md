@@ -17,7 +17,6 @@ An image definition lives in an `image.yaml`. The top level belongs to tailor. T
 | `rpmSources` | path list | no | Each path is a directory of RPMs or a `.repo` file; passed as IC `--rpm-source`. |
 | `operation` | `customize` or `convert` | no | Default: `customize`. |
 | `signing` | `true` or profile id | no | Opt in to the signed-image pipeline. `true` ⇒ the workspace `signing.default` profile; a string ⇒ that named profile; omitted ⇒ unsigned. See [Sign an image](../how-to/sign-an-image.md). |
-| `injectFiles` | boolean | no | Inert placeholder, superseded by `signing:`. Currently a no-op; do not rely on it. |
 | `extraDependencies` | path list | no | Extra files/directories to hash for incremental checks; use for IC-config-referenced assets. |
 | `dependsOn` | string list | no | Order-only build dependencies on other workspace images. See [Inter-image dependencies](#inter-image-dependencies). |
 | `inputs` | list of `{name, image, output?, cell?}` | no | Named producer artifacts embedded in `config:` via `${inputs.<name>}`. See [Embedding an artifact with `inputs:`](#embedding-an-artifact-with-inputs). |

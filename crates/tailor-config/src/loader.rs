@@ -118,6 +118,25 @@ mod tests {
     }
 
     #[test]
+    fn the_removed_inject_files_field_is_rejected() {
+        // `injectFiles` was an inert field; it is gone, so `deny_unknown_fields` now rejects it
+        // rather than silently accepting a no-op.
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "image.yaml",
+            indoc! {"
+                name: sample
+                injectFiles: true
+                base:
+                  path: ./b.img
+            "},
+        );
+        let err = load_image(&path).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "got {err:?}");
+    }
+
+    #[test]
     fn duplicate_toolchain_names_are_rejected() {
         let tmp = TempDir::new().unwrap();
         let path = write(

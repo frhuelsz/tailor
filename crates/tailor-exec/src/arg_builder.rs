@@ -1303,7 +1303,6 @@ mod tests {
             r"
 name: sample
 operation: {operation}
-injectFiles: false
 "
         ))
         .unwrap()

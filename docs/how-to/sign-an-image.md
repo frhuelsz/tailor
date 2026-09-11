@@ -102,4 +102,3 @@ tailor build --dry-run appliance
   into an image.
 - `local-test-ca` mints fresh keys each build, so its signed outputs are intentionally not
   reproducible; use `keypair` (a fixed cert identity) for reproducible production builds.
-- The legacy `injectFiles` boolean is an inert placeholder superseded by `signing:`; do not use it.

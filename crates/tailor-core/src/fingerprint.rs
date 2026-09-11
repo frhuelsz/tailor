@@ -26,7 +26,6 @@ pub struct FingerprintInputs<'a> {
     pub base: &'a ResolvedBase,
     pub ic_config: &'a Value,
     pub operation: Operation,
-    pub inject_files: bool,
     pub tools_dir_digest: Option<&'a str>,
     /// Sorted per-file hashes of `extraDependencies` files (XXH3-128 — see `deps.rs`).
     pub extra_dependency_hashes: &'a [[u8; 16]],
@@ -75,7 +74,6 @@ pub fn fingerprint(inputs: &FingerprintInputs<'_>) -> Fingerprint {
     }
     field(&mut hasher, b"config", &canonical_config(inputs.ic_config));
     field(&mut hasher, b"operation", operation_tag(inputs.operation));
-    field(&mut hasher, b"inject", &[u8::from(inputs.inject_files)]);
     if let Some(digest) = inputs.tools_dir_digest {
         field(&mut hasher, b"tools-dir.digest", digest.as_bytes());
     }
@@ -149,7 +147,6 @@ mod tests {
             base,
             ic_config: config,
             operation: Operation::Customize,
-            inject_files: false,
             tools_dir_digest: None,
             extra_dependency_hashes: &[],
             rpm_source_hashes: &[],
