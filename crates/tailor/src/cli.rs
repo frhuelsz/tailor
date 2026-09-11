@@ -148,9 +148,9 @@ pub(crate) enum Command {
     Clean(ImagesArgs),
     /// Resolve digests/hashes without building.
     Resolve(ImagesArgs),
-    /// Write `tailor.lock` without building.
+    /// Freeze `tailor.lock`: pin any new inputs, keeping already-locked digests unchanged.
     Lock,
-    /// Re-resolve and rewrite `tailor.lock`.
+    /// Re-resolve every input to its latest digest and rewrite `tailor.lock`.
     Update,
     /// Validate image definitions (renders every cell) without building.
     Validate(ImagesArgs),

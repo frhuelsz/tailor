@@ -157,7 +157,8 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             None,
         ),
         Command::Resolve(args) => resolve_verb(&workspace, &args.images, &engine).await,
-        Command::Lock | Command::Update => lock(&workspace, &engine).await,
+        Command::Lock => lock(&workspace, &engine, false).await,
+        Command::Update => lock(&workspace, &engine, true).await,
         Command::Build(args) => build(&workspace, args, &engine, &logging).await,
         Command::Clean(args) => {
             clean(
@@ -716,19 +717,40 @@ async fn resolve_verb(
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, names)?;
     let runtime = establish_runtime(engine, &tool).await?;
-    let lock = build_lock(&tool, &targets, &runtime, &OciResolver::new()).await?;
+    let lock = build_lock(
+        &tool,
+        &targets,
+        &runtime,
+        &OciResolver::new(),
+        &Lockfile::default(),
+    )
+    .await?;
     let yaml = serde_yaml_ng::to_string(&lock)
         .map_err(|e| AppError::Message(format!("serialize lock: {e}")))?;
     print!("{yaml}");
     Ok(())
 }
 
-async fn lock(workspace: &Workspace, engine: &EngineOverride) -> Result<(), AppError> {
+/// Resolve and write `tailor.lock`. When `refresh` is false (`tailor lock`), inputs already pinned in
+/// the current lock keep their digests — only new inputs are resolved, so the freeze is idempotent.
+/// When `refresh` is true (`tailor update`), every input is re-resolved to the latest digest.
+async fn lock(
+    workspace: &Workspace,
+    engine: &EngineOverride,
+    refresh: bool,
+) -> Result<(), AppError> {
     let tool = tool_config(workspace);
     let targets = build_targets(workspace, &[])?;
     let runtime = establish_runtime(engine, &tool).await?;
-    let lock = build_lock(&tool, &targets, &runtime, &OciResolver::new()).await?;
     let path = workspace.root.join(LOCK_FILE);
+    // `lock` reuses the existing pins (freeze current); `update` starts from an empty lock so
+    // everything re-resolves to the latest digest.
+    let base_lock = if refresh {
+        Lockfile::default()
+    } else {
+        Lockfile::read(&path)?
+    };
+    let lock = build_lock(&tool, &targets, &runtime, &OciResolver::new(), &base_lock).await?;
     lock.write(&path)?;
     println!("wrote {}", path.display());
     Ok(())
@@ -1002,12 +1024,11 @@ async fn build_lock(
     targets: &[Arc<Target>],
     runtime: &impl ContainerRuntime,
     resolver: &OciResolver,
+    base_lock: &Lockfile,
 ) -> Result<Lockfile, AppError> {
     let mut lock = Lockfile::default();
     for entry in &tool.toolchains.entries {
-        let image =
-            resolve_toolchain_ref(&entry.name, entry, runtime, resolver, &Lockfile::default())
-                .await?;
+        let image = resolve_toolchain_ref(&entry.name, entry, runtime, resolver, base_lock).await?;
         if let Some(digest) = image.lock_digest {
             lock.toolchains.insert(
                 entry.name.clone(),
@@ -1022,14 +1043,9 @@ async fn build_lock(
     }
     for source in &tool.tools_dir_sources {
         let inline = source.inline();
-        let image = resolve_tools_dir_ref(
-            Some(&source.name),
-            &inline,
-            runtime,
-            resolver,
-            &Lockfile::default(),
-        )
-        .await?;
+        let image =
+            resolve_tools_dir_ref(Some(&source.name), &inline, runtime, resolver, base_lock)
+                .await?;
         if let Some(digest) = image.lock_digest {
             lock.tools_dirs.insert(
                 source.name.clone(),
@@ -1057,6 +1073,12 @@ async fn build_lock(
                     digest,
                 } = resolver.resolve(&cell.base, arch, &target.dir).await?
                 {
+                    // Freeze: keep an already-pinned digest for this base rather than the freshly
+                    // resolved one, so `tailor lock` never drifts a moving tag (`tailor update`
+                    // passes an empty base lock, so this always takes the fresh digest).
+                    let digest = base_lock
+                        .base_digest(&reference, &platform)
+                        .map_or(digest, ToOwned::to_owned);
                     lock.upsert_base(LockedBase {
                         reference,
                         platform,
@@ -2694,9 +2716,15 @@ toolsDirSources:
         )
         .unwrap();
 
-        let lock = build_lock(&tool, &[], &runtime, &OciResolver::new())
-            .await
-            .unwrap();
+        let lock = build_lock(
+            &tool,
+            &[],
+            &runtime,
+            &OciResolver::new(),
+            &Lockfile::default(),
+        )
+        .await
+        .unwrap();
 
         assert!(lock.toolchains.is_empty());
         assert!(lock.tools_dirs.is_empty());
