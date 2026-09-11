@@ -1574,10 +1574,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-keep-a-fork-for-experimentation" class="md-nav__link">
+  <a href="#5-documentation-website" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Keep a fork for experimentation
+        5. Documentation website
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-keep-a-fork-for-experimentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Keep a fork for experimentation
       
     </span>
   </a>
@@ -1694,7 +1705,34 @@ fork's repo to the host repo. Update the <code>repo</code> and the identity rege
 </code></pre></div>
 <p>Artifacts released before the move remain verifiable against the old identity;
 document both during the transition.</p>
-<h2 id="5-keep-a-fork-for-experimentation">5. Keep a fork for experimentation<a class="headerlink" href="#5-keep-a-fork-for-experimentation" title="Permanent link">&para;</a></h2>
+<h2 id="5-documentation-website">5. Documentation website<a class="headerlink" href="#5-documentation-website" title="Permanent link">&para;</a></h2>
+<p>The docs site (MkDocs Material + <code>mike</code>, published to GitHub Pages) is <strong>more
+tied to a repository than the code is</strong>, because GitHub Pages is one site per
+repository: <code>mike</code> deploys to that repo's <code>gh-pages</code> branch, and the site URL is
+<code>https://&lt;owner&gt;.github.io/&lt;repo&gt;/</code>. A host monorepo usually already owns its
+Pages, so tailor's versioned docs cannot simply move into it. Three options, in
+order of preference:</p>
+<ol>
+<li><strong>Host the docs on this fork (recommended).</strong> Keep the <code>docs.yml</code> workflow and
+   the Pages site on the fork (<code>https://&lt;you&gt;.github.io/tailor/</code>). The monorepo
+   holds the source-of-truth Markdown under <code>tailor/docs/</code>; sync it to the fork,
+   which renders and publishes the site. Zero new infrastructure, and the
+   existing versioned-docs setup keeps working. To publish a release's docs
+   version, tag the fork <code>tailor-v&lt;x.y.z&gt;</code> (or run the docs workflow manually
+   from the synced commit).</li>
+<li><strong>Dedicated docs repo / org Pages.</strong> Publish to a separate <code>tailor-docs</code> (or
+   <code>&lt;org&gt;.github.io</code>) repository. The docs workflow builds the site and pushes it
+   there with a deploy key or cross-repo Pages deploy. More setup, but keeps docs
+   independent of both the fork and the monorepo.</li>
+<li><strong>Sub-path of the monorepo's Pages.</strong> If the monorepo publishes its own Pages,
+   integrate tailor's docs as a subdirectory of that site. This means adopting the
+   monorepo's docs pipeline (its generator, its versioning) — <code>mike</code>'s
+   per-project versioning usually will not fit, so treat this as a rewrite.</li>
+</ol>
+<p>Whichever you pick, the docs workflow already uses the component-scoped
+<code>tailor-v*</code> tag (not <code>v*</code>), and <code>mkdocs.yml</code>'s <code>site_url</code>, <code>repo_url</code>, and
+<code>edit_uri</code> point at whichever repo hosts the site — update them if you move it.</p>
+<h2 id="6-keep-a-fork-for-experimentation">6. Keep a fork for experimentation<a class="headerlink" href="#6-keep-a-fork-for-experimentation" title="Permanent link">&para;</a></h2>
 <p>You can keep your original repository as an upstream experimentation fork:</p>
 <ul>
 <li><strong>One canonical release origin.</strong> Cut official <code>tailor-v&lt;x.y.z&gt;</code> releases from
