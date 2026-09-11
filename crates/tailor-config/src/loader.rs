@@ -137,6 +137,50 @@ mod tests {
     }
 
     #[test]
+    fn preview_features_parse_and_gate() {
+        use crate::PreviewFeature;
+
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                previewFeatures:
+                  - signing
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+            "},
+        );
+        let tc = load_tool_config(&path).unwrap();
+        assert!(tc.preview_enabled(PreviewFeature::Signing));
+    }
+
+    #[test]
+    fn an_unknown_preview_feature_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 1
+                previewFeatures:
+                  - teleportation
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+            "},
+        );
+        let err = load_tool_config(&path).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "got {err:?}");
+    }
+
+    #[test]
     fn duplicate_toolchain_names_are_rejected() {
         let tmp = TempDir::new().unwrap();
         let path = write(

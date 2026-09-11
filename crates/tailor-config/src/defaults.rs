@@ -44,6 +44,7 @@ pub fn default_tool_config() -> ToolConfig {
     }];
     ToolConfig {
         schema_version: 1,
+        preview_features: Vec::new(),
         toolchains: Toolchains {
             default: DEFAULT_TOOLCHAIN_ID.to_owned(),
             entries,

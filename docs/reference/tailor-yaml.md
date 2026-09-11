@@ -21,7 +21,8 @@ defaults:
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `schemaVersion` | integer | yes | Current value: `1`. |
+| `schemaVersion` | integer | yes | Current value: `1`. tailor rejects a version newer than it supports. |
+| `previewFeatures` | list of strings | no | Opt in to features not yet part of the stable 1.0 contract. Currently: `signing`. Using a gated feature (e.g. `signing:`) without listing it here is a hard error. |
 | `toolchains.default` | string | yes | Default toolchain name for images that omit `toolchain:`. |
 | `toolchains.entries` | list of `{name, container, version?, tag?, pull?}` | yes | Named toolchain definitions. Each `name` must be unique. `tag` defaults to `version`, else `latest`; `pull` defaults to `missing`. |
 | `toolsDirSources` | list of `{name, container, tag?, pull?}` | no | Named tools-dir sources. Each `name` must be unique. `tag` defaults to `latest`; `pull` defaults to `missing`. Images opt in with `toolsDir.source`. |

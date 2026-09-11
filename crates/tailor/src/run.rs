@@ -15,9 +15,9 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use tailor_config::{
     Arch, BaseImageCatalogue, BaseSource, ImageDefinition, Operation, OutputArtifactsPolicy,
-    OutputFormat, OutputSpec, PullPolicy, RenderedCell, Runtime, ToolConfig, ToolchainEntry,
-    ToolsDirSourceInline, Workspace, discover, expand, find_manifest, merge_plan, render_image,
-    write_golden,
+    OutputFormat, OutputSpec, PreviewFeature, PullPolicy, RenderedCell, Runtime, ToolConfig,
+    ToolchainEntry, ToolsDirSourceInline, Workspace, discover, expand, find_manifest, merge_plan,
+    render_image, write_golden,
 };
 use tailor_core::{
     BaseResolver, BuildOptions, BuildProgress, BuildSelection, Cell, CellSlug, ContainerRuntime,
@@ -296,10 +296,9 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
     }
     // Surface signing prerequisites non-fatally (meta/docs/2026-06-29-signing.md §5.1) so they are discoverable
     // without starting a real build.
-    report_signing(&build_signers(
-        &signing_requirements(&targets, tool.signing.as_ref())?,
-        &workspace.root,
-    ));
+    let signing = signing_requirements(&targets, tool.signing.as_ref())?;
+    ensure_signing_preview(&tool, &signing)?;
+    report_signing(&build_signers(&signing, &workspace.root));
     Ok(())
 }
 
@@ -1399,6 +1398,7 @@ async fn build(
         env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?,
     );
     let signing = signing_requirements(&targets, tool.signing.as_ref())?;
+    ensure_signing_preview(&tool, &signing)?;
     // Build one signer per required profile (a shared CA per build); `signer_for` resolves a cell to
     // its signer via the image name (meta/docs/2026-06-29-signing.md §6). Empty when nothing signs.
     let signers = build_signers(&signing, &workspace.root);
@@ -1826,6 +1826,28 @@ fn apply_build_dir_base_override(
     tool.runtime
         .get_or_insert_with(Runtime::default)
         .build_dir_base = Some(tailor_config::absolutize(base, &cwd));
+    Ok(())
+}
+
+/// Gate the signing preview feature: signing is not yet part of the stable contract, so a workspace
+/// that uses `signing:` must opt in with `previewFeatures: [signing]` in `tailor.yaml`. A signed
+/// build without the opt-in is a hard error (`meta/docs/2026-09-10-tailor-1.0-implementation-plan.md`).
+fn ensure_signing_preview(
+    tool: &ToolConfig,
+    signing: &[SigningRequirement<'_>],
+) -> Result<(), AppError> {
+    if !signing.is_empty() && !tool.preview_enabled(PreviewFeature::Signing) {
+        let images = signing
+            .iter()
+            .flat_map(|requirement| requirement.images.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::Message(format!(
+            "signing is a preview feature, but it is not enabled: {images} request signing. Add \
+             `previewFeatures:\n  - signing` to tailor.yaml to opt in."
+        )));
+    }
     Ok(())
 }
 

@@ -11,7 +11,21 @@ tailor can produce **Secure Boot–signed** images by orchestrating Image Custom
 > produce a silently-unsigned image. `tailor validate` and `tailor build --dry-run` report signing
 > readiness without failing.
 
-## 1. Declare signing profiles
+> **Preview feature.** Signing is not yet part of the stable 1.0 contract, so it is gated behind a
+> preview opt-in. Enable it by adding `previewFeatures: [signing]` to `tailor.yaml`; a signed
+> `tailor build`/`validate` without the opt-in stops with a clear error.
+
+## 1. Enable the signing preview feature
+
+Signing is gated behind a preview opt-in. Add it to `tailor.yaml`:
+
+```yaml
+# tailor.yaml
+previewFeatures:
+  - signing
+```
+
+## 2. Declare signing profiles
 
 Add a `signing:` block to `tailor.yaml`. A profile names a key-source `backend` plus its settings:
 
@@ -39,7 +53,7 @@ signing:
 | `keypair` | `key`, `cert` | Bring your own Secure Boot key + certificate (PEM). |
 | `azure-key-vault` | `vault`, `certificate` | Remote signing (future milestone). |
 
-## 2. Opt an image in
+## 3. Opt an image in
 
 Set `signing:` on the image — `true` for the workspace default profile, or a profile id. The image
 still authors its own `output.artifacts` (that is what tells IC which boot artifacts to extract):
@@ -58,7 +72,7 @@ config:
 Omit `signing:` (or set `signing: false`) for an unsigned image — unlike `toolchain:`, the workspace
 default is **not** auto-applied, so signing is always an explicit choice.
 
-## 3. Check readiness (fail fast)
+## 4. Check readiness (fail fast)
 
 Before any build, tailor verifies every signing prerequisite — once, up front — so a signed build
 never customizes N cells only to discover a key is missing. Report readiness without building:
@@ -85,7 +99,7 @@ What the preflight checks per backend:
 - **`azure-key-vault`** — configuration completeness (a live credential probe arrives with the remote
   backend milestone).
 
-## 4. Dry-run
+## 5. Dry-run
 
 `tailor build --dry-run` never contacts an engine and reports the signing plan:
 

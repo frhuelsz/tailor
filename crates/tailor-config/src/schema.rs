@@ -12,6 +12,7 @@ use crate::{
     error::ConfigError,
     types::{
         Arch, Compression, LogLevel, Operation, OutputArtifactsPolicy, OutputFormat, ParamValue,
+        PreviewFeature,
     },
 };
 
@@ -28,6 +29,10 @@ pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolConfig {
     pub schema_version: u32,
+    /// Opt-in switches for tailor features that are not yet part of the stable 1.0 contract (e.g.
+    /// `signing`). A gated feature used without being listed here is a hard error.
+    #[serde(default)]
+    pub preview_features: Vec<PreviewFeature>,
     pub toolchains: Toolchains,
     #[serde(default)]
     pub tools_dir_sources: Vec<ToolsDirSource>,
@@ -97,6 +102,12 @@ impl ToolConfig {
             base_images.validate()?;
         }
         Ok(())
+    }
+
+    /// Whether `feature` is opted in via `previewFeatures:` in `tailor.yaml`.
+    #[must_use]
+    pub fn preview_enabled(&self, feature: PreviewFeature) -> bool {
+        self.preview_features.contains(&feature)
     }
 }
 

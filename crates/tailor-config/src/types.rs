@@ -92,6 +92,26 @@ impl Compression {
     }
 }
 
+/// A tailor preview feature — an opt-in switch for functionality that is not yet part of the stable
+/// 1.0 contract. Enabled per workspace via `previewFeatures:` in `tailor.yaml` (mirroring Image
+/// Customizer's own `previewFeatures`). Using a gated feature without listing it here is a hard
+/// error. An unrecognized name is rejected at parse time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PreviewFeature {
+    /// The signed-image pipeline (`signing:` and the `signing` workspace profiles).
+    Signing,
+}
+
+impl PreviewFeature {
+    /// The `previewFeatures:` token that enables this feature.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PreviewFeature::Signing => "signing",
+        }
+    }
+}
+
 impl fmt::Display for Compression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
