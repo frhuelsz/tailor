@@ -11,9 +11,12 @@ on:
         description: "Tag to release (e.g. v0.1.0)"
         required: true
 
-# Releases need write access to upload assets / create the release.
+# Releases need write access to upload assets / create the release, mint OIDC
+# tokens for keyless signing, and publish artifact attestations.
 permissions:
+  attestations: write
   contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
@@ -23,8 +26,58 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  test:
+    name: release gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Verify workspace version matches tag
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_TAG" != v* ]]; then
+            echo "::error::Release tag '$RELEASE_TAG' must start with 'v'."
+            exit 1
+          fi
+          tag_version="${RELEASE_TAG#v}"
+          manifest_version="$(python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          in_workspace_package = False
+          for line in pathlib.Path("Cargo.toml").read_text(encoding="utf-8").splitlines():
+              stripped = line.strip()
+              if stripped.startswith("[") and stripped.endswith("]"):
+                  in_workspace_package = stripped == "[workspace.package]"
+                  continue
+              if in_workspace_package:
+                  match = re.match(r'^version\s*=\s*"([^"]+)"\s*$', stripped)
+                  if match:
+                      print(match.group(1))
+                      break
+          else:
+              sys.exit("workspace.package version not found in Cargo.toml")
+          PY
+          )"
+          if [[ "$manifest_version" != "$tag_version" ]]; then
+            echo "::error::Cargo.toml workspace.package version '$manifest_version' does not match release tag '$RELEASE_TAG' ('$tag_version')."
+            exit 1
+          fi
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - name: Run tests
+        run: cargo test --workspace --locked
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Check formatting
+        run: cargo fmt --all --check
+
   build:
     name: build (${{ matrix.target }})
+    needs: test
     runs-on: ${{ matrix.os }}
     env:
       CC_x86_64_unknown_linux_musl: musl-gcc
@@ -39,7 +92,9 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Install musl toolchain
         run: |
           # The hosted runner ships third-party apt repos (e.g. google-chrome) whose indexes
@@ -48,7 +103,7 @@ jobs:
           # tolerate a partial update and let the install proceed from Ubuntu's own repos.
           sudo apt-get update || true
           sudo apt-get install -y musl-tools
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           target: ${{ matrix.target }}
       - name: Build static binary
@@ -63,7 +118,7 @@ jobs:
           BIN="dist/tailor-${{ matrix.target }}"
           file "$BIN"
           file "$BIN" | grep -qE 'static-pie linked|statically linked'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tailor-${{ matrix.target }}
           path: dist/*
@@ -74,19 +129,58 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
       - name: List artifacts
         run: ls -lR dist
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign release artifacts
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            for suffix in "" ".sha256"; do
+              artifact="dist/tailor-${target}${suffix}"
+              if [[ ! -f "$artifact" ]]; then
+                echo "::error::Missing release artifact: $artifact"
+                exit 1
+              fi
+              cosign sign-blob --yes \
+                --output-signature "${artifact}.sig" \
+                --output-certificate "${artifact}.pem" \
+                --bundle "${artifact}.bundle" \
+                "$artifact"
+            done
+          done
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/tailor-cyclonedx.json
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/tailor-x86_64-unknown-linux-musl
+            dist/tailor-aarch64-unknown-linux-musl
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: ${{ github.event.inputs.tag || github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/tailor-*
+            dist/*

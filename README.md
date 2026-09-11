@@ -126,6 +126,32 @@ sudo install -m 0755 "tailor-${target}" /usr/local/bin/tailor
 tailor --version
 ```
 
+### Verifying releases
+
+Each release binary is published with a checksum, a cosign keyless signature,
+and a GitHub build-provenance attestation.
+
+```bash
+set -euo pipefail
+repo="frhuelsz/tailor"
+target="x86_64-unknown-linux-musl" # or aarch64-unknown-linux-musl
+binary="tailor-${target}"
+issuer="https://token.actions.githubusercontent.com"
+identity="https://github.com/${repo}/.github/workflows/release.yml@refs/tags/v.*"
+
+sha256sum -c "${binary}.sha256"
+cosign verify-blob \
+  --certificate "${binary}.pem" \
+  --signature "${binary}.sig" \
+  --certificate-identity-regexp "${identity}" \
+  --certificate-oidc-issuer "${issuer}" \
+  "${binary}"
+gh attestation verify "${binary}" \
+  --repo "${repo}" \
+  --cert-identity-regexp "${identity}" \
+  --cert-oidc-issuer "${issuer}"
+```
+
 ### From source
 
 The crate is not published to crates.io yet.
