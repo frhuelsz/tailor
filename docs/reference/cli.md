@@ -37,6 +37,11 @@ Append an axis to an image's `matrix:` and create `by-<axis>/`. The image argume
 
 Resolve and run Image Customizer for selected images. Default: all images.
 
+Each positional may be an **image name** or a **cell slug**. A slug (e.g.
+`gizmo_pro_arm64_stable_cosi`) builds exactly that cell of its owning image, so you don't have to
+name the image and pass `--cell` — `tailor build <slug>` is shorthand for
+`tailor build <image> --cell <slug>`. Run `tailor slugs` to list cells.
+
 | Flag | Meaning |
 | --- | --- |
 | `-s`, `--select AXIS=VALUE` | Constrain matrix axes. Repeatable. Comma-separated axis pairs are accepted, for example `-s variant=full,arch=amd64`. |

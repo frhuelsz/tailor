@@ -33,6 +33,13 @@ Build one slug:
 tailor build --cell gizmo_full_amd64_edge_cosi
 ```
 
+Or pass the slug directly as a positional — `tailor build <slug>` is shorthand for
+`tailor build <image> --cell <slug>`:
+
+```bash
+tailor build gizmo_full_amd64_edge_cosi
+```
+
 ## Restrict architecture
 
 `--arch` is a build-only convenience:

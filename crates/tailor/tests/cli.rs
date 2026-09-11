@@ -85,8 +85,31 @@ fn per_image_toolchain_override_selects_a_different_image_customizer() {
         .stdout(predicate::str::contains("imagecustomizer:2.0.0"));
 }
 
-// ───────────────────────────── standalone: built-in default toolchain ─────────────────────────────
+// ───────────────────────────── build: positional image names and cell slugs ───────────────────────
 
+#[test]
+fn build_accepts_a_cell_slug_as_a_positional() {
+    // A slug uniquely identifies one cell, so `tailor build <slug>` builds just that cell without
+    // naming the image.
+    in_dir("workspace")
+        .args(["build", "--dry-run", "db_arm64_cosi"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 cell(s) (dry-run)"));
+}
+
+#[test]
+fn build_rejects_an_unknown_positional_with_a_clear_error() {
+    in_dir("workspace")
+        .args(["build", "--dry-run", "not-a-real-slug"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "no matching image or cell slug: `not-a-real-slug`",
+        ));
+}
+
+// ───────────────────────────── standalone: built-in default toolchain ─────────────────────────────
 #[test]
 fn standalone_image_builds_without_a_manifest() {
     in_dir("standalone")

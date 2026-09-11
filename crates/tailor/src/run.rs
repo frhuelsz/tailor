@@ -24,7 +24,7 @@ use tailor_core::{
     CoreError, ExecutionContext, Executor, LocalImage, LockedBase, LockedContainer, LockedRuntime,
     Lockfile, MissingPrerequisite, Orchestrator, ResolveError, ResolvedBase, ResolvedToolchain,
     ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement, SlotSource,
-    SlotSummary, Target, ado_matrix, cells_selected, download, imagedep, is_valid_var_name,
+    SlotSummary, Target, ado_matrix, cells, cells_selected, download, imagedep, is_valid_var_name,
     runtime_config, select_node_cells, summarize, toolchain_for, toolchain_key, tools_dir_key,
     verify,
 };
@@ -1417,16 +1417,23 @@ async fn build(
     resolve_image_cache_dir(&mut tool, &workspace.root);
     apply_log_overrides(&mut tool, logging, &workspace.root)?;
     apply_build_dir_base_override(&mut tool, args.build_dir_base.as_deref())?;
-    let targets = build_targets(workspace, &args.images)?;
-    // All workspace images supply producer definitions for resolving `base: { image }` references.
+    // All workspace images supply producer definitions for resolving `base: { image }` references,
+    // and let a positional cell slug resolve to its owning image.
     let all_members = all_member_targets(workspace)?;
+    // Positionals may name images *or* cell slugs: a slug builds exactly that cell (of its owning
+    // image), so `tailor build <slug>` works without naming the image.
+    let (image_names, positional_slugs) = classify_build_positionals(&args.images, &all_members)?;
+    let targets = build_targets(workspace, &image_names)?;
     // Build the selected images plus their transitive producers, in topological order, so a consumer
     // is planned *after* its producers (its base hashes then reflect the fresh artifacts —
     // `meta/docs/2026-09-09-inter-image-dependencies.md` §4). This also detects dependency cycles. Both the
     // dry-run and real-build paths schedule over this order.
     let closure = imagedep::dependency_closure(&targets, &all_members)?;
     let ordered = imagedep::topological_order(&closure, &all_members)?;
-    let selection = selector(&args.select, &args.arch)?;
+    // Positional slugs join any explicit `--cell` selection.
+    let mut cell_selectors = args.select.cell.clone();
+    cell_selectors.extend(positional_slugs);
+    let selection = Selector::parse(&args.select.select, &cell_selectors, &args.arch)?;
     // The user selector applies only to the explicitly requested images; a transitively pulled-in
     // producer instead builds exactly the cells its consumers need. Walk the schedule upstream
     // (reverse topological order) so each consumer registers the producer coordinates it requires
@@ -2047,6 +2054,48 @@ fn all_member_targets(workspace: &Workspace) -> Result<Vec<Arc<Target>>, AppErro
         .map(|image| image.definition.name.clone())
         .collect();
     build_targets(workspace, &names)
+}
+
+/// Split `build` positionals into image names and cell slugs. A positional that names a workspace
+/// image is an image target; one that matches a cell slug resolves to that cell (its owning image is
+/// built, restricted to that slug). Anything matching neither is an error. Empty input yields empty
+/// lists (build every image).
+fn classify_build_positionals(
+    names: &[String],
+    all_members: &[Arc<Target>],
+) -> Result<(Vec<String>, Vec<String>), AppError> {
+    let mut image_names: Vec<String> = Vec::new();
+    let mut cell_slugs: Vec<String> = Vec::new();
+    for name in names {
+        if all_members.iter().any(|target| target.name() == name) {
+            if !image_names.iter().any(|existing| existing == name) {
+                image_names.push(name.clone());
+            }
+            continue;
+        }
+        // Not an image name — resolve it as a cell slug across all members (including `skip`ped ones).
+        let mut owner = None;
+        for target in all_members {
+            if cells(target)?.iter().any(|cell| cell.slug.as_ref() == name) {
+                owner = Some(target.name().to_owned());
+                break;
+            }
+        }
+        match owner {
+            Some(image) => {
+                cell_slugs.push(name.clone());
+                if !image_names.contains(&image) {
+                    image_names.push(image);
+                }
+            }
+            None => {
+                return Err(AppError::Message(format!(
+                    "no matching image or cell slug: `{name}` (run `tailor slugs` to list cells)"
+                )));
+            }
+        }
+    }
+    Ok((image_names, cell_slugs))
 }
 
 fn build_targets(workspace: &Workspace, names: &[String]) -> Result<Vec<Arc<Target>>, AppError> {

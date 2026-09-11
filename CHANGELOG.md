@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- `tailor build <slug>` now accepts a cell slug as a positional argument: it
+  builds exactly that cell of its owning image, as shorthand for
+  `tailor build <image> --cell <slug>`. Positionals may still be image names, and
+  an unrecognized positional gives a clear "no matching image or cell slug" error.
+
 ### Fixed
 
 - `tailor validate` (and other non-build verbs) no longer reject a tools-dir
