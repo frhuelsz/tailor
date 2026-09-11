@@ -21,8 +21,8 @@ use tailor_config::{
 };
 use tailor_core::{
     BaseResolver, BuildOptions, BuildProgress, BuildSelection, Cell, CellSlug, ContainerRuntime,
-    CoreError, ExecutionContext, Executor, LocalImage, LockedBase, LockedContainer, Lockfile,
-    MissingPrerequisite, Orchestrator, ResolveError, ResolvedBase, ResolvedToolchain,
+    CoreError, ExecutionContext, Executor, LocalImage, LockedBase, LockedContainer, LockedRuntime,
+    Lockfile, MissingPrerequisite, Orchestrator, ResolveError, ResolvedBase, ResolvedToolchain,
     ResolvedToolsDirSource, Selector, SignError, Signer, SigningRequirement, SlotSource,
     SlotSummary, Target, ado_matrix, cells_selected, download, imagedep, is_valid_var_name,
     runtime_config, select_node_cells, summarize, toolchain_for, toolchain_key, tools_dir_key,
@@ -1056,6 +1056,36 @@ async fn build_lock(
                 },
             );
         }
+    }
+    // Pin the ownership-janitor image when one is explicitly configured, so a build normalizes IC's
+    // root-owned outputs with the exact reviewed image. The default (unconfigured) janitor is
+    // tailor's built-in and is not locked. `lock` reuses the frozen digest; `update` re-resolves.
+    if let Some(janitor) = tool.runtime.as_ref().and_then(|r| r.janitor_image.as_ref()) {
+        let tag = janitor.tag.clone().unwrap_or_else(|| "latest".to_owned());
+        let frozen = base_lock
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.janitor_image.as_ref());
+        let digest = if let Some(locked) = frozen {
+            locked.digest.clone()
+        } else {
+            let entry = ToolchainEntry {
+                name: "janitor".to_owned(),
+                container: janitor.container.clone(),
+                version: None,
+                tag: Some(tag.clone()),
+                pull: PullPolicy::Always,
+            };
+            resolver.resolve_toolchain(&entry).await?
+        };
+        lock.runtime = Some(LockedRuntime {
+            janitor_image: Some(LockedContainer {
+                container: janitor.container.clone(),
+                version: None,
+                tag: Some(tag),
+                digest,
+            }),
+        });
     }
     for target in targets {
         for cell in render_image(&target.definition, &target.dir)? {
