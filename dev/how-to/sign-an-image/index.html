@@ -1035,10 +1035,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-declare-signing-profiles" class="md-nav__link">
+  <a href="#1-enable-the-signing-preview-feature" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Declare signing profiles
+        1. Enable the signing preview feature
       
     </span>
   </a>
@@ -1046,10 +1046,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-opt-an-image-in" class="md-nav__link">
+  <a href="#2-declare-signing-profiles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Opt an image in
+        2. Declare signing profiles
       
     </span>
   </a>
@@ -1057,10 +1057,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-check-readiness-fail-fast" class="md-nav__link">
+  <a href="#3-opt-an-image-in" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Check readiness (fail fast)
+        3. Opt an image in
       
     </span>
   </a>
@@ -1068,10 +1068,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-dry-run" class="md-nav__link">
+  <a href="#4-check-readiness-fail-fast" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Dry-run
+        4. Check readiness (fail fast)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Dry-run
       
     </span>
   </a>
@@ -1638,10 +1649,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-declare-signing-profiles" class="md-nav__link">
+  <a href="#1-enable-the-signing-preview-feature" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Declare signing profiles
+        1. Enable the signing preview feature
       
     </span>
   </a>
@@ -1649,10 +1660,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-opt-an-image-in" class="md-nav__link">
+  <a href="#2-declare-signing-profiles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Opt an image in
+        2. Declare signing profiles
       
     </span>
   </a>
@@ -1660,10 +1671,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-check-readiness-fail-fast" class="md-nav__link">
+  <a href="#3-opt-an-image-in" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Check readiness (fail fast)
+        3. Opt an image in
       
     </span>
   </a>
@@ -1671,10 +1682,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-dry-run" class="md-nav__link">
+  <a href="#4-check-readiness-fail-fast" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Dry-run
+        4. Check readiness (fail fast)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Dry-run
       
     </span>
   </a>
@@ -1723,24 +1745,33 @@ PE signing, the <code>inject-files</code> pass) is a later milestone (<code>meta
 lands, a signed <code>tailor build</code> runs the preflight and then <strong>stops with a clear error</strong> rather than
 produce a silently-unsigned image. <code>tailor validate</code> and <code>tailor build --dry-run</code> report signing
 readiness without failing.</p>
+<p><strong>Preview feature.</strong> Signing is not yet part of the stable 1.0 contract, so it is gated behind a
+preview opt-in. Enable it by adding <code>previewFeatures: [signing]</code> to <code>tailor.yaml</code>; a signed
+<code>tailor build</code>/<code>validate</code> without the opt-in stops with a clear error.</p>
 </blockquote>
-<h2 id="1-declare-signing-profiles">1. Declare signing profiles<a class="headerlink" href="#1-declare-signing-profiles" title="Permanent link">&para;</a></h2>
-<p>Add a <code>signing:</code> block to <code>tailor.yaml</code>. A profile names a key-source <code>backend</code> plus its settings:</p>
+<h2 id="1-enable-the-signing-preview-feature">1. Enable the signing preview feature<a class="headerlink" href="#1-enable-the-signing-preview-feature" title="Permanent link">&para;</a></h2>
+<p>Signing is gated behind a preview opt-in. Add it to <code>tailor.yaml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># tailor.yaml</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">signing</span><span class="p">:</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test-ca</span><span class="w">            </span><span class="c1"># profile used when an image says `signing: true`</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">profiles</span><span class="p">:</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">test-ca</span><span class="p">:</span><span class="w">                  </span><span class="c1"># self-signed CA minted per build (CI / local; not a production root)</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">      </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-test-ca</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">      </span><span class="nt">publishCaCert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./artifacts/ca_cert.pem</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">byo</span><span class="p">:</span><span class="w">                      </span><span class="c1"># bring your own Secure Boot key + cert</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">      </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keypair</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./secrets/db.key</span><span class="w">   </span><span class="c1"># PEM private key (referenced, never imaged)</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">cert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./secrets/db.crt</span><span class="w">  </span><span class="c1"># PEM certificate</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">    </span><span class="nt">akv</span><span class="p">:</span><span class="w">                      </span><span class="c1"># remote signing service (future)</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">      </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">azure-key-vault</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">      </span><span class="nt">vault</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://my-vault.vault.azure.net</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">      </span><span class="nt">certificate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secureboot-db</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">previewFeatures</span><span class="p">:</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signing</span>
+</code></pre></div>
+<h2 id="2-declare-signing-profiles">2. Declare signing profiles<a class="headerlink" href="#2-declare-signing-profiles" title="Permanent link">&para;</a></h2>
+<p>Add a <code>signing:</code> block to <code>tailor.yaml</code>. A profile names a key-source <code>backend</code> plus its settings:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># tailor.yaml</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">signing</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">test-ca</span><span class="w">            </span><span class="c1"># profile used when an image says `signing: true`</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">profiles</span><span class="p">:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">test-ca</span><span class="p">:</span><span class="w">                  </span><span class="c1"># self-signed CA minted per build (CI / local; not a production root)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-test-ca</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="nt">publishCaCert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./artifacts/ca_cert.pem</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">byo</span><span class="p">:</span><span class="w">                      </span><span class="c1"># bring your own Secure Boot key + cert</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keypair</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./secrets/db.key</span><span class="w">   </span><span class="c1"># PEM private key (referenced, never imaged)</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">      </span><span class="nt">cert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./secrets/db.crt</span><span class="w">  </span><span class="c1"># PEM certificate</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">akv</span><span class="p">:</span><span class="w">                      </span><span class="c1"># remote signing service (future)</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">azure-key-vault</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">      </span><span class="nt">vault</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://my-vault.vault.azure.net</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">      </span><span class="nt">certificate</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secureboot-db</span>
 </code></pre></div>
 <table>
 <thead>
@@ -1768,32 +1799,32 @@ readiness without failing.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="2-opt-an-image-in">2. Opt an image in<a class="headerlink" href="#2-opt-an-image-in" title="Permanent link">&para;</a></h2>
+<h2 id="3-opt-an-image-in">3. Opt an image in<a class="headerlink" href="#3-opt-an-image-in" title="Permanent link">&para;</a></h2>
 <p>Set <code>signing:</code> on the image — <code>true</code> for the workspace default profile, or a profile id. The image
 still authors its own <code>output.artifacts</code> (that is what tells IC which boot artifacts to extract):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># image.yaml</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">appliance</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">signing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">            </span><span class="c1"># or `signing: byo`</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nt">config</span><span class="p">:</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">output</span><span class="p">:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">artifacts</span><span class="p">:</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="nt">items</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ukis</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">shim</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">systemd-boot</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">verity-hash</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./output-artifacts</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># image.yaml</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">appliance</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">signing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">            </span><span class="c1"># or `signing: byo`</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">config</span><span class="p">:</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">output</span><span class="p">:</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">artifacts</span><span class="p">:</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">items</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ukis</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">shim</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">systemd-boot</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">verity-hash</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./output-artifacts</span>
 </code></pre></div>
 <p>Omit <code>signing:</code> (or set <code>signing: false</code>) for an unsigned image — unlike <code>toolchain:</code>, the workspace
 default is <strong>not</strong> auto-applied, so signing is always an explicit choice.</p>
-<h2 id="3-check-readiness-fail-fast">3. Check readiness (fail fast)<a class="headerlink" href="#3-check-readiness-fail-fast" title="Permanent link">&para;</a></h2>
+<h2 id="4-check-readiness-fail-fast">4. Check readiness (fail fast)<a class="headerlink" href="#4-check-readiness-fail-fast" title="Permanent link">&para;</a></h2>
 <p>Before any build, tailor verifies every signing prerequisite — once, up front — so a signed build
 never customizes N cells only to discover a key is missing. Report readiness without building:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tailor<span class="w"> </span>validate<span class="w"> </span>appliance
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># ✓ appliance                    2 cell(s) valid</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># ✓ signing profile `byo` ready (image(s): appliance)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tailor<span class="w"> </span>validate<span class="w"> </span>appliance
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># ✓ appliance                    2 cell(s) valid</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># ✓ signing profile `byo` ready (image(s): appliance)</span>
 </code></pre></div>
 <p>If a prerequisite is missing, <code>validate</code> warns; a real <code>build</code> aborts before touching IC, naming
 every unmet prerequisite and the images that need it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$ tailor build appliance
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>error: signing preflight failed — fix every prerequisite below, then rebuild:
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  - profile `byo` (needed by: appliance): cannot read `key` `./secrets/db.key`: No such file or directory
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$ tailor build appliance
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>error: signing preflight failed — fix every prerequisite below, then rebuild:
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  - profile `byo` (needed by: appliance): cannot read `key` `./secrets/db.key`: No such file or directory
 </code></pre></div>
 <p>What the preflight checks per backend:</p>
 <ul>
@@ -1802,12 +1833,12 @@ every unmet prerequisite and the images that need it:</p>
 <li><strong><code>azure-key-vault</code></strong> — configuration completeness (a live credential probe arrives with the remote
   backend milestone).</li>
 </ul>
-<h2 id="4-dry-run">4. Dry-run<a class="headerlink" href="#4-dry-run" title="Permanent link">&para;</a></h2>
+<h2 id="5-dry-run">5. Dry-run<a class="headerlink" href="#5-dry-run" title="Permanent link">&para;</a></h2>
 <p><code>tailor build --dry-run</code> never contacts an engine and reports the signing plan:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>--dry-run<span class="w"> </span>appliance
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># … the customize invocation …</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># ✓ signing profile `byo` ready (image(s): appliance)</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># note: signing execution is not yet implemented; this dry-run shows the unsigned customize invocation.</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>--dry-run<span class="w"> </span>appliance
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># … the customize invocation …</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># ✓ signing profile `byo` ready (image(s): appliance)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># note: signing execution is not yet implemented; this dry-run shows the unsigned customize invocation.</span>
 </code></pre></div>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
