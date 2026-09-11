@@ -1,16 +1,20 @@
 name: Docs
 
 # Versioned documentation site (MkDocs Material + mike), published to GitHub Pages.
-#   - push to main            -> deploys the `dev` version
-#   - push a tag `vX.Y.Z`     -> deploys version `X.Y` and moves the `latest` alias (+ site default)
-#   - manual run from a tag   -> same as a tag push (use this to backfill an existing release, e.g. v0.2.0)
+#   - push to main                 -> deploys the `dev` version
+#   - push a tag `tailor-vX.Y.Z`   -> deploys version `X.Y` and moves the `latest` alias (+ site default)
+#   - manual run from a tag        -> same as a tag push (use this to backfill an existing release)
 #
 # mike publishes the built site to the `gh-pages` branch. Enable Pages once:
 #   Settings -> Pages -> Build and deployment -> Source: "Deploy from a branch" -> Branch: gh-pages / (root).
+#
+# GitHub Pages is one site per repository, so this workflow must run in the repository that owns the
+# tailor docs site. When tailor is embedded in a monorepo, keep the docs site on this fork (or a
+# dedicated docs repo) rather than the monorepo — see docs/how-to/embed-in-a-monorepo.md.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["tailor-v*"]
   workflow_dispatch:
 
 # mike commits the built site to the gh-pages branch.
@@ -46,8 +50,9 @@ jobs:
         id: target
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            version="${GITHUB_REF_NAME#v}"   # v0.2.0 -> 0.2.0
-            minor="${version%.*}"            # 0.2.0  -> 0.2
+            ref="${GITHUB_REF_NAME#tailor-}"  # tailor-v1.1.0 -> v1.1.0
+            version="${ref#v}"                # v1.1.0        -> 1.1.0
+            minor="${version%.*}"             # 1.1.0         -> 1.1
             echo "version=$minor"  >> "$GITHUB_OUTPUT"
             echo "alias=latest"    >> "$GITHUB_OUTPUT"
             echo "default=true"    >> "$GITHUB_OUTPUT"

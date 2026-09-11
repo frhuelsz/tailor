@@ -114,8 +114,36 @@ identity="https://github.com/<host-org>/<host-repo>/.github/workflows/tailor-rel
 Artifacts released before the move remain verifiable against the old identity;
 document both during the transition.
 
-## 5. Keep a fork for experimentation
+## 5. Documentation website
 
+The docs site (MkDocs Material + `mike`, published to GitHub Pages) is **more
+tied to a repository than the code is**, because GitHub Pages is one site per
+repository: `mike` deploys to that repo's `gh-pages` branch, and the site URL is
+`https://<owner>.github.io/<repo>/`. A host monorepo usually already owns its
+Pages, so tailor's versioned docs cannot simply move into it. Three options, in
+order of preference:
+
+1. **Host the docs on this fork (recommended).** Keep the `docs.yml` workflow and
+   the Pages site on the fork (`https://<you>.github.io/tailor/`). The monorepo
+   holds the source-of-truth Markdown under `tailor/docs/`; sync it to the fork,
+   which renders and publishes the site. Zero new infrastructure, and the
+   existing versioned-docs setup keeps working. To publish a release's docs
+   version, tag the fork `tailor-v<x.y.z>` (or run the docs workflow manually
+   from the synced commit).
+2. **Dedicated docs repo / org Pages.** Publish to a separate `tailor-docs` (or
+   `<org>.github.io`) repository. The docs workflow builds the site and pushes it
+   there with a deploy key or cross-repo Pages deploy. More setup, but keeps docs
+   independent of both the fork and the monorepo.
+3. **Sub-path of the monorepo's Pages.** If the monorepo publishes its own Pages,
+   integrate tailor's docs as a subdirectory of that site. This means adopting the
+   monorepo's docs pipeline (its generator, its versioning) — `mike`'s
+   per-project versioning usually will not fit, so treat this as a rewrite.
+
+Whichever you pick, the docs workflow already uses the component-scoped
+`tailor-v*` tag (not `v*`), and `mkdocs.yml`'s `site_url`, `repo_url`, and
+`edit_uri` point at whichever repo hosts the site — update them if you move it.
+
+## 6. Keep a fork for experimentation
 You can keep your original repository as an upstream experimentation fork:
 
 - **One canonical release origin.** Cut official `tailor-v<x.y.z>` releases from
