@@ -320,7 +320,6 @@ fn validate(workspace: &Workspace, names: &[String], selector: &Selector) -> Res
         let mut cells = cells_selected(target, selector)?;
         imagedep::lower_image_bases(&mut cells, &all_members, &output_dir)?;
         imagedep::resolve_inputs(&mut cells, &all_members, &output_dir)?;
-        validate_tools_dir_runtime(&cells, &tool)?;
         println!("✓ {:<28} {} cell(s) valid", target.name(), cells.len());
     }
     // Surface signing prerequisites non-fatally (meta/docs/2026-06-29-signing.md §5.1) so they are discoverable
@@ -2031,26 +2030,6 @@ fn report_signing(signers: &[ProfileSigner<'_>]) {
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
-
-fn validate_tools_dir_runtime(cells: &[Cell], tool: &ToolConfig) -> Result<(), AppError> {
-    // The tools-dir is always bound writable as a per-cell copy on `runtime.buildDirBase`, so any
-    // image using a tools-dir requires `buildDirBase` to be set.
-    let has_tools_dir = cells.iter().any(|cell| cell.tools_dir.is_some());
-    if has_tools_dir
-        && tool
-            .runtime
-            .as_ref()
-            .and_then(|runtime| runtime.build_dir_base.as_ref())
-            .is_none()
-    {
-        let image = cells.first().map_or_else(
-            || "unknown".to_owned(),
-            |cell| cell.target.name().to_owned(),
-        );
-        return Err(CoreError::WritableToolsDirNeedsBuildDir { image }.into());
-    }
-    Ok(())
-}
 
 fn tool_config(workspace: &Workspace) -> ToolConfig {
     match &workspace.tool {

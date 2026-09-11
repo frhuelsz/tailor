@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- `tailor validate` (and other non-build verbs) no longer reject a tools-dir
+  image when `runtime.buildDirBase` is unset. The build path already defaults
+  `buildDirBase` to `<output>/.tailor/build`; the validate-time check was a stale
+  leftover of the old "buildDirBase is required" rule.
+
 ## [1.0.1] - 2026-09-11
 
 ### Changed

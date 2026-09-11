@@ -146,7 +146,7 @@ pub enum CoreError {
     ToolsDirPreviewMissing { image: String },
 
     #[error(
-        "image `{image}` uses `toolsDir`, which is bound writable and requires runtime.buildDirBase on an isolated filesystem"
+        "internal error: no build directory resolved for image `{image}`'s tools-dir (buildDirBase should have defaulted)"
     )]
     WritableToolsDirNeedsBuildDir { image: String },
 

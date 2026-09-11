@@ -450,9 +450,9 @@ fn tools_dir_plan_for(
             reason: "tools-dir cache must not be filesystem root".to_owned(),
         }));
     }
-    // The tools-dir is always bound writable, so it is always a per-cell disposable copy on the
-    // isolated build filesystem — IC rewrites resolv.conf in the tools chroot, so a shared RO cache
-    // bind cannot work. This makes `runtime.buildDirBase` required for any image using a tools-dir.
+    // The tools-dir is always bound writable as a per-cell disposable copy under the build
+    // directory. `buildDirBase` defaults to `<output>/.tailor/build` (set by the build driver), so
+    // this is an internal invariant, not a user requirement.
     let Some(build_base) = &runtime.build_dir_base else {
         return Err(CoreError::WritableToolsDirNeedsBuildDir {
             image: cell.target.name().to_owned(),
