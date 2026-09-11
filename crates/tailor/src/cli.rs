@@ -356,11 +356,12 @@ pub(crate) struct BuildArgs {
     #[arg(long)]
     pub(crate) dry_run: bool,
 
-    /// Max parallel matrix cells (reserved; currently sequential).
-    #[arg(long)]
+    /// Max parallel matrix cells (reserved for a future release; builds are currently sequential).
+    #[arg(long, hide = true)]
     pub(crate) jobs: Option<usize>,
 
-    /// Build N identical clones of each cell.
+    /// Build N clones of each cell: distinct artifacts that share all meaningful content but differ
+    /// in incidental details (fresh UUIDs, timestamps). Each is published as `<slug>_clone<n>`.
     #[arg(long, default_value_t = 1)]
     pub(crate) clones: u32,
 }

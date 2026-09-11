@@ -204,7 +204,10 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
         let runtime = runtime_config(tool, lock, workspace_root);
         let mut results = Vec::new();
         for planned in &plan.cells {
-            if planned.up_to_date && !options.force {
+            // Clones are intentionally non-deterministic (fresh UUIDs, mtimes), so an up-to-date
+            // stamp is meaningless for them — always rebuild each clone. A normal build honours the
+            // incremental stamp.
+            if planned.up_to_date && !options.force && options.clone_index.is_none() {
                 continue;
             }
             let (toolchain_id, toolchain) = toolchain_for(&planned.cell.target, tool)?;
@@ -229,7 +232,10 @@ impl<E: Executor, R: BaseResolver> Orchestrator<E, R> {
                 .execute(&planned.cell, &context, cancel.clone())
                 .await?;
             if !options.dry_run {
-                stamp::write(output_dir, planned.cell.slug.as_ref(), planned.fingerprint)?;
+                // Stamp under the clone-suffixed slug so each clone keeps its own stamp beside its
+                // own artifact (and never clobbers the base cell's stamp).
+                let stamp_slug = output_slug(planned.cell.slug.as_ref(), options.clone_index);
+                stamp::write(output_dir, &stamp_slug, planned.fingerprint)?;
             }
             progress(BuildProgress::Built {
                 slug: planned.cell.slug.as_ref(),
@@ -862,6 +868,17 @@ fn oci_repository(reference: &str) -> &str {
     }
 }
 
+/// The output slug for a build run: the cell slug, suffixed with the clone index when building
+/// `--clones` so each clone produces a **distinct** artifact and stamp (`<slug>_clone<n>`) instead
+/// of overwriting one shared path. `None` (a normal build) yields the bare slug.
+#[must_use]
+pub fn output_slug(slug: &str, clone_index: Option<u32>) -> String {
+    match clone_index {
+        Some(clone) => format!("{slug}_clone{clone}"),
+        None => slug.to_owned(),
+    }
+}
+
 /// The artifact filename for a cell slug + format (a directory for `pxe-dir`). This is what Image
 /// Customizer writes — the **uncompressed** name; see [`published_artifact_name`] for the final
 /// artifact tailor publishes when `compression:` is set.
@@ -908,6 +925,26 @@ mod tests {
     };
 
     use crate::testing::{FakeExecutor, FakeResolver};
+
+    #[test]
+    fn output_slug_suffixes_each_clone_distinctly() {
+        // A normal build keeps the bare slug; each clone gets a distinct suffix so their artifacts
+        // and stamps never collide.
+        assert_eq!(output_slug("img_amd64_cosi", None), "img_amd64_cosi");
+        assert_eq!(
+            output_slug("img_amd64_cosi", Some(0)),
+            "img_amd64_cosi_clone0"
+        );
+        assert_ne!(
+            output_slug("img_amd64_cosi", Some(0)),
+            output_slug("img_amd64_cosi", Some(1))
+        );
+        // The suffixed slug flows through the published name, so clones publish distinct files.
+        assert_eq!(
+            published_artifact_name(&output_slug("img", Some(1)), OutputFormat::Cosi, None),
+            "img_clone1.cosi"
+        );
+    }
 
     #[test]
     fn published_artifact_name_appends_compression_suffix() {
