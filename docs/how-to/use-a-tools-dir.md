@@ -27,13 +27,12 @@ disposable directory `<buildDirBase>/<slug>/tools-dir`, binds **that copy writab
 translated path to IC customize passes. It never emits `--tools-dir /`.
 
 The tools dir is always writable because IC rewrites `resolv.conf` inside the tools chroot during
-package operations — a read-only bind fails. So any image using `toolsDir:` **requires
-`runtime.buildDirBase`** (the isolated filesystem the per-cell copy lives on):
+package operations — a read-only bind fails. `runtime.buildDirBase` defaults to
+`<output>/.tailor/build`, so no configuration is required; set it to place the per-cell copy
+elsewhere:
 
 ```yaml
 # tailor.yaml
 runtime:
   buildDirBase: /mnt/tailor-build
 ```
-
-Without it, `tailor validate` / `build` fails fast with a clear error.

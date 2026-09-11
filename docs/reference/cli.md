@@ -45,7 +45,7 @@ Resolve and run Image Customizer for selected images. Default: all images.
 | `--force` | Ignore incremental up-to-date checks. |
 | `--arch ARCH` | Restrict build to architecture(s). Repeatable. |
 | `--output-dir PATH` | Output directory. Default: `<workspace>/artifacts`. |
-| `--build-dir-base PATH` | Override `runtime.buildDirBase`: place each cell's build scratch under this directory (which must not be `/` or on the same filesystem as `/`). Lets CI point scratch at a pool-specific filesystem without editing the committed `tailor.yaml`. |
+| `--build-dir-base PATH` | Override `runtime.buildDirBase`: place each cell's build scratch under this directory (which must not be `/`, a system directory, or `$HOME`). Lets CI point scratch at a specific filesystem without editing the committed `tailor.yaml`. |
 | `--dry-run` | Render each selected container/IC invocation without running it. |
 | `--clones N` | Build N clones of each cell — distinct artifacts sharing all meaningful content but differing in incidental details (fresh UUIDs, timestamps), each published as `<slug>_clone<n>`. Default: `1`. |
 

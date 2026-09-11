@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- `runtime.buildDirBase` is now optional: it defaults to `<output>/.tailor/build`,
+  so tools-dir images (which need a writable scratch dir) build with no
+  host-specific path. The build-directory guard no longer requires a separate
+  filesystem — it rejects `/`, system directories, and `$HOME` instead — since
+  Image Customizer keeps its overlays and mounts within `--build-dir`/`--tools-dir`.
+
 ## [1.0.0] - 2026-09-10
 
 First stable release. The `tailor` CLI is now covered by the

@@ -32,7 +32,7 @@ defaults:
 | `runtime.mounts.hostRoot` | path | no | Default `/host`; namespace prefix for translated host paths. tailor no longer binds host `/` there. |
 | `runtime.mounts.dev` | bool | no | Default `true`; bind `/dev:/dev`. |
 | `runtime.mounts.extraPaths` | list of extra mount objects | no | Additional paths exposed under `hostRoot`. `access` defaults to `ro`; use `rw` only for explicit writable carve-outs. Relative paths resolve against the workspace root. |
-| `runtime.buildDirBase` | path | no | Host filesystem base for per-cell IC build dirs (`<buildDirBase>/<slug>`). Must be on a separate filesystem from `/`. Omit to keep IC's container-local `/tmp`. |
+| `runtime.buildDirBase` | path | no | Host filesystem base for per-cell IC build dirs (`<buildDirBase>/<slug>`). Omit to use the default under the output dir (`<output>/.tailor/build`). Must not be `/`, a system directory, or `$HOME`. |
 | `runtime.logLevel` | enum | no | IC log level: `panic`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`. |
 | `runtime.imageCacheDir` | path | no | Cache for registry base images. Default: `<workspace>/.tailor/cache`. Required by IC for `oci`/`azureLinux` bases — tailor supplies the default so they build out of the box. |
 | `runtime.janitorImage` | `{container, tag?}` | no | Minimal image used for sudo-free ownership cleanup. Default: `mcr.microsoft.com/azurelinux/base/core:3.0`. |

@@ -1,6 +1,5 @@
 use std::{
-    fs,
-    os::unix::fs::MetadataExt,
+    env,
     path::{Component, Path, PathBuf},
 };
 
@@ -8,12 +7,20 @@ use tailor_core::ExecError;
 
 const ROOT_PATH: &str = "/";
 
+/// Well-known system directories a build/scratch dir must never *be*: IC recursively deletes the
+/// build dir, so pointing it at one of these (or `$HOME`) would be catastrophic. This rejects the
+/// directory itself, not paths beneath it — a build dir like `/home/user/scratch` is fine.
+const PROTECTED_DIRS: &[&str] = &[
+    "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib32", "/lib64", "/opt", "/proc", "/root",
+    "/run", "/sbin", "/srv", "/sys", "/usr", "/var",
+];
+
 pub(crate) fn ensure_safe_build_dir(path: &Path) -> Result<(), ExecError> {
-    ensure_safe_dir(path, true)
+    ensure_safe_dir(path)
 }
 
 pub(crate) fn ensure_safe_rw_target(path: &Path) -> Result<(), ExecError> {
-    ensure_safe_dir(path, false)
+    ensure_safe_dir(path)
 }
 
 /// Guard a directory the janitor will bind read-write in order to remove a **named child** under it
@@ -33,21 +40,30 @@ pub(crate) fn ensure_safe_removal_parent(path: &Path) -> Result<(), ExecError> {
     Ok(())
 }
 
-fn ensure_safe_dir(path: &Path, require_separate_device: bool) -> Result<(), ExecError> {
+/// Guard a directory tailor will bind read-write and IC may recursively delete. Rejects the
+/// filesystem root, a well-known system directory or `$HOME`, and any directory that *contains* the
+/// current working directory (deleting it would take out the cwd). It deliberately does **not**
+/// require a separate filesystem: IC keeps its overlays and mounts within `--build-dir`/`--tools-dir`
+/// (see `docs/explanation/threat-model.md`), so a build dir on the same device as `/` is safe.
+fn ensure_safe_dir(path: &Path) -> Result<(), ExecError> {
     let normalized = normalize_absolute_lexical(path)?;
-    let root = Path::new(ROOT_PATH);
-    if normalized == root {
+    if normalized == Path::new(ROOT_PATH) {
         return Err(unsafe_dir(
             normalized,
             "must not be the filesystem root".to_owned(),
         ));
     }
+    if is_protected_dir(&normalized) {
+        return Err(unsafe_dir(
+            normalized,
+            "must not be a system directory or the home directory".to_owned(),
+        ));
+    }
 
-    let cwd =
-        normalize_absolute_lexical(&std::env::current_dir().map_err(|source| ExecError::Io {
-            context: "failed to determine current directory".to_owned(),
-            source,
-        })?)?;
+    let cwd = normalize_absolute_lexical(&env::current_dir().map_err(|source| ExecError::Io {
+        context: "failed to determine current directory".to_owned(),
+        source,
+    })?)?;
     if cwd.starts_with(&normalized) {
         return Err(unsafe_dir(
             normalized,
@@ -58,56 +74,25 @@ fn ensure_safe_dir(path: &Path, require_separate_device: bool) -> Result<(), Exe
         ));
     }
 
-    if require_separate_device {
-        let root_dev = fs::metadata(root)
-            .map_err(|source| ExecError::Io {
-                context: "failed to stat filesystem root `/`".to_owned(),
-                source,
-            })?
-            .dev();
-        let ancestor = nearest_existing_ancestor(&normalized)?;
-        let ancestor_dev = fs::metadata(&ancestor)
-            .map_err(|source| ExecError::Io {
-                context: format!("failed to stat `{}`", ancestor.display()),
-                source,
-            })?
-            .dev();
-        if ancestor_dev == root_dev {
-            return Err(unsafe_dir(
-                normalized,
-                format!(
-                    "nearest existing ancestor `{}` is on the same device as `/`",
-                    ancestor.display()
-                ),
-            ));
-        }
-    }
-
     Ok(())
+}
+
+/// Whether `normalized` is a well-known system directory (see [`PROTECTED_DIRS`]) or `$HOME`.
+fn is_protected_dir(normalized: &Path) -> bool {
+    if PROTECTED_DIRS
+        .iter()
+        .any(|dir| normalized == Path::new(dir))
+    {
+        return true;
+    }
+    env::var_os("HOME").is_some_and(|home| {
+        !home.is_empty()
+            && normalize_absolute_lexical(Path::new(&home)).is_ok_and(|home| normalized == home)
+    })
 }
 
 fn unsafe_dir(path: PathBuf, reason: String) -> ExecError {
     ExecError::UnsafeDir { path, reason }
-}
-
-fn nearest_existing_ancestor(path: &Path) -> Result<PathBuf, ExecError> {
-    let mut candidate = path.to_path_buf();
-    loop {
-        match fs::metadata(&candidate) {
-            Ok(_) => return Ok(candidate),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                if !candidate.pop() {
-                    return Ok(PathBuf::from(ROOT_PATH));
-                }
-            }
-            Err(source) => {
-                return Err(ExecError::Io {
-                    context: format!("failed to stat `{}`", candidate.display()),
-                    source,
-                });
-            }
-        }
-    }
 }
 
 fn normalize_absolute_lexical(path: &Path) -> Result<PathBuf, ExecError> {
@@ -146,10 +131,6 @@ fn normalize_absolute_lexical(path: &Path) -> Result<PathBuf, ExecError> {
 mod tests {
     use super::*;
 
-    fn same_device(left: &Path, right: &Path) -> bool {
-        fs::metadata(left).unwrap().dev() == fs::metadata(right).unwrap().dev()
-    }
-
     #[test]
     fn rejects_filesystem_root() {
         let err = ensure_safe_build_dir(Path::new(ROOT_PATH)).unwrap_err();
@@ -178,42 +159,35 @@ mod tests {
     }
 
     #[test]
-    fn same_device_dir_is_rejected_for_build_but_allowed_for_rw_target() {
+    fn same_device_build_dir_is_allowed() {
+        // A build dir on the same filesystem as `/` is now accepted: IC keeps its overlays/mounts
+        // within the build dir, so a separate device is no longer required.
         let temp = tempfile::Builder::new()
             .prefix("tailor-guard-")
             .tempdir_in(std::env::current_dir().unwrap())
             .unwrap();
-        if !same_device(temp.path(), Path::new(ROOT_PATH)) {
-            return;
-        }
-
-        let err = ensure_safe_build_dir(temp.path()).unwrap_err();
-        assert!(matches!(err, ExecError::UnsafeDir { .. }));
-        ensure_safe_rw_target(temp.path()).unwrap();
+        let build_dir = temp.path().join("scratch");
+        ensure_safe_build_dir(&build_dir).unwrap();
+        ensure_safe_rw_target(&build_dir).unwrap();
     }
 
     #[test]
-    fn separate_filesystem_build_dir_is_allowed() {
-        let candidate = Path::new("/dev/shm/tailor-build-dir");
-        if !candidate
-            .parent()
-            .is_some_and(|parent| parent.exists() && !same_device(parent, Path::new(ROOT_PATH)))
-        {
-            return;
+    fn rejects_protected_system_dirs() {
+        for dir in ["/usr", "/etc", "/home", "/var", "/boot"] {
+            let err = ensure_safe_build_dir(Path::new(dir)).unwrap_err();
+            assert!(
+                matches!(err, ExecError::UnsafeDir { .. }),
+                "expected `{dir}` to be rejected"
+            );
         }
-
-        ensure_safe_build_dir(candidate).unwrap();
     }
 
     #[test]
     fn normalizes_without_requiring_leaf_to_exist() {
-        let candidate = Path::new("/dev/shm/../shm/tailor-build-dir");
-        if !Path::new("/dev/shm").exists()
-            || same_device(Path::new("/dev/shm"), Path::new(ROOT_PATH))
-        {
-            return;
-        }
-
-        ensure_safe_build_dir(candidate).unwrap();
+        // A non-existent, lexically-normalized build dir under the cwd is accepted (tailor creates
+        // it); normalization collapses the `..` without touching the filesystem.
+        let base = std::env::current_dir().unwrap().join("does-not-exist");
+        let candidate = base.join("..").join("does-not-exist").join("scratch");
+        ensure_safe_build_dir(&candidate).unwrap();
     }
 }

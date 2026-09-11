@@ -47,6 +47,9 @@ const LOCK_FILE: &str = "tailor.lock";
 const ARTIFACTS_DIR: &str = "artifacts";
 const TAILOR_STATE_DIR: &str = ".tailor";
 const BASE_HASH_CACHE_DIR: &str = "base-hashes";
+/// Default per-cell build/scratch directory under the output state dir, used when
+/// `runtime.buildDirBase` is unset.
+const BUILD_DIR: &str = "build";
 const STATUS_VERB_WIDTH: usize = 12;
 const ELAPSED_TIMESTAMP_PRECISION: usize = 2;
 const SECS_PER_MINUTE: u64 = 60;
@@ -1453,6 +1456,21 @@ async fn build(
             .unwrap_or_else(|| workspace.root.join(ARTIFACTS_DIR)),
         env::current_dir().map_err(|e| AppError::Message(format!("current dir: {e}")))?,
     );
+    // Default the build directory to a tailor-owned location under the output directory when
+    // `runtime.buildDirBase` is unset, so builds — including tools-dir images, which need a writable
+    // scratch dir — work with no host-specific path. The output directory is a real, bound
+    // filesystem (never the container's overlayfs), so IC's read-only/`/etc` overlays do not stack
+    // overlay-on-overlay.
+    if tool
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.build_dir_base.as_ref())
+        .is_none()
+    {
+        tool.runtime
+            .get_or_insert_with(Runtime::default)
+            .build_dir_base = Some(output_dir.join(TAILOR_STATE_DIR).join(BUILD_DIR));
+    }
     let signing = signing_requirements(&targets, tool.signing.as_ref())?;
     ensure_signing_preview(&tool, &signing)?;
     // Build one signer per required profile (a shared CA per build); `signer_for` resolves a cell to
