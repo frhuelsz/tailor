@@ -2236,6 +2236,10 @@
 <p>Append an axis to an image's <code>matrix:</code> and create <code>by-&lt;axis&gt;/</code>. The image argument is optional when the workspace has a single image. A placeholder value is inserted so the matrix stays non-empty.</p>
 <h2 id="tailor-build-images"><code>tailor build [images...]</code><a class="headerlink" href="#tailor-build-images" title="Permanent link">&para;</a></h2>
 <p>Resolve and run Image Customizer for selected images. Default: all images.</p>
+<p>Each positional may be an <strong>image name</strong> or a <strong>cell slug</strong>. A slug (e.g.
+<code>gizmo_pro_arm64_stable_cosi</code>) builds exactly that cell of its owning image, so you don't have to
+name the image and pass <code>--cell</code> — <code>tailor build &lt;slug&gt;</code> is shorthand for
+<code>tailor build &lt;image&gt; --cell &lt;slug&gt;</code>. Run <code>tailor slugs</code> to list cells.</p>
 <table>
 <thead>
 <tr>

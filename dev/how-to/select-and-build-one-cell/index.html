@@ -1777,9 +1777,13 @@
 <p>Build one slug:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>--cell<span class="w"> </span>gizmo_full_amd64_edge_cosi
 </code></pre></div>
+<p>Or pass the slug directly as a positional — <code>tailor build &lt;slug&gt;</code> is shorthand for
+<code>tailor build &lt;image&gt; --cell &lt;slug&gt;</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>gizmo_full_amd64_edge_cosi
+</code></pre></div>
 <h2 id="restrict-architecture">Restrict architecture<a class="headerlink" href="#restrict-architecture" title="Permanent link">&para;</a></h2>
 <p><code>--arch</code> is a build-only convenience:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>gizmo<span class="w"> </span>--arch<span class="w"> </span>amd64<span class="w"> </span>--dry-run
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>gizmo<span class="w"> </span>--arch<span class="w"> </span>amd64<span class="w"> </span>--dry-run
 </code></pre></div>
 <p>Related commands that also accept selectors include <code>validate</code>, <code>render</code>, <code>matrix</code>, <code>slugs</code>, <code>explain</code>, and <code>clean</code>.</p>
 
