@@ -182,4 +182,10 @@ pub enum ConfigError {
 
     #[error("signing is requested but misconfigured: {detail}")]
     SigningMisconfigured { detail: String },
+
+    #[error(
+        "unsupported `schemaVersion: {found}`; this tailor understands schema version(s) up to \
+         {supported}. Upgrade tailor, or set `schemaVersion: {supported}`."
+    )]
+    UnsupportedSchemaVersion { found: u32, supported: u32 },
 }

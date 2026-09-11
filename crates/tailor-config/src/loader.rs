@@ -74,6 +74,50 @@ mod tests {
     }
 
     #[test]
+    fn a_newer_schema_version_is_rejected() {
+        use crate::schema::SUPPORTED_SCHEMA_VERSION;
+
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            &format!(
+                "schemaVersion: {}\ntoolchains:\n  default: ic\n  entries:\n    - name: ic\n      \
+                 container: registry.example/imagecustomizer\n",
+                SUPPORTED_SCHEMA_VERSION + 1
+            ),
+        );
+        let err = load_tool_config(&path).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::UnsupportedSchemaVersion { found, supported }
+                if *found == SUPPORTED_SCHEMA_VERSION + 1 && *supported == SUPPORTED_SCHEMA_VERSION),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn schema_version_zero_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let path = write(
+            &tmp,
+            "tailor.yaml",
+            indoc! {"
+                schemaVersion: 0
+                toolchains:
+                  default: ic
+                  entries:
+                    - name: ic
+                      container: registry.example/imagecustomizer
+            "},
+        );
+        let err = load_tool_config(&path).unwrap_err();
+        assert!(
+            matches!(&err, ConfigError::UnsupportedSchemaVersion { found, .. } if *found == 0),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
     fn duplicate_toolchain_names_are_rejected() {
         let tmp = TempDir::new().unwrap();
         let path = write(

@@ -17,6 +17,12 @@ use crate::{
 
 // ===== tailor.yaml — workspace / tool config (reference/tailor-yaml.md) =====
 
+/// The highest `schemaVersion` this build of tailor understands. A config may declare any version
+/// from 1 up to this (older majors stay supported — backward compatible); a higher version is
+/// rejected because it may use semantics this tailor does not implement. Bump when a
+/// backward-incompatible config change ships.
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
+
 /// `tailor.yaml` — the workspace root: toolchains, runtime, defaults, and the image catalogue.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -72,6 +78,14 @@ pub enum ExportScope {
 
 impl ToolConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
+        // Reject a config newer than this tailor understands (`schemaVersion: 0` is never valid).
+        // Older/current versions pass — images and fragments inherit this one workspace version.
+        if self.schema_version == 0 || self.schema_version > SUPPORTED_SCHEMA_VERSION {
+            return Err(ConfigError::UnsupportedSchemaVersion {
+                found: self.schema_version,
+                supported: SUPPORTED_SCHEMA_VERSION,
+            });
+        }
         self.toolchains.validate()?;
         ensure_unique_names(
             "toolsDirSources",
