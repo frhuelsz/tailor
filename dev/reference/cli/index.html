@@ -492,6 +492,8 @@
       
         
       
+        
+      
     
     
     
@@ -1022,6 +1024,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/embed-in-a-monorepo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Embed tailor in a monorepo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1394,6 +1424,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#tailor-notice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tailor notice
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1533,6 +1574,10 @@
       
         
           
+        
+      
+        
+      
         
       
         
@@ -1756,6 +1801,62 @@
     
   
     Design rationale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/threat-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threat model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/licensing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licensing and third-party notices
   
 
     
@@ -2016,6 +2117,17 @@
     <span class="md-ellipsis">
       
         tailor version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tailor-notice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tailor notice
       
     </span>
   </a>
@@ -2296,6 +2408,13 @@ every slot referenced by the workspace's images; pass names to check only those.
 feed download wired?" gate. See <a href="../../how-to/use-a-base-image-catalogue/">Use a base-image catalogue</a>.</p>
 <h2 id="tailor-version"><code>tailor version</code><a class="headerlink" href="#tailor-version" title="Permanent link">&para;</a></h2>
 <p>Print version information. Same source as <code>tailor --version</code>.</p>
+<h2 id="tailor-notice"><code>tailor notice</code><a class="headerlink" href="#tailor-notice" title="Permanent link">&para;</a></h2>
+<p>Print tailor's own MIT license, then the third-party software notices for every dependency compiled
+into the binary — each crate's name, version, SPDX identifier, and full license text. The notice is
+generated at build time from the resolved dependency set (<code>Cargo.lock</code>), so it always matches the
+binary you are running. Redirect it to a file to archive the attributions:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tailor<span class="w"> </span>notice<span class="w"> </span>&gt;<span class="w"> </span>THIRD-PARTY-NOTICES.txt
+</code></pre></div>
 
 
 
