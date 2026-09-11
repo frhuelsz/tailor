@@ -33,6 +33,10 @@
          <lastmod>2026-09-11</lastmod>
     </url>
     <url>
+         <loc>https://frhuelsz.github.io/tailor/1.0/explanation/licensing/</loc>
+         <lastmod>2026-09-11</lastmod>
+    </url>
+    <url>
          <loc>https://frhuelsz.github.io/tailor/1.0/explanation/merge-model/</loc>
          <lastmod>2026-09-11</lastmod>
     </url>
@@ -70,6 +74,10 @@
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/1.0/how-to/cross-arch-building/</loc>
+         <lastmod>2026-09-11</lastmod>
+    </url>
+    <url>
+         <loc>https://frhuelsz.github.io/tailor/1.0/how-to/embed-in-a-monorepo/</loc>
          <lastmod>2026-09-11</lastmod>
     </url>
     <url>
