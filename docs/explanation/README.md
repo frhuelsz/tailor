@@ -8,3 +8,4 @@ Explanation pages help you understand tailor's model and design choices.
 - [Merge model](merge-model.md)
 - [Architecture](2026-06-22-architecture.md)
 - [Design rationale](design-rationale.md)
+- [Threat model](threat-model.md)
