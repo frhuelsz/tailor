@@ -200,3 +200,12 @@ The same content lives in [`docs/`](docs/README.md):
 - [How-to guides](docs/how-to/README.md): accomplish specific tasks.
 - [Reference](docs/reference/README.md): commands, fields, directives, and formats.
 - [Explanation](docs/explanation/README.md): concepts, merge model, architecture, and design rationale.
+
+## License
+
+tailor is licensed under the [MIT License](LICENSE).
+
+It is distributed as a static binary that links third-party Rust crates, all under
+permissive, attribution-style licenses. Their full notices are embedded in the binary and printed by
+`tailor notice`. Dependency licenses are gated in CI by [`cargo-deny`](deny.toml) to an allow-list of
+permissive licenses (no copyleft). See [Licensing and third-party notices](docs/explanation/licensing.md).

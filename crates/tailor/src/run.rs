@@ -103,6 +103,10 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
             print_version();
             return Ok(());
         }
+        Command::Notice => {
+            print_notice();
+            return Ok(());
+        }
         Command::Init(args) => return init(args),
         Command::Add { what } => return add(what),
         Command::Convert(args) => {
@@ -124,7 +128,11 @@ pub(crate) async fn dispatch(cli: Cli) -> Result<(), AppError> {
         ic_log_level: cli.ic_log_level.map(Into::into),
     };
     match cli.command {
-        Command::Version | Command::Init(_) | Command::Add { .. } | Command::Convert(_) => {
+        Command::Version
+        | Command::Notice
+        | Command::Init(_)
+        | Command::Add { .. }
+        | Command::Convert(_) => {
             unreachable!("handled before workspace discovery")
         }
         Command::List => {
@@ -182,6 +190,24 @@ fn selector(args: &crate::cli::SelectArgs, arches: &[String]) -> Result<Selector
 fn print_version() {
     use clap::CommandFactory;
     print!("{}", Cli::command().render_version());
+}
+
+/// Print tailor's own MIT license followed by the third-party notices for every dependency linked
+/// into the binary. The third-party text is generated at build time (`build.rs`) from the crate
+/// sources and embedded via `OUT_DIR`, so it always matches the built dependency set.
+fn print_notice() {
+    const TAILOR_LICENSE: &str =
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE"));
+    const THIRD_PARTY_NOTICES: &str =
+        include_str!(concat!(env!("OUT_DIR"), "/third-party-notices.txt"));
+
+    println!("tailor is distributed under the MIT License:\n");
+    print!("{TAILOR_LICENSE}");
+    if !TAILOR_LICENSE.ends_with('\n') {
+        println!();
+    }
+    println!();
+    print!("{THIRD_PARTY_NOTICES}");
 }
 
 fn load_workspace(cli: &Cli) -> Result<Workspace, AppError> {

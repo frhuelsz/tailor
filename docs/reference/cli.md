@@ -170,3 +170,14 @@ feed download wired?" gate. See [Use a base-image catalogue](../how-to/use-a-bas
 ## `tailor version`
 
 Print version information. Same source as `tailor --version`.
+
+## `tailor notice`
+
+Print tailor's own MIT license, then the third-party software notices for every dependency compiled
+into the binary — each crate's name, version, SPDX identifier, and full license text. The notice is
+generated at build time from the resolved dependency set (`Cargo.lock`), so it always matches the
+binary you are running. Redirect it to a file to archive the attributions:
+
+```bash
+tailor notice > THIRD-PARTY-NOTICES.txt
+```

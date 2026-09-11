@@ -16,6 +16,8 @@ rust-version = "1.91"
 license = "MIT"
 repository = "https://github.com/frhuelsz/tailor"
 authors = ["tailor contributors"]
+# The crates are internal to the tailor binary (not a published library API); never publish them.
+publish = false
 
 # All third-party deps are pinned here; per-crate manifests use `<name> = { workspace = true }`.
 # Deps are added as the crates that need them are implemented (see docs/2026-06-22-architecture.md §9.2).
@@ -79,6 +81,9 @@ tar = "0.4"
 
 # --- globbing ---
 glob = "0.3"
+
+# --- build-time license collection (build-dependency only; not linked into the binary) ---
+cargo_metadata = "0.23"
 
 # --- observability ---
 tracing = "0.1"

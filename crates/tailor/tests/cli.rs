@@ -530,6 +530,34 @@ fn empty_selection_is_rejected() {
 // ───────────────────────────── version ────────────────────────────────────────────────────────────
 
 #[test]
+fn notice_prints_own_license_and_third_party_notices() {
+    let assert = tailor().arg("notice").assert().success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout);
+    // tailor's own MIT license.
+    assert!(out.contains("MIT License"), "missing tailor license");
+    assert!(
+        out.contains("Copyright (c) 2026 tailor contributors"),
+        "missing tailor copyright"
+    );
+    // The third-party section with real dependency license text (e.g. serde, tokio, clap).
+    assert!(
+        out.contains("THIRD-PARTY SOFTWARE NOTICES"),
+        "missing third-party section"
+    );
+    for crate_name in ["serde", "tokio", "clap"] {
+        assert!(
+            out.contains(&format!("\n{crate_name} ")),
+            "expected a notice entry for `{crate_name}`"
+        );
+    }
+    // Full permission text must be reproduced, not just SPDX identifiers.
+    assert!(
+        out.contains("Permission is hereby granted"),
+        "expected reproduced license text"
+    );
+}
+
+#[test]
 fn version_subcommand_matches_flag() {
     let from_flag = tailor().arg("--version").assert().success();
     let from_subcommand = tailor().arg("version").assert().success();

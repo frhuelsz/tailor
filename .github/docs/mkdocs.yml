@@ -84,6 +84,7 @@ nav:
       - Select a container engine: how-to/select-a-container-engine.md
       - Sign an image: how-to/sign-an-image.md
       - Build a portable binary: how-to/build-a-portable-binary.md
+      - Embed tailor in a monorepo: how-to/embed-in-a-monorepo.md
   - Reference:
       - reference/README.md
       - CLI: reference/cli.md
@@ -99,3 +100,5 @@ nav:
       - Base images: explanation/base-images.md
       - Merge model: explanation/merge-model.md
       - Design rationale: explanation/design-rationale.md
+      - Threat model: explanation/threat-model.md
+      - Licensing and third-party notices: explanation/licensing.md

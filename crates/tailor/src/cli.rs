@@ -170,6 +170,8 @@ pub(crate) enum Command {
     Slugs(ImagesArgs),
     /// Print version information (identical to `--version`).
     Version,
+    /// Print tailor's license and the third-party software notices for its dependencies.
+    Notice,
     /// Scaffold a new tailor project (manifest and/or image definition).
     Init(InitArgs),
     /// Add an image or axis to an existing tailor project.

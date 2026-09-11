@@ -9,3 +9,4 @@ Explanation pages help you understand tailor's model and design choices.
 - [Architecture](2026-06-22-architecture.md)
 - [Design rationale](design-rationale.md)
 - [Threat model](threat-model.md)
+- [Licensing and third-party notices](licensing.md)
