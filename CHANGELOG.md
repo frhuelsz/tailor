@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-11
+
 ### Changed
 
 - `runtime.buildDirBase` is now optional: it defaults to `<output>/.tailor/build`,
@@ -121,7 +123,8 @@ First stable release. The `tailor` CLI is now covered by the
 
 - Initial tailor CLI, runtime, documentation, and tests.
 
-[Unreleased]: https://github.com/frhuelsz/tailor/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/frhuelsz/tailor/compare/tailor-v1.0.1...HEAD
+[1.0.1]: https://github.com/frhuelsz/tailor/compare/v1.0.0...tailor-v1.0.1
 [1.0.0]: https://github.com/frhuelsz/tailor/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/frhuelsz/tailor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/frhuelsz/tailor/compare/v0.6.0...v0.7.0
