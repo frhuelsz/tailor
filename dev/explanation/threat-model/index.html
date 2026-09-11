@@ -1814,13 +1814,14 @@ container per build) around tailor; tailor alone is not that boundary.</p>
 <p>These guards defend against the accident class above and are considered
 load-bearing — treat a regression in them as a serious bug:</p>
 <ul>
-<li><strong>Never operate on the filesystem root.</strong> Before any build directory,
-  writable tools directory, or writable RPM source is bound into the privileged
-  container, tailor refuses paths that resolve to <code>/</code>, that contain the current
-  working directory, or (for build directories) whose nearest existing ancestor
-  lives on the same device as <code>/</code>. The janitor likewise refuses to bind <code>/</code> to
-  reclaim a child. This is what stops a stray build directory from exposing the
-  whole host to a recursive delete. See <code>crates/tailor-exec/src/guard.rs</code>.</li>
+<li><strong>Never operate on the filesystem root or a system directory.</strong> Before any
+  build directory, writable tools directory, or writable RPM source is bound
+  into the privileged container, tailor refuses paths that resolve to <code>/</code>, to a
+  well-known system directory (<code>/usr</code>, <code>/etc</code>, <code>/home</code>, <code>/var</code>, …) or <code>$HOME</code>, or
+  that contain the current working directory. The janitor likewise refuses to
+  bind <code>/</code> to reclaim a child. This is what stops a stray build directory from
+  exposing the whole host to a recursive delete. See
+  <code>crates/tailor-exec/src/guard.rs</code>.</li>
 <li><strong>Single build per output directory.</strong> A build takes an advisory lock on its
   output directory, so two concurrent builds cannot race on the shared stamp,
   hash-cache, and artifact writes. See <code>crates/tailor-exec/src/lock.rs</code>.</li>

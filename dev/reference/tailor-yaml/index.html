@@ -1899,7 +1899,7 @@
 <td><code>runtime.buildDirBase</code></td>
 <td>path</td>
 <td>no</td>
-<td>Host filesystem base for per-cell IC build dirs (<code>&lt;buildDirBase&gt;/&lt;slug&gt;</code>). Must be on a separate filesystem from <code>/</code>. Omit to keep IC's container-local <code>/tmp</code>.</td>
+<td>Host filesystem base for per-cell IC build dirs (<code>&lt;buildDirBase&gt;/&lt;slug&gt;</code>). Omit to use the default under the output dir (<code>&lt;output&gt;/.tailor/build</code>). Must not be <code>/</code>, a system directory, or <code>$HOME</code>.</td>
 </tr>
 <tr>
 <td><code>runtime.logLevel</code></td>

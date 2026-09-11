@@ -1970,7 +1970,7 @@
 <td><code>toolsDir</code></td>
 <td><code>{source}</code></td>
 <td>no</td>
-<td>Tailor-managed IC <code>--tools-dir</code>. <code>source</code> is a <code>toolsDirSources</code> name or inline <code>{container, tag?, pull?}</code>. Always bound writable as a per-cell copy under <code>runtime.buildDirBase</code>, which it therefore requires.</td>
+<td>Tailor-managed IC <code>--tools-dir</code>. <code>source</code> is a <code>toolsDirSources</code> name or inline <code>{container, tag?, pull?}</code>. Always bound writable as a per-cell copy under <code>runtime.buildDirBase</code> (which defaults to <code>&lt;output&gt;/.tailor/build</code>).</td>
 </tr>
 <tr>
 <td><code>matrix</code></td>
@@ -2063,7 +2063,8 @@
 <code>source</code> is either a name from workspace <code>toolsDirSources:</code> or an inline container source. The
 tools-dir is always bound <strong>writable</strong> as a per-cell disposable copy under <code>runtime.buildDirBase</code>
 (IC rewrites <code>resolv.conf</code> inside the tools chroot during package operations, so a read-only bind
-cannot work), so any image using <code>toolsDir:</code> <strong>requires <code>runtime.buildDirBase</code></strong>. Inline sources
+cannot work). <code>runtime.buildDirBase</code> defaults to <code>&lt;output&gt;/.tailor/build</code>, so no configuration is
+needed; set it to override the location. Inline sources
 accept the same <code>pull: always | missing | never</code> policy as workspace <code>toolsDirSources</code>; local-only
 images without a <code>RepoDigest</code> run by image <code>Id</code> and are not lockable. The inline IC
 <code>config.previewFeatures</code> list must include <code>tools-dir</code>.</p>

@@ -1668,13 +1668,13 @@ named source in <code>tailor.yaml</code>:</p>
 disposable directory <code>&lt;buildDirBase&gt;/&lt;slug&gt;/tools-dir</code>, binds <strong>that copy writable</strong>, and passes the
 translated path to IC customize passes. It never emits <code>--tools-dir /</code>.</p>
 <p>The tools dir is always writable because IC rewrites <code>resolv.conf</code> inside the tools chroot during
-package operations — a read-only bind fails. So any image using <code>toolsDir:</code> <strong>requires
-<code>runtime.buildDirBase</code></strong> (the isolated filesystem the per-cell copy lives on):</p>
+package operations — a read-only bind fails. <code>runtime.buildDirBase</code> defaults to
+<code>&lt;output&gt;/.tailor/build</code>, so no configuration is required; set it to place the per-cell copy
+elsewhere:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># tailor.yaml</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">runtime</span><span class="p">:</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">buildDirBase</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/mnt/tailor-build</span>
 </code></pre></div>
-<p>Without it, <code>tailor validate</code> / <code>build</code> fails fast with a clear error.</p>
 
 
 

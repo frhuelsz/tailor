@@ -2270,7 +2270,7 @@
 </tr>
 <tr>
 <td><code>--build-dir-base PATH</code></td>
-<td>Override <code>runtime.buildDirBase</code>: place each cell's build scratch under this directory (which must not be <code>/</code> or on the same filesystem as <code>/</code>). Lets CI point scratch at a pool-specific filesystem without editing the committed <code>tailor.yaml</code>.</td>
+<td>Override <code>runtime.buildDirBase</code>: place each cell's build scratch under this directory (which must not be <code>/</code>, a system directory, or <code>$HOME</code>). Lets CI point scratch at a specific filesystem without editing the committed <code>tailor.yaml</code>.</td>
 </tr>
 <tr>
 <td><code>--dry-run</code></td>
