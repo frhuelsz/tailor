@@ -7,10 +7,45 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-10
+
+First stable release. The `tailor` CLI is now covered by the
+[compatibility policy](COMPATIBILITY.md); the library crates remain internal.
+
 ### Added
 
-- 1.0.0 stabilization is in progress, including release provenance, compatibility
-  guarantees, signing support, and schema hardening.
+- Compatibility policy (`COMPATIBILITY.md`) and threat model
+  (`docs/explanation/threat-model.md`).
+- Workspace-level `previewFeatures` opt-in for not-yet-stable features; signing
+  is gated behind `previewFeatures: [signing]`.
+- Documented exit-code taxonomy: `2` usage error, `1` build failure, `130`
+  interrupted (SIGINT).
+- `--clones` now produces distinct artifacts (`<slug>_clone<n>`), each with its
+  own stamp, and always rebuilds.
+- Crash-safe atomic writes for build stamps, the hash cache, and published
+  artifacts.
+- Single-build-per-output-directory advisory lock.
+- Release provenance: version/tag gate, test gate, cosign keyless signing,
+  CycloneDX SBOM, and build provenance attestation; pinned toolchain and action
+  digests.
+
+### Changed
+
+- `tailor lock` freezes the current pins (idempotent); `tailor update`
+  re-resolves every input to its latest digest. The configured janitor image is
+  now pinned in `tailor.lock`.
+- `schemaVersion` is enforced: a version newer than tailor supports is rejected.
+- The build fingerprint folds in a build-schema version, so artifacts correctly
+  rebuild after a tailor upgrade that changes build semantics.
+
+### Fixed
+
+- A `-s`/`--cell` selection meant for a consumer no longer excludes (or errors
+  on) a transitively required producer cell.
+
+### Removed
+
+- The inert `injectFiles` image field (rejected if used).
 
 ## [0.8.0] - 2026-09-09
 
@@ -78,7 +113,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - Initial tailor CLI, runtime, documentation, and tests.
 
-[Unreleased]: https://github.com/frhuelsz/tailor/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/frhuelsz/tailor/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/frhuelsz/tailor/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/frhuelsz/tailor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/frhuelsz/tailor/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/frhuelsz/tailor/compare/v0.5.0...v0.6.0
