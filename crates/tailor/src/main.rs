@@ -37,7 +37,7 @@ async fn main() -> ExitCode {
                 eprintln!("  caused by: {source}");
                 cause = source.source();
             }
-            ExitCode::FAILURE
+            ExitCode::from(error.exit_code())
         }
     }
 }
