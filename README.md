@@ -131,13 +131,18 @@ tailor --version
 Each release binary is published with a checksum, a cosign keyless signature,
 and a GitHub build-provenance attestation.
 
+The signing identity is bound to the repository and workflow that produced the
+release, so set `repo` to the repository you downloaded from. Releases are
+tagged `tailor-v<version>` (a component-scoped tag, so tailor can live inside a
+larger monorepo); the identity regexp matches that ref.
+
 ```bash
 set -euo pipefail
-repo="frhuelsz/tailor"
+repo="frhuelsz/tailor" # the repository you downloaded the release from
 target="x86_64-unknown-linux-musl" # or aarch64-unknown-linux-musl
 binary="tailor-${target}"
 issuer="https://token.actions.githubusercontent.com"
-identity="https://github.com/${repo}/.github/workflows/release.yml@refs/tags/v.*"
+identity="https://github.com/${repo}/.github/workflows/release.yml@refs/tags/tailor-v.*"
 
 sha256sum -c "${binary}.sha256"
 cosign verify-blob \

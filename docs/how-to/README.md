@@ -18,3 +18,4 @@ How-to guides are task-oriented recipes.
 - [Select a container engine (Docker or Podman)](select-a-container-engine.md)
 - [Sign an image](sign-an-image.md)
 - [Build a portable binary](build-a-portable-binary.md)
+- [Embed tailor in a monorepo](embed-in-a-monorepo.md)

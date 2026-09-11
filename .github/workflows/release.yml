@@ -1,14 +1,21 @@
 name: Release
 
-# Triggered by pushing a version tag (e.g. `v0.1.0`), or manually via the Actions
-# tab (provide the tag to release).
+# Triggered by pushing a component-scoped version tag (e.g. `tailor-v1.0.0`), or manually via the
+# Actions tab (provide the tag to release).
+#
+# The tag is component-scoped (`tailor-v*`, not `v*`) so this project can live inside a larger
+# monorepo without colliding with the monorepo's own tags. To relocate this workflow into a monorepo
+# where tailor is a subdirectory: move this file to the monorepo's `.github/workflows/`, set
+# `TAILOR_DIR` below to tailor's path (e.g. `tailor`), and add a `paths:` filter (e.g.
+# `paths: ['tailor/**']`) so it only runs on changes to the tailor subtree. See
+# `docs/how-to/embed-in-a-monorepo.md`.
 on:
   push:
-    tags: ["v*"]
+    tags: ["tailor-v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.1.0)"
+        description: "Tag to release (e.g. tailor-v1.0.0)"
         required: true
 
 # Releases need write access to upload assets / create the release, mint OIDC
@@ -24,6 +31,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # tailor's path within the repository. `.` when tailor is the repository root (this fork); set to
+  # tailor's subdirectory (e.g. `tailor`) when embedded in a monorepo — the only line to change.
+  TAILOR_DIR: "."
 
 jobs:
   test:
@@ -38,18 +48,20 @@ jobs:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ "$RELEASE_TAG" != v* ]]; then
-            echo "::error::Release tag '$RELEASE_TAG' must start with 'v'."
+          # Accept a component-scoped tag (`tailor-v1.2.3`); tolerate a bare `v1.2.3` too.
+          tag_version="${RELEASE_TAG#tailor-}"
+          if [[ "$tag_version" != v* ]]; then
+            echo "::error::Release tag '$RELEASE_TAG' must be of the form 'tailor-vX.Y.Z'."
             exit 1
           fi
-          tag_version="${RELEASE_TAG#v}"
-          manifest_version="$(python3 - <<'PY'
+          tag_version="${tag_version#v}"
+          manifest_version="$(python3 - <<PY
           import pathlib
           import re
           import sys
 
           in_workspace_package = False
-          for line in pathlib.Path("Cargo.toml").read_text(encoding="utf-8").splitlines():
+          for line in pathlib.Path("${TAILOR_DIR}/Cargo.toml").read_text(encoding="utf-8").splitlines():
               stripped = line.strip()
               if stripped.startswith("[") and stripped.endswith("]"):
                   in_workspace_package = stripped == "[workspace.package]"
@@ -69,10 +81,13 @@ jobs:
           fi
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
       - name: Run tests
+        working-directory: ${{ env.TAILOR_DIR }}
         run: cargo test --workspace --locked
       - name: Run clippy
+        working-directory: ${{ env.TAILOR_DIR }}
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Check formatting
+        working-directory: ${{ env.TAILOR_DIR }}
         run: cargo fmt --all --check
 
   build:
@@ -107,13 +122,16 @@ jobs:
         with:
           target: ${{ matrix.target }}
       - name: Build static binary
+        working-directory: ${{ env.TAILOR_DIR }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p tailor
       - name: Stage artifact
+        working-directory: ${{ env.TAILOR_DIR }}
         run: |
           mkdir -p dist
           install -Dm755 "target/${{ matrix.target }}/release/tailor" "dist/tailor-${{ matrix.target }}"
           ( cd dist && sha256sum "tailor-${{ matrix.target }}" > "tailor-${{ matrix.target }}.sha256" )
       - name: Verify the binary is fully static
+        working-directory: ${{ env.TAILOR_DIR }}
         run: |
           BIN="dist/tailor-${{ matrix.target }}"
           file "$BIN"
@@ -121,7 +139,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tailor-${{ matrix.target }}
-          path: dist/*
+          path: ${{ env.TAILOR_DIR }}/dist/*
           if-no-files-found: error
 
   release:
@@ -163,7 +181,7 @@ jobs:
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
-          path: .
+          path: ${{ env.TAILOR_DIR }}
           format: cyclonedx-json
           output-file: dist/tailor-cyclonedx.json
           upload-artifact: false
