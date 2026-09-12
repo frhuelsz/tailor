@@ -1572,7 +1572,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../explanation/2026-06-22-architecture.md" class="md-nav__link">
+      <a href="../../explanation/crate-architecture/" class="md-nav__link">
         
   
   
@@ -1600,14 +1600,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../explanation/architectures/" class="md-nav__link">
+      <a href="../../explanation/target-architectures/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Architectures
+    Target architectures
   
 
     
@@ -2140,7 +2140,7 @@ has exactly one arch, resolved in this order:</p>
 <p>There is no <code>architectures:</code> field — neither per-image nor a workspace default. Declare a non-default
 arch with the axis, or let the base image's own arch supply it. The default is fixed at <code>amd64</code> and
 never the host arch, so a workspace builds the same set everywhere. See
-<a href="../../explanation/architectures/">Architectures</a>
+<a href="../../explanation/target-architectures/">Target architectures</a>
 and <a href="../../how-to/cross-arch-building/">Cross-arch building</a>.</p>
 <h2 id="fragments">Fragments<a class="headerlink" href="#fragments" title="Permanent link">&para;</a></h2>
 <p>Per-cell deltas live in <code>by-*/</code> files whose <strong>path</strong> is the condition — no inline <code>match:</code> needed. A

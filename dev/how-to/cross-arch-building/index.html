@@ -1505,7 +1505,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../explanation/2026-06-22-architecture.md" class="md-nav__link">
+      <a href="../../explanation/crate-architecture/" class="md-nav__link">
         
   
   
@@ -1533,14 +1533,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../explanation/architectures/" class="md-nav__link">
+      <a href="../../explanation/target-architectures/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Architectures
+    Target architectures
   
 
     
@@ -1849,7 +1849,7 @@ axis:</p>
 <p>The <code>arch</code> component of an <code>oci.platform</code> must equal the cell's arch. Always write <code>linux/${arch}</code> so
 each cell pulls its own manifest; a fixed <code>platform: linux/arm64</code> on an <code>amd64</code> cell fails at
 <code>validate</code> before any pull. <code>path</code> and <code>azureLinux</code> bases declare no arch, so the cell arch decides.</p>
-<p>See <a href="../../explanation/architectures/">Architectures</a> for the full model.</p>
+<p>See <a href="../../explanation/target-architectures/">Target architectures</a> for the full model.</p>
 
 
 

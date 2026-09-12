@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://frhuelsz.github.io/tailor/dev/explanation/architectures/">
+        <link rel="canonical" href="https://frhuelsz.github.io/tailor/dev/explanation/crate-architecture/">
       
       
         <link rel="prev" href="../concepts/">
       
       
-        <link rel="next" href="../base-images/">
+        <link rel="next" href="../target-architectures/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Architectures - tailor</title>
+        <title>Architecture - tailor</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#architectures" class="md-skip">
+        <a href="#architecture" class="md-skip">
           Skip to content
         </a>
       
@@ -117,7 +117,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Architectures
+              Architecture
             
           </span>
         </div>
@@ -1400,10 +1400,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../2026-06-22-architecture.md" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1419,6 +1428,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -1428,44 +1438,17 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Architectures
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../target-architectures/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Architectures
+    Target architectures
   
 
     
@@ -1474,81 +1457,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-reserved-axis" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The reserved axis
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#every-cell-has-exactly-one-arch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Every cell has exactly one arch
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#declaring-arch-with-the-axis" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Declaring arch with the axis
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#-platform-and-the-base" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        --platform and the base
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-effective-arch-matrix" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The effective-arch matrix
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1721,69 +1629,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-reserved-axis" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The reserved axis
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#every-cell-has-exactly-one-arch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Every cell has exactly one arch
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#declaring-arch-with-the-axis" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Declaring arch with the axis
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#-platform-and-the-base" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        --platform and the base
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-effective-arch-matrix" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The effective-arch matrix
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1802,89 +1647,53 @@
   
 
 
-<h1 id="architectures">Architectures<a class="headerlink" href="#architectures" title="Permanent link">&para;</a></h1>
-<p><code>arch</code> is tailor's one <strong>reserved</strong> matrix axis. It looks like any other axis, but it is <em>typed</em>: its
-values are closed to <code>amd64</code> and <code>arm64</code>, and the cell's arch is wired straight into the build.</p>
-<h2 id="the-reserved-axis">The reserved axis<a class="headerlink" href="#the-reserved-axis" title="Permanent link">&para;</a></h2>
-<p>Every other axis (<code>edition</code>, <code>channel</code>, <code>variant</code>, …) is an opaque label — any <code>[A-Za-z0-9.-]</code>
-string, meaningful only for partitioning the matrix, <code>${axis}</code> interpolation, <code>by-axis/</code> fragments,
-and <code>--select</code>. <code>arch</code> is all of that <strong>plus</strong> real semantics tailor reaches into by name:</p>
-<ul>
-<li>the container platform is <strong><code>--platform linux/&lt;arch&gt;</code></strong>;</li>
-<li>the base image is selected per arch (a <code>baseImages:</code> slot's <code>arch</code>, and the <code>oci.platform</code>);</li>
-<li><code>arch</code> is always part of the slug;</li>
-<li><code>${arch}</code> interpolates into config and base URIs.</li>
-</ul>
-<p>So values are restricted: <code>amd64</code> or <code>arm64</code>. Anything else is an error.</p>
-<h2 id="every-cell-has-exactly-one-arch">Every cell has exactly one arch<a class="headerlink" href="#every-cell-has-exactly-one-arch" title="Permanent link">&para;</a></h2>
-<p>A cell's <strong>effective arch</strong> is resolved in this order:</p>
-<ol>
-<li>the <strong><code>arch</code> matrix axis</strong> — one cell per value;</li>
-<li>else the <strong>base image's own arch</strong> — a <code>baseImages:</code> slot's <code>arch</code>, a local <code>path</code> base's <code>arch</code>,
-   or an <code>oci.platform</code>'s arch component;</li>
-<li>else the built-in default <strong><code>amd64</code></strong>.</li>
-</ol>
-<p>The default is fixed at <code>amd64</code> — it is <strong>not</strong> the host arch. A build on an arm64 host still targets
-amd64 unless you declare otherwise, so a workspace produces the same set on every machine. To build
-another arch, declare the <code>arch</code> axis, or let the base image's own arch supply it.</p>
-<p>There is no <code>architectures:</code> field — neither per-image nor a workspace default. An image declares a
-non-default arch through the <code>arch</code> axis, or inherits it from the base image it resolves to.</p>
-<h2 id="declaring-arch-with-the-axis">Declaring arch with the axis<a class="headerlink" href="#declaring-arch-with-the-axis" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># image.yaml</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gizmo</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">matrix</span><span class="p">:</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">amd64</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">arm64</span><span class="p p-Indicator">]</span><span class="w">      </span><span class="c1"># two cells: gizmo_amd64_cosi, gizmo_arm64_cosi</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nt">base</span><span class="p">:</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./bases/gizmo-${arch}.img</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nt">outputs</span><span class="p">:</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cosi</span>
-</code></pre></div>
-<p>With no <code>arch</code> axis and no base arch, <code>gizmo</code> builds one <code>amd64</code> cell. Order <code>arch</code> first in
-the matrix so it sits widest in the slug and fragment precedence.</p>
-<h2 id="-platform-and-the-base"><code>--platform</code> and the base<a class="headerlink" href="#-platform-and-the-base" title="Permanent link">&para;</a></h2>
-<p>The cell arch is the single source of truth: <code>--platform linux/&lt;arch&gt;</code>, the base pull, the slug, and
-<code>${arch}</code> all derive from it. A registry base is multi-arch — <code>platform: linux/${arch}</code> selects the
-right manifest per cell. A fixed <code>platform: linux/arm64</code> on an amd64 cell would pull the wrong
-manifest, so tailor rejects it at <code>validate</code> time: the <code>arch</code> component of <code>oci.platform</code> must equal
-the cell arch. <code>path</code> and <code>azureLinux</code> bases declare no arch, so they never conflict — the cell arch
-decides.</p>
-<h2 id="the-effective-arch-matrix">The effective-arch matrix<a class="headerlink" href="#the-effective-arch-matrix" title="Permanent link">&para;</a></h2>
-<p>When both the image arch (the axis) and a base-image arch (a catalogue slot's <code>arch</code>, or an
-<code>oci.platform</code>'s arch component) are set, they must agree:</p>
+<h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
+<p>tailor is split into small Rust crates with an inward dependency direction.</p>
+<pre class="mermaid"><code>graph TD
+  CLI["tailor&lt;br/&gt;binary CLI"] --&gt; CORE["tailor-core"]
+  CLI --&gt; CONFIG["tailor-config"]
+  CLI --&gt; EXEC["tailor-exec"]
+  CLI --&gt; RESOLVE["tailor-resolve"]
+  CLI --&gt; SIGN["tailor-sign"]
+  CORE --&gt; CONFIG
+  EXEC -. implements ports .-&gt; CORE
+  RESOLVE -. implements ports .-&gt; CORE
+  SIGN -. implements ports .-&gt; CORE</code></pre>
 <table>
 <thead>
 <tr>
-<th>image arch ↓ \ base arch →</th>
-<th><em>(unset)</em></th>
-<th><code>arm64</code></th>
-<th><code>amd64</code></th>
+<th>Crate</th>
+<th>Responsibility</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong><em>(unset)</em></strong></td>
-<td><code>amd64</code></td>
-<td><code>arm64</code></td>
-<td><code>amd64</code></td>
+<td><code>tailor-config</code></td>
+<td>Parse <code>tailor.yaml</code>/<code>image.yaml</code>, expand matrices, merge fragments, interpolate params, render cells.</td>
 </tr>
 <tr>
-<td><strong><code>arm64</code></strong></td>
-<td><code>arm64</code></td>
-<td><code>arm64</code></td>
-<td><strong>error</strong></td>
+<td><code>tailor-core</code></td>
+<td>Domain model, build plans, lockfile/stamp logic, orchestration, and port traits.</td>
 </tr>
 <tr>
-<td><strong><code>amd64</code></strong></td>
-<td><code>amd64</code></td>
-<td><strong>error</strong></td>
-<td><code>amd64</code></td>
+<td><code>tailor-resolve</code></td>
+<td>Resolve toolchain and base image digests/hashes.</td>
+</tr>
+<tr>
+<td><code>tailor-exec</code></td>
+<td>Docker/Bollard execution adapter, IC arg construction, path translation, cleanup.</td>
+</tr>
+<tr>
+<td><code>tailor-sign</code></td>
+<td>Host-side signing backends for the <code>Signer</code> port (openssl/<code>sbsign</code>); preview-gated.</td>
+</tr>
+<tr>
+<td><code>tailor</code></td>
+<td>CLI parsing, command dispatch, output formatting, and composition root.</td>
 </tr>
 </tbody>
 </table>
-<p>Both unset → <code>amd64</code> (or the <code>tailor.yaml</code> override); exactly one set fills in the other; both set must
-agree, else it is a validate-time error naming the cell and the two arches.</p>
-<p>See <a href="../../how-to/cross-arch-building/">Cross-arch building</a>, <a href="../../reference/image-yaml/">image.yaml</a>,
-and <a href="../../reference/tailor-yaml/">tailor.yaml</a>.</p>
+<p>The config-to-render path is deterministic and synchronous. Container execution is the async boundary because Docker/Bollard and log streaming are async.</p>
 
 
 
@@ -1937,13 +1746,13 @@ and <a href="../../reference/tailor-yaml/">tailor.yaml</a>.</p>
         
         
           
-          <a href="../base-images/" class="md-footer__link md-footer__link--next" aria-label="Next: Base images">
+          <a href="../target-architectures/" class="md-footer__link md-footer__link--next" aria-label="Next: Target architectures">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Base images
+                Target architectures
               </div>
             </div>
             <div class="md-footer__button md-icon">

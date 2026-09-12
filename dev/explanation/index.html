@@ -1403,7 +1403,7 @@
   
   
     <li class="md-nav__item">
-      <a href="2026-06-22-architecture.md" class="md-nav__link">
+      <a href="crate-architecture/" class="md-nav__link">
         
   
   
@@ -1431,14 +1431,14 @@
   
   
     <li class="md-nav__item">
-      <a href="architectures/" class="md-nav__link">
+      <a href="target-architectures/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Architectures
+    Target architectures
   
 
     
@@ -1619,6 +1619,47 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#start-here-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start here (the model)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-and-internals-contributors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design and internals (contributors)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-and-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security and compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1638,16 +1679,32 @@
 
 
 <h1 id="explanation">Explanation<a class="headerlink" href="#explanation" title="Permanent link">&para;</a></h1>
-<p>Explanation pages help you understand tailor's model and design choices.</p>
+<p>Explanation pages help you understand tailor's model and design choices. Unlike
+the how-to guides, they are meant to be read rather than followed.</p>
+<h2 id="start-here-the-model">Start here (the model)<a class="headerlink" href="#start-here-the-model" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="concepts/">Concepts</a></li>
-<li><a href="architectures/">Architectures</a></li>
-<li><a href="base-images/">Base images</a></li>
-<li><a href="merge-model/">Merge model</a></li>
-<li><a href="2026-06-22-architecture.md">Architecture</a></li>
-<li><a href="design-rationale/">Design rationale</a></li>
-<li><a href="threat-model/">Threat model</a></li>
-<li><a href="licensing/">Licensing and third-party notices</a></li>
+<li><a href="concepts/">Concepts</a> — the core vocabulary: images, matrices, axes, cells,
+  slugs, fragments, and toolchains. Read this first.</li>
+<li><a href="merge-model/">Merge model</a> — how base config and per-axis fragments combine,
+  and the precedence rules that decide the final cell config.</li>
+<li><a href="target-architectures/">Target architectures</a> — how the reserved <code>arch</code> axis
+  selects the target platform and base image, and how the effective arch is resolved.</li>
+<li><a href="base-images/">Base images</a> — where a cell's starting image comes from and the
+  ways to declare one.</li>
+</ul>
+<h2 id="design-and-internals-contributors">Design and internals (contributors)<a class="headerlink" href="#design-and-internals-contributors" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="crate-architecture/">Architecture</a> — the crate layout and dependency
+  direction of the tailor workspace.</li>
+<li><a href="design-rationale/">Design rationale</a> — why tailor is shaped the way it is,
+  and the trade-offs behind the key decisions.</li>
+</ul>
+<h2 id="security-and-compliance">Security and compliance<a class="headerlink" href="#security-and-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="threat-model/">Threat model</a> — the trust boundaries and what tailor does to
+  keep a build from reaching the host.</li>
+<li><a href="licensing/">Licensing and third-party notices</a> — tailor's license and how it
+  reports the licenses of its dependencies.</li>
 </ul>
 
 
