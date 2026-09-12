@@ -1,6 +1,6 @@
 # Documentation audit & resolution plan
 
-Status: Audit complete — resolution pending review
+Status: Resolved — all four phases implemented (2026-09-11); site builds `--strict`-clean.
 Scope: All public docs (`README.md`, `docs/**`, `COMPATIBILITY.md`, `CHANGELOG.md`,
 `.github/docs/mkdocs.yml`). Docs-only — no code changes in this pass.
 Method: a mechanical pass (nav/link/hygiene/inventory) plus three parallel
@@ -202,4 +202,39 @@ the how-to index.
 - **Dead `WritableToolsDirNeedsBuildDir` path + stale comment** in
   `crates/tailor/src/run.rs` (tools-dir "requires buildDirBase") — unreachable now
   that `buildDirBase` defaults; remove or convert to a defensive invariant with an
-  accurate comment.
+  accurate comment. **(Partially addressed: `validate_tools_dir_runtime` removed in
+  commit `0e68f97`; the orchestrator's defensive invariant + comment remain.)**
+
+---
+
+## Resolution log (2026-09-11)
+
+All four phases implemented and pushed to `main`; a `mkdocs build --strict` is warning-free.
+
+- **Phase 1 (`6079c64`)** — fixed the broken Architecture nav/orphan; renamed
+  `architecture.md`→`crate-architecture.md` and `architectures.md`→`target-architectures.md`
+  (updated every link + nav); added the missing `tailor-sign` crate to the architecture page;
+  rewrote the explanation index with summaries/reading-order; removed the unused `logo.png`.
+- **Phase 2 (`7815aa7`)** — corrected the signing status (local-test-ca/keypair sign end-to-end,
+  preview-gated; only azure-key-vault is config-only), `explain --with-config`, lock/update
+  semantics, `export` wording, version strings; replaced public→`meta/docs` links.
+- **Phase 3 (`aa1600f` guides + `a37ae00`)** — new how-to guides (clones, license notices, exit
+  codes, preview features, build directory); documented `bases list`, `matrix ado`/`--ado`, exit
+  codes, `runtime.logDir`, `defaults.outputArtifacts`, `publishCaCert`, output-format required;
+  refreshed README features + docs landing + COMPATIBILITY + CHANGELOG; regrouped the how-to index;
+  expanded lock/update workflow.
+- **Phase 4 (`677ced2`)** — tutorial vocabulary/transition/next-steps, `--select` introduction,
+  dry-run wording, `arch`-reserved note, fixed the stale `tailor.yaml` arch-override line,
+  merge-model numbered sort-order + worked example, design-rationale intro, directives cross-link,
+  installation verification link.
+- **Strict-clean (`2b5be47`)** — pointed remaining repo-root links (`LICENSE`, `deny.toml`,
+  `README`) at canonical GitHub URLs so the site builds under `--strict`.
+
+Notes / deviations from the original findings:
+- #43: `logo_small.png` is **used** (both READMEs); only `logo.png` was unused and removed.
+- #6: the audit suggested "signed-image execution is not yet available", but the shipped binary
+  actually signs end-to-end for `local-test-ca`/`keypair` — the docs were corrected to match code.
+- #4: CHANGELOG compare links were already convention-correct (`v*` ≤1.0.0, `tailor-v*` after);
+  only a convention note was added.
+- Remaining P2/P3 depth items (#34 explanation dedup, #36 architecture expansion, #37 handoff) were
+  judged adequate after the index/framing and crate-table additions; not further expanded.
