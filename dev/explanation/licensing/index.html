@@ -1907,12 +1907,12 @@
 
 
 <h1 id="licensing-and-third-party-notices">Licensing and third-party notices<a class="headerlink" href="#licensing-and-third-party-notices" title="Permanent link">&para;</a></h1>
-<p>tailor is licensed under the <a href="../../LICENSE">MIT License</a>. Because tailor is distributed as a
+<p>tailor is licensed under the <a href="https://github.com/frhuelsz/tailor/blob/main/LICENSE">MIT License</a>. Because tailor is distributed as a
 statically linked binary, every dependency it links is compiled into that binary, so their licenses
 travel with it. This page describes how tailor stays compliant.</p>
 <h2 id="policy-what-dependencies-are-allowed">Policy: what dependencies are allowed<a class="headerlink" href="#policy-what-dependencies-are-allowed" title="Permanent link">&para;</a></h2>
 <p>tailor restricts its dependency tree to <strong>permissive, attribution-style licenses</strong> — no copyleft.
-The policy lives in <a href="../../deny.toml"><code>deny.toml</code></a> and is enforced in CI by
+The policy lives in <a href="https://github.com/frhuelsz/tailor/blob/main/deny.toml"><code>deny.toml</code></a> and is enforced in CI by
 <a href="https://github.com/EmbarkStudios/cargo-deny"><code>cargo-deny</code></a>: a pull request that introduces a
 dependency under a license outside the allow-list fails the <code>cargo-deny</code> check until reviewed.</p>
 <p>The allow-list is:</p>

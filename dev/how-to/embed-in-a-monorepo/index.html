@@ -2059,7 +2059,7 @@ SBOM; swap cosign for the internal signer.</p>
 <p>Keyless signatures and attestations are bound to the <strong>repository and workflow</strong>
 that produced them. After moving, the verification identity changes from the
 fork's repo to the host repo. Update the <code>repo</code> and the identity regexp in the
-<a href="../../README.md#verifying-releases">verification instructions</a>:</p>
+<a href="https://github.com/frhuelsz/tailor#verifying-releases">verification instructions</a>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>identity="https://github.com/&lt;host-org&gt;/&lt;host-repo&gt;/.github/workflows/tailor-release.yml@refs/tags/tailor-v.*"
 </code></pre></div>
 <p>Artifacts released before the move remain verifiable against the old identity;
