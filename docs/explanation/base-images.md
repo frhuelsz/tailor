@@ -55,7 +55,7 @@ A slot may declare its `arch` (`amd64`/`arm64`) — the same vocabulary as the `
 `linux/...` platform string. It drives the pull platform and reconciles with the referencing cell: if
 both are set they must agree, either fills the other, and a conflict is a `validate`-time error. This
 is why per-arch local bases are modeled as arch-specific slots (e.g. `core_arm64`) swapped in by a
-`by-arch/` fragment. See [Architectures](architectures.md).
+`by-arch/` fragment. See [Target architectures](target-architectures.md).
 
 ## What stays explicit
 

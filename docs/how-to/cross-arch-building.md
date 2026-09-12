@@ -68,4 +68,4 @@ The `arch` component of an `oci.platform` must equal the cell's arch. Always wri
 each cell pulls its own manifest; a fixed `platform: linux/arm64` on an `amd64` cell fails at
 `validate` before any pull. `path` and `azureLinux` bases declare no arch, so the cell arch decides.
 
-See [Architectures](../explanation/architectures.md) for the full model.
+See [Target architectures](../explanation/target-architectures.md) for the full model.

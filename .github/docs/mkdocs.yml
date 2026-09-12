@@ -95,8 +95,8 @@ nav:
   - Explanation:
       - explanation/README.md
       - Concepts: explanation/concepts.md
-      - Architecture: explanation/2026-06-22-architecture.md
-      - Architectures: explanation/architectures.md
+      - Architecture: explanation/crate-architecture.md
+      - Target architectures: explanation/target-architectures.md
       - Base images: explanation/base-images.md
       - Merge model: explanation/merge-model.md
       - Design rationale: explanation/design-rationale.md

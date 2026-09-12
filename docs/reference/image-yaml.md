@@ -126,7 +126,7 @@ has exactly one arch, resolved in this order:
 There is no `architectures:` field — neither per-image nor a workspace default. Declare a non-default
 arch with the axis, or let the base image's own arch supply it. The default is fixed at `amd64` and
 never the host arch, so a workspace builds the same set everywhere. See
-[Architectures](../explanation/architectures.md)
+[Target architectures](../explanation/target-architectures.md)
 and [Cross-arch building](../how-to/cross-arch-building.md).
 
 ## Fragments
