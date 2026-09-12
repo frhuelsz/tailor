@@ -1708,6 +1708,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fragment-sort-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fragment sort order
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fragment sort order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#maps-lists-and-scalars" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1867,6 +1895,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#fragment-sort-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fragment sort order
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fragment sort order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#maps-lists-and-scalars" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1927,6 +1983,31 @@
 single-axis ones they refine (more axes = more specific = later), and a narrower single-value fragment wins
 over a broader disjunction on the same axis. <code>tailor explain &lt;image&gt; --cell &lt;slug&gt;</code> prints the exact order;
 see <a href="../../reference/image-yaml/">image.yaml</a> and <a href="../../reference/directives/">Merge directives</a>.</p>
+<h2 id="fragment-sort-order">Fragment sort order<a class="headerlink" href="#fragment-sort-order" title="Permanent link">&para;</a></h2>
+<p>For a given cell, the fragments that apply are sorted by these keys, in order, and merged base → last:</p>
+<ol>
+<li><strong>Arity</strong> — how many axes the fragment constrains. A single-axis fragment
+   (<code>by-edition/pro.yaml</code>) applies before a multi-axis one (<code>by-edition+arch/pro+arm64.yaml</code>), so the
+   more specific composite wins.</li>
+<li><strong>Axis declaration order</strong> — among fragments of equal arity, the axis declared earlier in <code>matrix:</code>
+   applies first (later-declared axes win later conflicts).</li>
+<li><strong>Breadth</strong> — a broader disjunction (<code>by-channel/stable+edge.yaml</code>) applies before a narrower
+   single value (<code>by-channel/edge.yaml</code>) on the same axis, so the single value wins.</li>
+</ol>
+<h3 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">matrix</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">edition</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">lite</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pro</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">stable</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">edge</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>For the cell <code>edition=pro, channel=edge</code>, these fragments merge in this order (each may override the
+previous):</p>
+<ol>
+<li><code>image.yaml</code> (the base)</li>
+<li><code>by-edition/pro.yaml</code> (arity 1, first-declared axis)</li>
+<li><code>by-channel/stable+edge.yaml</code> (arity 1, later axis, broad)</li>
+<li><code>by-channel/edge.yaml</code> (arity 1, later axis, narrow — beats the disjunction above)</li>
+<li><code>by-edition+channel/pro+edge.yaml</code> (arity 2 — most specific, wins last)</li>
+</ol>
 <h2 id="maps-lists-and-scalars">Maps, lists, and scalars<a class="headerlink" href="#maps-lists-and-scalars" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Maps deep-merge.</li>

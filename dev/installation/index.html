@@ -1965,6 +1965,9 @@
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span><span class="s2">"tailor-</span><span class="si">${</span><span class="nv">target</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>/usr/local/bin/tailor
 </code></pre></div>
 <p>The binary is fully static: it does not require glibc or OpenSSL on the target machine.</p>
+<p>Each release also publishes a cosign signature bundle, an SBOM, and build provenance. To verify the
+binary's signature and provenance (not just its checksum), follow the verification steps in the
+<a href="https://github.com/frhuelsz/tailor#verifying-releases">project README</a>.</p>
 <h2 id="from-source">From source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
 <p>The crate is not published to crates.io yet, so install from git (or a local checkout):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>--git<span class="w"> </span>https://github.com/frhuelsz/tailor<span class="w"> </span>tailor

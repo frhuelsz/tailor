@@ -2031,7 +2031,7 @@
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>...
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>imagecustomizer ... --config-file ... --output-image-format cosi ...
 </code></pre></div>
-<p><code>--dry-run</code> renders the container/Image Customizer invocation without starting the container. Remove <code>--dry-run</code> when you have Docker daemon access and want to build the artifact.</p>
+<p><code>--dry-run</code> renders the build plan — the container/Image Customizer invocation — and prints it without starting a container. It contacts no container engine, so it works with no Docker daemon. Remove <code>--dry-run</code> when you have Docker daemon access and want to build the artifact.</p>
 <h2 id="next-step">Next step<a class="headerlink" href="#next-step" title="Permanent link">&para;</a></h2>
 <p>Learn matrix builds in <a href="../your-first-matrix/">Your first matrix</a>.</p>
 

@@ -1969,6 +1969,10 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">arch</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">amd64</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">arm64</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <p>This creates four axis tuples before outputs are considered.</p>
+<p>Most axes are opaque labels — any <code>[A-Za-z0-9.-]</code> string, meaningful only for partitioning the matrix,
+<code>${axis}</code> interpolation, and <code>by-&lt;axis&gt;/</code> fragments. <strong><code>arch</code> is the one reserved, typed axis:</strong> its
+values are closed to <code>amd64</code>/<code>arm64</code> and it also drives the target platform and base-image resolution.
+See <a href="../target-architectures/">Target architectures</a>.</p>
 <h2 id="slugs">Slugs<a class="headerlink" href="#slugs" title="Permanent link">&para;</a></h2>
 <p>A cell slug is:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;image&gt;_&lt;axis values in matrix order&gt;_&lt;format&gt;

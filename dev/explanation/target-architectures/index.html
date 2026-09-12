@@ -1955,6 +1955,10 @@
 <h1 id="architectures">Architectures<a class="headerlink" href="#architectures" title="Permanent link">&para;</a></h1>
 <p><code>arch</code> is tailor's one <strong>reserved</strong> matrix axis. It looks like any other axis, but it is <em>typed</em>: its
 values are closed to <code>amd64</code> and <code>arm64</code>, and the cell's arch is wired straight into the build.</p>
+<blockquote>
+<p>Most axes only select fragments and interpolate into strings. <code>arch</code> does that <strong>and</strong> controls the
+target platform and base-image resolution — so it needs the extra rules on this page.</p>
+</blockquote>
 <h2 id="the-reserved-axis">The reserved axis<a class="headerlink" href="#the-reserved-axis" title="Permanent link">&para;</a></h2>
 <p>Every other axis (<code>edition</code>, <code>channel</code>, <code>variant</code>, …) is an opaque label — any <code>[A-Za-z0-9.-]</code>
 string, meaningful only for partitioning the matrix, <code>${axis}</code> interpolation, <code>by-axis/</code> fragments,
@@ -2031,7 +2035,7 @@ decides.</p>
 </tr>
 </tbody>
 </table>
-<p>Both unset → <code>amd64</code> (or the <code>tailor.yaml</code> override); exactly one set fills in the other; both set must
+<p>Both unset → <code>amd64</code> (the fixed built-in default; there is no workspace-wide arch override); exactly one set fills in the other; both set must
 agree, else it is a validate-time error naming the cell and the two arches.</p>
 <p>See <a href="../../how-to/cross-arch-building/">Cross-arch building</a>, <a href="../../reference/image-yaml/">image.yaml</a>,
 and <a href="../../reference/tailor-yaml/">tailor.yaml</a>.</p>

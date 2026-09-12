@@ -544,6 +544,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1954,6 +1965,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1976,6 +1998,20 @@
 
 <h1 id="your-first-matrix">Your first matrix<a class="headerlink" href="#your-first-matrix" title="Permanent link">&para;</a></h1>
 <p>This tutorial shows how a single image definition expands into multiple cells.</p>
+<p>Unlike <a href="../getting-started/">Getting started</a>, which built one standalone <code>image.yaml</code>, this tutorial
+uses a <strong>workspace</strong>: a <code>tailor.yaml</code> manifest (toolchains, runtime defaults, and which images belong
+to the workspace) alongside one or more member images, each in its own directory. <code>schemaVersion: 1</code>
+is required in <code>tailor.yaml</code>.</p>
+<p>A few terms used throughout:</p>
+<ul>
+<li><strong>matrix</strong> — the axes you declare on an image; their cartesian product is the set of candidate builds.</li>
+<li><strong>axis</strong> — one dimension of the matrix (e.g. <code>variant</code>, <code>arch</code>), each with a list of values.</li>
+<li><strong>cell</strong> — one combination of axis values: a single concrete build.</li>
+<li><strong>slug</strong> — a cell's stable identifier (<code>&lt;image&gt;_&lt;axis values&gt;_&lt;format&gt;</code>), also the artifact name.</li>
+<li><strong>fragment</strong> — a <code>by-&lt;axis&gt;/&lt;value&gt;.yaml</code> file whose config is merged in only for cells with that
+  value.</li>
+</ul>
+<p>See <a href="../../explanation/concepts/">Concepts</a> for the full model.</p>
 <h2 id="1-scaffold-an-advanced-workspace">1. Scaffold an advanced workspace<a class="headerlink" href="#1-scaffold-an-advanced-workspace" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mkdir<span class="w"> </span>matrix-demo
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>matrix-demo
@@ -2039,6 +2075,8 @@
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>gizmo_full_arm64_edge_cosi
 </code></pre></div>
 <h2 id="5-inspect-rendered-image-customizer-yaml">5. Inspect rendered Image Customizer YAML<a class="headerlink" href="#5-inspect-rendered-image-customizer-yaml" title="Permanent link">&para;</a></h2>
+<p>Narrow to a single cell with <code>--select</code> (short form <code>-s</code>), an <code>axis=value</code> filter you can repeat or
+comma-separate:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tailor<span class="w"> </span>explain<span class="w"> </span>gizmo<span class="w"> </span>-s<span class="w"> </span><span class="nv">variant</span><span class="o">=</span>full,arch<span class="o">=</span>amd64,channel<span class="o">=</span>edge<span class="w"> </span>--with-config
 </code></pre></div>
 <p>Expected shape:</p>
@@ -2060,6 +2098,13 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>gizmo<span class="w"> </span>-s<span class="w"> </span><span class="nv">variant</span><span class="o">=</span>full,arch<span class="o">=</span>amd64,channel<span class="o">=</span>edge<span class="w"> </span>--dry-run
 </code></pre></div>
 <p>You now have a small workspace that demonstrates axes, fragments, interpolation, cell selection, and dry-run builds.</p>
+<h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../how-to/select-and-build-one-cell/">Select and build one cell</a> — narrow a matrix with selectors and slugs.</li>
+<li><a href="../../how-to/add-an-axis/">Add an axis</a> — grow the matrix with a new dimension.</li>
+<li><a href="../../explanation/merge-model/">Merge model</a> — how fragments combine and which one wins.</li>
+<li><a href="../../reference/cli/">CLI reference</a> and <a href="../../reference/image-yaml/">image.yaml reference</a> — look up every command and field.</li>
+</ul>
 
 
 
