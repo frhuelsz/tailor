@@ -2,6 +2,22 @@
 
 This tutorial shows how a single image definition expands into multiple cells.
 
+Unlike [Getting started](getting-started.md), which built one standalone `image.yaml`, this tutorial
+uses a **workspace**: a `tailor.yaml` manifest (toolchains, runtime defaults, and which images belong
+to the workspace) alongside one or more member images, each in its own directory. `schemaVersion: 1`
+is required in `tailor.yaml`.
+
+A few terms used throughout:
+
+- **matrix** — the axes you declare on an image; their cartesian product is the set of candidate builds.
+- **axis** — one dimension of the matrix (e.g. `variant`, `arch`), each with a list of values.
+- **cell** — one combination of axis values: a single concrete build.
+- **slug** — a cell's stable identifier (`<image>_<axis values>_<format>`), also the artifact name.
+- **fragment** — a `by-<axis>/<value>.yaml` file whose config is merged in only for cells with that
+  value.
+
+See [Concepts](../explanation/concepts.md) for the full model.
+
 ## 1. Scaffold an advanced workspace
 
 ```bash
@@ -94,6 +110,9 @@ gizmo_full_arm64_edge_cosi
 
 ## 5. Inspect rendered Image Customizer YAML
 
+Narrow to a single cell with `--select` (short form `-s`), an `axis=value` filter you can repeat or
+comma-separate:
+
 ```bash
 tailor explain gizmo -s variant=full,arch=amd64,channel=edge --with-config
 ```
@@ -124,3 +143,10 @@ tailor build gizmo -s variant=full,arch=amd64,channel=edge --dry-run
 ```
 
 You now have a small workspace that demonstrates axes, fragments, interpolation, cell selection, and dry-run builds.
+
+## Next steps
+
+- [Select and build one cell](../how-to/select-and-build-one-cell.md) — narrow a matrix with selectors and slugs.
+- [Add an axis](../how-to/add-an-axis.md) — grow the matrix with a new dimension.
+- [Merge model](../explanation/merge-model.md) — how fragments combine and which one wins.
+- [CLI reference](../reference/cli.md) and [image.yaml reference](../reference/image-yaml.md) — look up every command and field.

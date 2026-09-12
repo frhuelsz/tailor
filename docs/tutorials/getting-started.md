@@ -92,7 +92,7 @@ Expected shape:
 imagecustomizer ... --config-file ... --output-image-format cosi ...
 ```
 
-`--dry-run` renders the container/Image Customizer invocation without starting the container. Remove `--dry-run` when you have Docker daemon access and want to build the artifact.
+`--dry-run` renders the build plan — the container/Image Customizer invocation — and prints it without starting a container. It contacts no container engine, so it works with no Docker daemon. Remove `--dry-run` when you have Docker daemon access and want to build the artifact.
 
 ## Next step
 

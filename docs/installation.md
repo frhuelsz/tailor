@@ -20,6 +20,10 @@ sudo install -m 0755 "tailor-${target}" /usr/local/bin/tailor
 
 The binary is fully static: it does not require glibc or OpenSSL on the target machine.
 
+Each release also publishes a cosign signature bundle, an SBOM, and build provenance. To verify the
+binary's signature and provenance (not just its checksum), follow the verification steps in the
+[project README](https://github.com/frhuelsz/tailor#verifying-releases).
+
 ## From source
 
 The crate is not published to crates.io yet, so install from git (or a local checkout):

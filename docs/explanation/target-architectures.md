@@ -3,6 +3,9 @@
 `arch` is tailor's one **reserved** matrix axis. It looks like any other axis, but it is *typed*: its
 values are closed to `amd64` and `arm64`, and the cell's arch is wired straight into the build.
 
+> Most axes only select fragments and interpolate into strings. `arch` does that **and** controls the
+> target platform and base-image resolution — so it needs the extra rules on this page.
+
 ## The reserved axis
 
 Every other axis (`edition`, `channel`, `variant`, …) is an opaque label — any `[A-Za-z0-9.-]`
@@ -68,7 +71,7 @@ When both the image arch (the axis) and a base-image arch (a catalogue slot's `a
 | **`arm64`** | `arm64` | `arm64` | **error** |
 | **`amd64`** | `amd64` | **error** | `amd64` |
 
-Both unset → `amd64` (or the `tailor.yaml` override); exactly one set fills in the other; both set must
+Both unset → `amd64` (the fixed built-in default; there is no workspace-wide arch override); exactly one set fills in the other; both set must
 agree, else it is a validate-time error naming the cell and the two arches.
 
 See [Cross-arch building](../how-to/cross-arch-building.md), [image.yaml](../reference/image-yaml.md),

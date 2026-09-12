@@ -1,5 +1,9 @@
 # Design rationale
 
+This page explains *why* tailor is shaped the way it is — the decisions behind the model, the
+alternatives that were rejected, and the consequences you live with as a result. For *how* the pieces
+fit, see [Concepts](concepts.md) and the [Merge model](merge-model.md).
+
 ## Why a thin Image Customizer wrapper?
 
 Image Customizer already owns image semantics: storage, packages, services, scripts, ISO/PXE behavior, and version-specific features. tailor deliberately does not mirror that schema. It owns only:

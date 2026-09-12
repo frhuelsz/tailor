@@ -29,6 +29,11 @@ matrix:
 
 This creates four axis tuples before outputs are considered.
 
+Most axes are opaque labels — any `[A-Za-z0-9.-]` string, meaningful only for partitioning the matrix,
+`${axis}` interpolation, and `by-<axis>/` fragments. **`arch` is the one reserved, typed axis:** its
+values are closed to `amd64`/`arm64` and it also drives the target platform and base-image resolution.
+See [Target architectures](target-architectures.md).
+
 ## Slugs
 
 A cell slug is:

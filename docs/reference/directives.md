@@ -23,7 +23,7 @@ A later `$set` wins over an earlier `$set`. A plain reassignment after a `$set` 
 | `$append` | List field value | list | Insert items **after** the inherited list. |
 | `$unset` | Mapping value | the bare token `$unset` | Remove the inherited key entirely. |
 | `$include` | Mapping value or list item | path string | Splice a shared YAML file at that position. |
-| `$select` | — | — | **Reserved, not implemented** — use `by-<axis>/<value>.yaml` fragments. |
+| `$select` | — | — | **Reserved, not implemented** — use [`by-<axis>/<value>.yaml` fragments](image-yaml.md#fragments) instead. |
 
 `$prepend`, `$append`, and `$remove` may share one mapping (e.g. trim the inherited list and add to both
 ends at once); `$set` and `$replace` are exclusive and cannot be combined with the others.
