@@ -496,6 +496,16 @@
       
         
       
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
     
     
     
@@ -641,6 +651,34 @@
   
   
     <li class="md-nav__item">
+      <a href="build-clones/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build clones of a cell
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="cross-arch-building/" class="md-nav__link">
         
   
@@ -705,6 +743,34 @@
     
   
     Convert an image format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="set-the-build-directory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the build directory
   
 
     
@@ -921,6 +987,34 @@
   
   
     <li class="md-nav__item">
+      <a href="handle-exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handle exit codes in scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="use-a-tools-dir/" class="md-nav__link">
         
   
@@ -957,6 +1051,34 @@
     
   
     Select a container engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="use-preview-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable a preview feature
   
 
     
@@ -1041,6 +1163,34 @@
     
   
     Embed tailor in a monorepo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="print-license-notices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Print third-party license notices
   
 
     
@@ -1619,6 +1769,102 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#author-a-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Author a workspace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-a-base-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose a base image
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-and-select" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build and select
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pin-and-reproduce" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pin and reproduce
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-and-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment and engine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipelines-and-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipelines and CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#signing-and-preview-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing and preview features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#distribute-and-comply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distribute and comply
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1638,25 +1884,56 @@
 
 
 <h1 id="how-to-guides">How-to guides<a class="headerlink" href="#how-to-guides" title="Permanent link">&para;</a></h1>
-<p>How-to guides are task-oriented recipes.</p>
+<p>How-to guides are task-oriented recipes. Most assume a <strong>workspace</strong> (<code>tailor.yaml</code> plus one or
+more <code>image.yaml</code> files); the execution verbs (<code>build</code>, <code>render</code> with a real run) additionally need a
+container <strong>engine</strong>, and some steps need a <strong>registry</strong> login or a base-image <strong>catalogue</strong>. Each
+guide notes anything extra it needs.</p>
+<h2 id="author-a-workspace">Author a workspace<a class="headerlink" href="#author-a-workspace" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="add-an-image/">Add an image</a></li>
 <li><a href="add-an-axis/">Add an axis</a></li>
-<li><a href="build-with-an-azure-linux-base/">Build an image from an Azure Linux base</a></li>
-<li><a href="cross-arch-building/">Cross-arch building</a></li>
-<li><a href="select-and-build-one-cell/">Select and build one cell</a></li>
+<li><a href="share-config-with-include/">Share config with <code>$include</code></a></li>
 <li><a href="override-a-base-per-axis/">Override a base per axis</a></li>
+</ul>
+<h2 id="choose-a-base-image">Choose a base image<a class="headerlink" href="#choose-a-base-image" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="build-with-an-azure-linux-base/">Build an image from an Azure Linux base</a></li>
 <li><a href="use-a-base-image-catalogue/">Use a base-image catalogue</a></li>
 <li><a href="use-a-tools-dir/">Use a tools dir for sealed images</a></li>
+</ul>
+<h2 id="build-and-select">Build and select<a class="headerlink" href="#build-and-select" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="select-and-build-one-cell/">Select and build one cell</a></li>
+<li><a href="cross-arch-building/">Cross-arch building</a></li>
+<li><a href="build-clones/">Build clones of a cell</a></li>
 <li><a href="change-an-output-format/">Change an output format</a></li>
-<li><a href="share-config-with-include/">Share config with <code>$include</code></a></li>
+<li><a href="convert-an-image-format/">Convert an image format</a></li>
+<li><a href="set-the-build-directory/">Set the build directory</a></li>
+</ul>
+<h2 id="pin-and-reproduce">Pin and reproduce<a class="headerlink" href="#pin-and-reproduce" title="Permanent link">&para;</a></h2>
+<ul>
 <li><a href="pin-the-ic-version/">Pin the Image Customizer version</a></li>
 <li><a href="use-a-local-ic-image/">Use a locally-built Image Customizer image</a></li>
-<li><a href="export-configs-for-a-pipeline/">Export configs for a pipeline</a></li>
+</ul>
+<h2 id="environment-and-engine">Environment and engine<a class="headerlink" href="#environment-and-engine" title="Permanent link">&para;</a></h2>
+<ul>
 <li><a href="select-a-container-engine/">Select a container engine (Docker or Podman)</a></li>
+</ul>
+<h2 id="pipelines-and-ci">Pipelines and CI<a class="headerlink" href="#pipelines-and-ci" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="export-configs-for-a-pipeline/">Export configs for a pipeline</a></li>
+<li><a href="handle-exit-codes/">Handle exit codes in scripts</a></li>
+</ul>
+<h2 id="signing-and-preview-features">Signing and preview features<a class="headerlink" href="#signing-and-preview-features" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="use-preview-features/">Enable a preview feature</a></li>
 <li><a href="sign-an-image/">Sign an image</a></li>
+</ul>
+<h2 id="distribute-and-comply">Distribute and comply<a class="headerlink" href="#distribute-and-comply" title="Permanent link">&para;</a></h2>
+<ul>
 <li><a href="build-a-portable-binary/">Build a portable binary</a></li>
 <li><a href="embed-in-a-monorepo/">Embed tailor in a monorepo</a></li>
+<li><a href="print-license-notices/">Print third-party license notices</a></li>
 </ul>
 
 

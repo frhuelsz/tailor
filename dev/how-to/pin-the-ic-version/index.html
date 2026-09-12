@@ -496,6 +496,16 @@
       
         
       
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
     
     
     
@@ -641,6 +651,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../build-clones/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build clones of a cell
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cross-arch-building/" class="md-nav__link">
         
   
@@ -705,6 +743,34 @@
     
   
     Convert an image format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../set-the-build-directory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the build directory
   
 
     
@@ -846,6 +912,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pin the Image Customizer version
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -862,6 +946,47 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#freeze-and-refresh-the-lockfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freeze and refresh the lockfile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-reproducibly-from-the-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build reproducibly from the lock
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -931,6 +1056,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../handle-exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handle exit codes in scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../use-a-tools-dir/" class="md-nav__link">
         
   
@@ -967,6 +1120,34 @@
     
   
     Select a container engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../use-preview-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable a preview feature
   
 
     
@@ -1051,6 +1232,34 @@
     
   
     Embed tailor in a monorepo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../print-license-notices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Print third-party license notices
   
 
     
@@ -1629,6 +1838,36 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#freeze-and-refresh-the-lockfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freeze and refresh the lockfile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-reproducibly-from-the-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build reproducibly from the lock
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1671,14 +1910,32 @@
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">db</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">toolchain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ic-1.3</span>
 </code></pre></div>
-<p>Write or refresh the lockfile:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tailor<span class="w"> </span>lock
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># Later, deliberately refresh floating tags:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>tailor<span class="w"> </span>update
+<h2 id="freeze-and-refresh-the-lockfile">Freeze and refresh the lockfile<a class="headerlink" href="#freeze-and-refresh-the-lockfile" title="Permanent link">&para;</a></h2>
+<p><code>tailor.lock</code> records the exact digest each toolchain (and base image) resolves to, so every machine
+builds the same inputs.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># First time — resolve everything and write the lock:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>tailor<span class="w"> </span>lock
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Add a new image/toolchain later — lock keeps existing pins and resolves only the new inputs:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>tailor<span class="w"> </span>lock
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Deliberately move every pin to the latest digest:</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>tailor<span class="w"> </span>update
 </code></pre></div>
-<p>Build reproducibly from the lock:</p>
+<p><code>lock</code> is a <strong>freeze</strong>: inputs already pinned keep their digests, so re-running it is idempotent and
+never silently moves a pin. <code>update</code> re-resolves <strong>everything</strong> to the latest digest — use it when you
+intend to move up.</p>
+<h2 id="build-reproducibly-from-the-lock">Build reproducibly from the lock<a class="headerlink" href="#build-reproducibly-from-the-lock" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>--locked
 </code></pre></div>
+<p><code>--locked</code> requires a complete lock and fails on any missing entry or registry drift, so a CI build
+never silently resolves something new.</p>
+<blockquote>
+<p><strong>Local images.</strong> A local-only Image Customizer image (a fresh <code>docker build</code> that was never pushed,
+so it has no registry digest) can't be pinned and is omitted from <code>tailor.lock</code>; reproducibility then
+depends on the local image tag you built. A local image that <em>does</em> carry a repo digest is still
+locked. See <a href="../use-a-local-ic-image/">Use a locally-built Image Customizer image</a>.</p>
+</blockquote>
 
 
 

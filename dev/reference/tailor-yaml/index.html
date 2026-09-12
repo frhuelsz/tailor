@@ -494,6 +494,16 @@
       
         
       
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
     
     
     
@@ -639,6 +649,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/build-clones/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build clones of a cell
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/cross-arch-building/" class="md-nav__link">
         
   
@@ -703,6 +741,34 @@
     
   
     Convert an image format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-build-directory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the build directory
   
 
     
@@ -919,6 +985,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/handle-exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handle exit codes in scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/use-a-tools-dir/" class="md-nav__link">
         
   
@@ -955,6 +1049,34 @@
     
   
     Select a container engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/use-preview-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable a preview feature
   
 
     
@@ -1039,6 +1161,34 @@
     
   
     Embed tailor in a monorepo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/print-license-notices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Print third-party license notices
   
 
     
@@ -1908,6 +2058,12 @@
 <td>IC log level: <code>panic</code>, <code>fatal</code>, <code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>.</td>
 </tr>
 <tr>
+<td><code>runtime.logDir</code></td>
+<td>path</td>
+<td>no</td>
+<td>Directory for on-disk IC log files (one per cell). Off by default (logs stream to the console). Overridden, highest precedence first, by the <code>--log-dir</code> flag then the <code>TAILOR_LOG_DIR</code> environment variable.</td>
+</tr>
+<tr>
 <td><code>runtime.imageCacheDir</code></td>
 <td>path</td>
 <td>no</td>
@@ -1929,13 +2085,19 @@
 <td><code>signing.profiles</code></td>
 <td>map of <code>{backend, …}</code></td>
 <td>no</td>
-<td>Named signing profiles. <code>backend</code> is <code>local-test-ca</code>, <code>keypair</code> (needs <code>key</code>+<code>cert</code>), or <code>azure-key-vault</code> (needs <code>vault</code>+<code>certificate</code>).</td>
+<td>Named signing profiles. <code>backend</code> is <code>local-test-ca</code> (optional <code>publishCaCert</code>: where to write the enrollable CA certificate), <code>keypair</code> (needs <code>key</code>+<code>cert</code>), or <code>azure-key-vault</code> (needs <code>vault</code>+<code>certificate</code>).</td>
 </tr>
 <tr>
 <td><code>defaults.outputs</code></td>
 <td>output list</td>
 <td>no</td>
 <td>Inherited by images without <code>outputs</code>.</td>
+</tr>
+<tr>
+<td><code>defaults.outputArtifacts</code></td>
+<td>enum</td>
+<td>no</td>
+<td>Default <code>output.artifacts</code> staging policy for images that don't set their own: <code>managed</code> (default — relocate the extracted artifacts to the output dir and keep them), <code>scratch</code> (treat as signing scratch: extract, then reclaim), or <code>strip</code> (drop the <code>output.artifacts</code> block so IC never extracts). A per-image <code>outputArtifacts</code> overrides this.</td>
 </tr>
 <tr>
 <td><code>export.outputDir</code></td>

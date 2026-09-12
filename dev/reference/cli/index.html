@@ -494,6 +494,16 @@
       
         
       
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
     
     
     
@@ -639,6 +649,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/build-clones/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build clones of a cell
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/cross-arch-building/" class="md-nav__link">
         
   
@@ -703,6 +741,34 @@
     
   
     Convert an image format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-the-build-directory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set the build directory
   
 
     
@@ -919,6 +985,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../how-to/handle-exit-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handle exit codes in scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../how-to/use-a-tools-dir/" class="md-nav__link">
         
   
@@ -955,6 +1049,34 @@
     
   
     Select a container engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/use-preview-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enable a preview feature
   
 
     
@@ -1039,6 +1161,34 @@
     
   
     Embed tailor in a monorepo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/print-license-notices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Print third-party license notices
   
 
     
@@ -1271,10 +1421,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-matrix-images-format-jsonslugs" class="md-nav__link">
+  <a href="#tailor-matrix-images-format-jsonslugsado" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor matrix [images...] [--format json|slugs]
+        tailor matrix [images...] [--format json|slugs|ado]
       
     </span>
   </a>
@@ -1392,6 +1542,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tailor-bases-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tailor bases list
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tailor-bases-download-names-force" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1429,6 +1590,17 @@
     <span class="md-ellipsis">
       
         tailor notice
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
       
     </span>
   </a>
@@ -1970,10 +2142,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-matrix-images-format-jsonslugs" class="md-nav__link">
+  <a href="#tailor-matrix-images-format-jsonslugsado" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor matrix [images...] [--format json|slugs]
+        tailor matrix [images...] [--format json|slugs|ado]
       
     </span>
   </a>
@@ -2091,6 +2263,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tailor-bases-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tailor bases list
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tailor-bases-download-names-force" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2128,6 +2311,17 @@
     <span class="md-ellipsis">
       
         tailor notice
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
       
     </span>
   </a>
@@ -2326,10 +2520,36 @@ config required. Writes the output beside the input by default (or to <code>-o</
 <p>See <a href="../../how-to/convert-an-image-format/">Convert an image format</a>.</p>
 <h2 id="tailor-validate-images"><code>tailor validate [images...]</code><a class="headerlink" href="#tailor-validate-images" title="Permanent link">&para;</a></h2>
 <p>Render every selected cell without building. Catches tailor-owned config and merge errors. Accepts <code>-s/--select</code> and <code>--cell</code>.</p>
-<h2 id="tailor-matrix-images-format-jsonslugs"><code>tailor matrix [images...] [--format json|slugs]</code><a class="headerlink" href="#tailor-matrix-images-format-jsonslugs" title="Permanent link">&para;</a></h2>
+<h2 id="tailor-matrix-images-format-jsonslugsado"><code>tailor matrix [images...] [--format json|slugs|ado]</code><a class="headerlink" href="#tailor-matrix-images-format-jsonslugsado" title="Permanent link">&para;</a></h2>
 <p>Emit selected matrix cells. Default format is <code>json</code>.</p>
 <p>JSON entries contain <code>image</code>, <code>slug</code>, <code>axes</code>, and <code>format</code>, plus <code>baseImage</code> when the cell binds to a
 <code>baseImages:</code> catalogue slot.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--format json</code></td>
+<td>JSON array of cell objects (default).</td>
+</tr>
+<tr>
+<td><code>--format slugs</code></td>
+<td>One cell slug per line — feeds <code>tailor build --cell &lt;slug&gt;</code> directly.</td>
+</tr>
+<tr>
+<td><code>--format ado</code></td>
+<td>The bare Azure DevOps matrix object (<code>{ leg: { var: string, … } }</code>) for a pipeline <code>strategy.matrix</code>.</td>
+</tr>
+<tr>
+<td><code>--ado VAR_NAME</code></td>
+<td>Emit the ADO matrix wrapped in a <code>##vso[task.setvariable]</code> logging command that sets <code>VAR_NAME</code> (e.g. <code>BUILD_MATRIX</code>). Implies <code>--format ado</code> and conflicts with <code>--format</code>. An empty selection exits non-zero.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="tailor-slugs-images"><code>tailor slugs [images...]</code><a class="headerlink" href="#tailor-slugs-images" title="Permanent link">&para;</a></h2>
 <p>Print one selected cell slug per line. Equivalent to <code>tailor matrix --format slugs</code>.</p>
 <h2 id="tailor-explain-image"><code>tailor explain &lt;image&gt;</code><a class="headerlink" href="#tailor-explain-image" title="Permanent link">&para;</a></h2>
@@ -2405,6 +2625,9 @@ pins. Use it to deliberately refresh to newer base images / toolchains.</p>
 <p>Resolve digests/hashes and print the lockfile content without writing it.</p>
 <h2 id="tailor-clean-images"><code>tailor clean [images...]</code><a class="headerlink" href="#tailor-clean-images" title="Permanent link">&para;</a></h2>
 <p>Remove generated artifacts and build stamps for selected cells. Accepts <code>-s/--select</code> and <code>--cell</code>.</p>
+<h2 id="tailor-bases-list"><code>tailor bases list</code><a class="headerlink" href="#tailor-bases-list" title="Permanent link">&para;</a></h2>
+<p>List every base-image catalogue slot with its arch, <code>source</code> (if any), on-disk presence, and path.
+Read-only; requires a <code>baseImages:</code> catalogue in <code>tailor.yaml</code>.</p>
 <h2 id="tailor-bases-download-names-force"><code>tailor bases download [names...] [--force]</code><a class="headerlink" href="#tailor-bases-download-names-force" title="Permanent link">&para;</a></h2>
 <p>Materialise base-image catalogue slots from their <code>source</code>. Default (no names): every slot that has a
 <code>source</code> and whose file is missing. Naming a sourceless slot is an error; <code>--force</code> re-pulls present
@@ -2419,9 +2642,39 @@ feed download wired?" gate. See <a href="../../how-to/use-a-base-image-catalogue
 <p>Print tailor's own MIT license, then the third-party software notices for every dependency compiled
 into the binary — each crate's name, version, SPDX identifier, and full license text. The notice is
 generated at build time from the resolved dependency set (<code>Cargo.lock</code>), so it always matches the
-binary you are running. Redirect it to a file to archive the attributions:</p>
+binary you are running. It writes to stdout only (it never creates files); redirect it to archive the
+attributions:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tailor<span class="w"> </span>notice<span class="w"> </span>&gt;<span class="w"> </span>THIRD-PARTY-NOTICES.txt
 </code></pre></div>
+<h2 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h2>
+<p>Every command uses a small, stable exit-code taxonomy so scripts and CI can branch on the outcome:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Success.</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Build or operational failure (an Image Customizer run failed, an engine error, an I/O error).</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Usage or configuration error — bad arguments, an unknown image, an invalid <code>tailor.yaml</code>/<code>image.yaml</code>, or a dependency cycle. Mirrors clap's own code for bad arguments.</td>
+</tr>
+<tr>
+<td><code>130</code></td>
+<td>Interrupted (Ctrl+C / SIGTERM): <code>128 + SIGINT</code>. The running container is torn down before exit.</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../../how-to/handle-exit-codes/">Handle exit codes in scripts</a>.</p>
 
 
 
