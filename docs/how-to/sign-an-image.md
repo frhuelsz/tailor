@@ -4,16 +4,15 @@ tailor can produce **Secure Boot–signed** images by orchestrating Image Custom
 `output.artifacts` → host-side signing → `inject-files` flow. You declare *how* to sign with a
 `signing:` profile; you keep authoring *what* to extract (`output.artifacts`) in your own IC `config:`.
 
-> **Status — foundation only.** The `signing:` configuration, profile resolution, and the
-> **fail-fast preflight** are implemented and enforced. The signing *execution* (certificate minting,
-> PE signing, the `inject-files` pass) is a later milestone (`meta/docs/2026-06-29-signing.md` §11). Until it
-> lands, a signed `tailor build` runs the preflight and then **stops with a clear error** rather than
-> produce a silently-unsigned image. `tailor validate` and `tailor build --dry-run` report signing
-> readiness without failing.
-
 > **Preview feature.** Signing is not yet part of the stable 1.0 contract, so it is gated behind a
-> preview opt-in. Enable it by adding `previewFeatures: [signing]` to `tailor.yaml`; a signed
-> `tailor build`/`validate` without the opt-in stops with a clear error.
+> preview opt-in: add `previewFeatures: [signing]` to `tailor.yaml`. A signed `tailor build` or
+> `validate` without the opt-in stops with a clear error. Because it is a preview feature, its schema
+> and behavior may change before it is promoted (see [Compatibility](https://github.com/frhuelsz/tailor/blob/main/COMPATIBILITY.md)).
+>
+> **Backend status.** The `local-test-ca` and `keypair` backends are implemented end-to-end: a signed
+> build extracts the declared artifacts, signs them on the host, and re-injects them so the final image
+> is signed. The `azure-key-vault` backend is **not yet implemented** — its configuration validates and
+> preflight reports it as unavailable.
 
 ## 1. Enable the signing preview feature
 
@@ -49,9 +48,9 @@ signing:
 
 | Backend | Required fields | Use |
 | --- | --- | --- |
-| `local-test-ca` | none | MVP / CI. Pure-Rust self-signed CA + leaf minted per build. Not a production trust root. |
+| `local-test-ca` | none | MVP / CI. A self-signed CA + leaf minted per build. Not a production trust root. |
 | `keypair` | `key`, `cert` | Bring your own Secure Boot key + certificate (PEM). |
-| `azure-key-vault` | `vault`, `certificate` | Remote signing (future milestone). |
+| `azure-key-vault` | `vault`, `certificate` | Remote signing — configuration only; execution is a later milestone. |
 
 ## 3. Opt an image in
 
@@ -94,21 +93,24 @@ error: signing preflight failed — fix every prerequisite below, then rebuild:
 
 What the preflight checks per backend:
 
-- **`local-test-ca`** — always ready (keys are minted in pure Rust at sign time).
+- **`local-test-ca`** — always ready (the CA + leaf are minted at sign time).
 - **`keypair`** — the `key` and `cert` files exist, are readable, and are PEM.
-- **`azure-key-vault`** — configuration completeness (a live credential probe arrives with the remote
-  backend milestone).
+- **`azure-key-vault`** — configuration completeness; preflight also reports that execution is not yet
+  available for this backend.
 
 ## 5. Dry-run
 
-`tailor build --dry-run` never contacts an engine and reports the signing plan:
+`tailor build --dry-run` never contacts an engine and reports the signing plan and its readiness
+without signing anything:
 
 ```bash
 tailor build --dry-run appliance
 # … the customize invocation …
 # ✓ signing profile `byo` ready (image(s): appliance)
-# note: signing execution is not yet implemented; this dry-run shows the unsigned customize invocation.
 ```
+
+A real `tailor build appliance` (with an implemented backend) then runs the full flow: extract the
+declared `output.artifacts`, sign them on the host, and re-inject them so the final image is signed.
 
 ## Notes
 

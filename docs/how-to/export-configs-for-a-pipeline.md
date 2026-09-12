@@ -52,8 +52,8 @@ one-liner.
 The exported `<slug>.yaml` is only the Image Customizer **config**. Everything else in an IC
 invocation — the base image, `--rpm-source`, `--tools-dir`, output format, and any signing — is not in
 the config and is provided by the pipeline. This is deliberate: the config is portable and static, so
-`tailor export` always succeeds for any cell, and the pipeline owns the invocation using its own
-approved machinery.
+`tailor export` renders any cell whose config is complete, and the pipeline owns the invocation using
+its own approved machinery.
 
 A minimal pipeline call per cell looks like:
 

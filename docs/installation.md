@@ -36,7 +36,7 @@ cargo install --path crates/tailor
 tailor --version
 ```
 
-It prints the SemVer version plus build metadata, e.g. `tailor 0.2.0+<commit>.<date>`.
+It prints the SemVer version plus build metadata, e.g. `tailor <version>+<commit>.<date>`.
 
 ## Runtime requirement: a container engine
 

@@ -19,7 +19,7 @@ tailor --version
 Expected shape:
 
 ```text
-tailor 0.1.0+...
+tailor <version>+<commit>.<date>
 ```
 
 ## 2. Scaffold a standalone image

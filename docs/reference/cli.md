@@ -146,11 +146,14 @@ consuming pipeline supplies).
 
 ## `tailor lock`
 
-Resolve registry inputs and write `tailor.lock` without building.
+Resolve registry inputs and write `tailor.lock` without building. Inputs already pinned in the
+current lock **keep their digests** — only new or unpinned inputs are resolved, so re-running `lock`
+is idempotent and never silently moves an existing pin. Use it to freeze a reproducible set.
 
 ## `tailor update`
 
-Re-resolve and rewrite `tailor.lock`.
+Re-resolve **every** input to its latest digest and rewrite `tailor.lock`, ignoring the existing
+pins. Use it to deliberately refresh to newer base images / toolchains.
 
 ## `tailor resolve [images...]`
 

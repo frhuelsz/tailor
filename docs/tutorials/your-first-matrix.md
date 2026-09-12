@@ -95,7 +95,7 @@ gizmo_full_arm64_edge_cosi
 ## 5. Inspect rendered Image Customizer YAML
 
 ```bash
-tailor explain gizmo -s variant=full,arch=amd64,channel=edge
+tailor explain gizmo -s variant=full,arch=amd64,channel=edge --with-config
 ```
 
 Expected shape:
@@ -115,7 +115,7 @@ os:
       - gizmo-edge
 ```
 
-The exact config depends on your edits. The important point: `explain` shows the fully merged IC config for selected cells.
+The exact config depends on your edits. The important point: `explain --with-config` shows the fully merged IC config for selected cells (plain `explain` shows only the ordered list of fragment files that merge into each cell).
 
 ## 6. Dry-run one selected cell
 
