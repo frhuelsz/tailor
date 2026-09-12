@@ -61,6 +61,10 @@
          <lastmod>2026-09-12</lastmod>
     </url>
     <url>
+         <loc>https://frhuelsz.github.io/tailor/dev/how-to/build-clones/</loc>
+         <lastmod>2026-09-12</lastmod>
+    </url>
+    <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/build-with-an-azure-linux-base/</loc>
          <lastmod>2026-09-12</lastmod>
     </url>
@@ -85,6 +89,10 @@
          <lastmod>2026-09-12</lastmod>
     </url>
     <url>
+         <loc>https://frhuelsz.github.io/tailor/dev/how-to/handle-exit-codes/</loc>
+         <lastmod>2026-09-12</lastmod>
+    </url>
+    <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/override-a-base-per-axis/</loc>
          <lastmod>2026-09-12</lastmod>
     </url>
@@ -93,11 +101,19 @@
          <lastmod>2026-09-12</lastmod>
     </url>
     <url>
+         <loc>https://frhuelsz.github.io/tailor/dev/how-to/print-license-notices/</loc>
+         <lastmod>2026-09-12</lastmod>
+    </url>
+    <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/select-a-container-engine/</loc>
          <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/select-and-build-one-cell/</loc>
+         <lastmod>2026-09-12</lastmod>
+    </url>
+    <url>
+         <loc>https://frhuelsz.github.io/tailor/dev/how-to/set-the-build-directory/</loc>
          <lastmod>2026-09-12</lastmod>
     </url>
     <url>
@@ -118,6 +134,10 @@
     </url>
     <url>
          <loc>https://frhuelsz.github.io/tailor/dev/how-to/use-a-tools-dir/</loc>
+         <lastmod>2026-09-12</lastmod>
+    </url>
+    <url>
+         <loc>https://frhuelsz.github.io/tailor/dev/how-to/use-preview-features/</loc>
          <lastmod>2026-09-12</lastmod>
     </url>
     <url>
