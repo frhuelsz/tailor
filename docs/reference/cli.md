@@ -74,12 +74,19 @@ See [Convert an image format](../how-to/convert-an-image-format.md).
 
 Render every selected cell without building. Catches tailor-owned config and merge errors. Accepts `-s/--select` and `--cell`.
 
-## `tailor matrix [images...] [--format json|slugs]`
+## `tailor matrix [images...] [--format json|slugs|ado]`
 
 Emit selected matrix cells. Default format is `json`.
 
 JSON entries contain `image`, `slug`, `axes`, and `format`, plus `baseImage` when the cell binds to a
 `baseImages:` catalogue slot.
+
+| Flag | Meaning |
+| --- | --- |
+| `--format json` | JSON array of cell objects (default). |
+| `--format slugs` | One cell slug per line — feeds `tailor build --cell <slug>` directly. |
+| `--format ado` | The bare Azure DevOps matrix object (`{ leg: { var: string, … } }`) for a pipeline `strategy.matrix`. |
+| `--ado VAR_NAME` | Emit the ADO matrix wrapped in a `##vso[task.setvariable]` logging command that sets `VAR_NAME` (e.g. `BUILD_MATRIX`). Implies `--format ado` and conflicts with `--format`. An empty selection exits non-zero. |
 
 ## `tailor slugs [images...]`
 
@@ -163,6 +170,11 @@ Resolve digests/hashes and print the lockfile content without writing it.
 
 Remove generated artifacts and build stamps for selected cells. Accepts `-s/--select` and `--cell`.
 
+## `tailor bases list`
+
+List every base-image catalogue slot with its arch, `source` (if any), on-disk presence, and path.
+Read-only; requires a `baseImages:` catalogue in `tailor.yaml`.
+
 ## `tailor bases download [names...] [--force]`
 
 Materialise base-image catalogue slots from their `source`. Default (no names): every slot that has a
@@ -184,8 +196,22 @@ Print version information. Same source as `tailor --version`.
 Print tailor's own MIT license, then the third-party software notices for every dependency compiled
 into the binary — each crate's name, version, SPDX identifier, and full license text. The notice is
 generated at build time from the resolved dependency set (`Cargo.lock`), so it always matches the
-binary you are running. Redirect it to a file to archive the attributions:
+binary you are running. It writes to stdout only (it never creates files); redirect it to archive the
+attributions:
 
 ```bash
 tailor notice > THIRD-PARTY-NOTICES.txt
 ```
+
+## Exit codes
+
+Every command uses a small, stable exit-code taxonomy so scripts and CI can branch on the outcome:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | Build or operational failure (an Image Customizer run failed, an engine error, an I/O error). |
+| `2` | Usage or configuration error — bad arguments, an unknown image, an invalid `tailor.yaml`/`image.yaml`, or a dependency cycle. Mirrors clap's own code for bad arguments. |
+| `130` | Interrupted (Ctrl+C / SIGTERM): `128 + SIGINT`. The running container is torn down before exit. |
+
+See [Handle exit codes in scripts](../how-to/handle-exit-codes.md).

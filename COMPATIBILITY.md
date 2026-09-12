@@ -68,6 +68,17 @@ improving them:
 - **Deprecation policy.** There is not yet a formal warn-before-remove cadence.
   Breaking changes are gated on a major version bump, but the lead time and
   warning mechanics are not guaranteed.
+- **Preview features.** Anything opted into via `previewFeatures:` in
+  `tailor.yaml` (currently `signing`) is explicitly outside these guarantees:
+  its schema, flags, and behavior may change or be removed in any release until
+  the feature is promoted out of preview and documented as stable.
+
+## Releases and verification
+
+Release tags are component-scoped as `tailor-v<version>` (e.g. `tailor-v1.0.2`).
+Each release publishes static binaries with cosign signatures, checksums, an
+SBOM, and build provenance; see the project README and
+[Installation](docs/installation.md) for how to verify them.
 
 ## Internal (never stable)
 

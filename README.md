@@ -182,13 +182,26 @@ The `advanced` scaffold creates a workspace `tailor.yaml`, a `myimage/image.yaml
 ## Features
 
 - Workspace and standalone image definitions.
-- Multiple Image Customizer toolchains, with lockfile support.
-- Matrix expansion over user-defined axes plus output formats.
+- Multiple Image Customizer toolchains, with a `tailor.lock` lockfile (`lock` to freeze, `update` to
+  refresh) and `--locked` reproducible builds.
+- Matrix expansion over user-defined axes, with `arch` as a typed, reserved axis.
 - Per-axis fragments in `by-<axis>/<value>.yaml` and feature fragments in `by-feature/<name>.yaml`.
 - Deterministic merge model: maps deep-merge, lists append, scalar conflicts require `$set`.
-- Local, OCI, and Azure Linux base image sources.
-- Pure pass-through for the Image Customizer `config:` tree.
-- Dry runs, validation, rendered config snapshots, selectors, exact cell slugs, and portable static builds.
+- Local, OCI, Azure Linux, and catalogue (`baseImages:`) base image sources.
+- Inter-image dependencies: base one image on another's output and embed producer artifacts with
+  `inputs:`.
+- Managed tools-dir (`--tools-dir`) for sealed images, with a safety guard that keeps builds off the
+  host root.
+- Multiple output formats, `convert` for one-off format changes, and optional post-build `zstd`
+  compression.
+- Preview-gated Secure Boot signing (`previewFeatures: [signing]`).
+- `export` rendered configs for a pipeline, third-party license notices via `tailor notice`, and a
+  stable exit-code taxonomy (`0`/`1`/`2`/`130`).
+- Dry runs, validation, rendered config snapshots, selectors, exact cell slugs, and portable static
+  builds.
+
+Run `tailor --version` to see the version of your build; the current release line is `1.x` (see the
+[compatibility policy](COMPATIBILITY.md)).
 
 ## Documentation
 

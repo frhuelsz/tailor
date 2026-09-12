@@ -40,9 +40,18 @@ flowchart TD
 
 ## Quick links
 
+- [Installation](installation.md)
 - [Getting started](tutorials/getting-started.md)
 - [Your first matrix](tutorials/your-first-matrix.md)
 - [CLI reference](reference/cli.md)
 - [Image definition reference](reference/image-yaml.md)
 - [Merge directives](reference/directives.md)
 - [Core concepts](explanation/concepts.md)
+
+## Project
+
+- [Compatibility policy](https://github.com/frhuelsz/tailor/blob/main/COMPATIBILITY.md) — what is
+  stable across releases.
+- [Changelog](https://github.com/frhuelsz/tailor/blob/main/CHANGELOG.md) — release history.
+- [Releases](https://github.com/frhuelsz/tailor/releases) — signed binaries and provenance; see
+  [Installation](installation.md) for verification.

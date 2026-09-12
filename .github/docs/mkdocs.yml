@@ -70,9 +70,11 @@ nav:
       - Add an image: how-to/add-an-image.md
       - Add an axis: how-to/add-an-axis.md
       - Select and build one cell: how-to/select-and-build-one-cell.md
+      - Build clones of a cell: how-to/build-clones.md
       - Cross-arch building: how-to/cross-arch-building.md
       - Change an output format: how-to/change-an-output-format.md
       - Convert an image format: how-to/convert-an-image-format.md
+      - Set the build directory: how-to/set-the-build-directory.md
       - Build from an Azure Linux base: how-to/build-with-an-azure-linux-base.md
       - Use a base-image catalogue: how-to/use-a-base-image-catalogue.md
       - Override a base per axis: how-to/override-a-base-per-axis.md
@@ -80,11 +82,14 @@ nav:
       - Pin the Image Customizer version: how-to/pin-the-ic-version.md
       - Use a locally-built IC image: how-to/use-a-local-ic-image.md
       - Export configs for a pipeline: how-to/export-configs-for-a-pipeline.md
+      - Handle exit codes in scripts: how-to/handle-exit-codes.md
       - Use a tools dir for sealed images: how-to/use-a-tools-dir.md
       - Select a container engine: how-to/select-a-container-engine.md
+      - Enable a preview feature: how-to/use-preview-features.md
       - Sign an image: how-to/sign-an-image.md
       - Build a portable binary: how-to/build-a-portable-binary.md
       - Embed tailor in a monorepo: how-to/embed-in-a-monorepo.md
+      - Print third-party license notices: how-to/print-license-notices.md
   - Reference:
       - reference/README.md
       - CLI: reference/cli.md

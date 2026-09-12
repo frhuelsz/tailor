@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Release tags are component-scoped as `tailor-v<version>`; tags `v1.0.0` and
+earlier use the bare `v<version>` scheme.
 
 ## [Unreleased]
 
@@ -44,6 +46,8 @@ First stable release. The `tailor` CLI is now covered by the
   (`docs/explanation/threat-model.md`).
 - Workspace-level `previewFeatures` opt-in for not-yet-stable features; signing
   is gated behind `previewFeatures: [signing]`.
+- `tailor notice` prints tailor's MIT license and the embedded third-party
+  license notices for every linked dependency.
 - Documented exit-code taxonomy: `2` usage error, `1` build failure, `130`
   interrupted (SIGINT).
 - `--clones` now produces distinct artifacts (`<slug>_clone<n>`), each with its

@@ -1,6 +1,7 @@
 # Output formats
 
-`outputs:` is a list of output specs. tailor creates one artifact per selected cell × output.
+`outputs:` is a list of output specs. tailor creates one artifact per selected cell × output. Each
+spec's `format` is **required**, and an unknown format is rejected at validate time.
 
 ```yaml
 outputs:
