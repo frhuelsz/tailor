@@ -2395,9 +2395,12 @@ selected cell produces. Only static cells are exportable — the config YAML its
 tools-dir, base, rpm-source, or signing details (those are Image Customizer invocation arguments the
 consuming pipeline supplies).</p>
 <h2 id="tailor-lock"><code>tailor lock</code><a class="headerlink" href="#tailor-lock" title="Permanent link">&para;</a></h2>
-<p>Resolve registry inputs and write <code>tailor.lock</code> without building.</p>
+<p>Resolve registry inputs and write <code>tailor.lock</code> without building. Inputs already pinned in the
+current lock <strong>keep their digests</strong> — only new or unpinned inputs are resolved, so re-running <code>lock</code>
+is idempotent and never silently moves an existing pin. Use it to freeze a reproducible set.</p>
 <h2 id="tailor-update"><code>tailor update</code><a class="headerlink" href="#tailor-update" title="Permanent link">&para;</a></h2>
-<p>Re-resolve and rewrite <code>tailor.lock</code>.</p>
+<p>Re-resolve <strong>every</strong> input to its latest digest and rewrite <code>tailor.lock</code>, ignoring the existing
+pins. Use it to deliberately refresh to newer base images / toolchains.</p>
 <h2 id="tailor-resolve-images"><code>tailor resolve [images...]</code><a class="headerlink" href="#tailor-resolve-images" title="Permanent link">&para;</a></h2>
 <p>Resolve digests/hashes and print the lockfile content without writing it.</p>
 <h2 id="tailor-clean-images"><code>tailor clean [images...]</code><a class="headerlink" href="#tailor-clean-images" title="Permanent link">&para;</a></h2>

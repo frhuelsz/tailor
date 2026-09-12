@@ -1889,7 +1889,7 @@
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>gizmo_full_arm64_edge_cosi
 </code></pre></div>
 <h2 id="5-inspect-rendered-image-customizer-yaml">5. Inspect rendered Image Customizer YAML<a class="headerlink" href="#5-inspect-rendered-image-customizer-yaml" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tailor<span class="w"> </span>explain<span class="w"> </span>gizmo<span class="w"> </span>-s<span class="w"> </span><span class="nv">variant</span><span class="o">=</span>full,arch<span class="o">=</span>amd64,channel<span class="o">=</span>edge
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>tailor<span class="w"> </span>explain<span class="w"> </span>gizmo<span class="w"> </span>-s<span class="w"> </span><span class="nv">variant</span><span class="o">=</span>full,arch<span class="o">=</span>amd64,channel<span class="o">=</span>edge<span class="w"> </span>--with-config
 </code></pre></div>
 <p>Expected shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>gizmo: 1 cell(s)
@@ -1905,7 +1905,7 @@
 <a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>      - git
 <a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>      - gizmo-edge
 </code></pre></div>
-<p>The exact config depends on your edits. The important point: <code>explain</code> shows the fully merged IC config for selected cells.</p>
+<p>The exact config depends on your edits. The important point: <code>explain --with-config</code> shows the fully merged IC config for selected cells (plain <code>explain</code> shows only the ordered list of fragment files that merge into each cell).</p>
 <h2 id="6-dry-run-one-selected-cell">6. Dry-run one selected cell<a class="headerlink" href="#6-dry-run-one-selected-cell" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>gizmo<span class="w"> </span>-s<span class="w"> </span><span class="nv">variant</span><span class="o">=</span>full,arch<span class="o">=</span>amd64,channel<span class="o">=</span>edge<span class="w"> </span>--dry-run
 </code></pre></div>

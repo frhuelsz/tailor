@@ -1815,8 +1815,8 @@ one-liner.</p>
 <p>The exported <code>&lt;slug&gt;.yaml</code> is only the Image Customizer <strong>config</strong>. Everything else in an IC
 invocation — the base image, <code>--rpm-source</code>, <code>--tools-dir</code>, output format, and any signing — is not in
 the config and is provided by the pipeline. This is deliberate: the config is portable and static, so
-<code>tailor export</code> always succeeds for any cell, and the pipeline owns the invocation using its own
-approved machinery.</p>
+<code>tailor export</code> renders any cell whose config is complete, and the pipeline owns the invocation using
+its own approved machinery.</p>
 <p>A minimal pipeline call per cell looks like:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>imagecustomizer<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--config-file<span class="w"> </span>rendered/&lt;slug&gt;.yaml<span class="w"> </span><span class="se">\</span>

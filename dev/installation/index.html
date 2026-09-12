@@ -1824,7 +1824,7 @@
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tailor<span class="w"> </span>--version
 </code></pre></div>
-<p>It prints the SemVer version plus build metadata, e.g. <code>tailor 0.2.0+&lt;commit&gt;.&lt;date&gt;</code>.</p>
+<p>It prints the SemVer version plus build metadata, e.g. <code>tailor &lt;version&gt;+&lt;commit&gt;.&lt;date&gt;</code>.</p>
 <h2 id="runtime-requirement-a-container-engine">Runtime requirement: a container engine<a class="headerlink" href="#runtime-requirement-a-container-engine" title="Permanent link">&para;</a></h2>
 <p>tailor runs the Azure Linux Image Customizer inside a container, so a running <strong>Docker</strong> (or Podman) daemon is required at build time — see <a href="../how-to/select-a-container-engine/">Select a container engine</a>. The binary itself has no other runtime dependencies.</p>
 <p><code>tailor validate</code>, <code>matrix</code>, <code>slugs</code>, and <code>render</code> work without a daemon; only <code>build</code> (and the other execution verbs) need one.</p>

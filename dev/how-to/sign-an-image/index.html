@@ -1829,15 +1829,14 @@
 <code>output.artifacts</code> → host-side signing → <code>inject-files</code> flow. You declare <em>how</em> to sign with a
 <code>signing:</code> profile; you keep authoring <em>what</em> to extract (<code>output.artifacts</code>) in your own IC <code>config:</code>.</p>
 <blockquote>
-<p><strong>Status — foundation only.</strong> The <code>signing:</code> configuration, profile resolution, and the
-<strong>fail-fast preflight</strong> are implemented and enforced. The signing <em>execution</em> (certificate minting,
-PE signing, the <code>inject-files</code> pass) is a later milestone (<code>meta/docs/2026-06-29-signing.md</code> §11). Until it
-lands, a signed <code>tailor build</code> runs the preflight and then <strong>stops with a clear error</strong> rather than
-produce a silently-unsigned image. <code>tailor validate</code> and <code>tailor build --dry-run</code> report signing
-readiness without failing.</p>
 <p><strong>Preview feature.</strong> Signing is not yet part of the stable 1.0 contract, so it is gated behind a
-preview opt-in. Enable it by adding <code>previewFeatures: [signing]</code> to <code>tailor.yaml</code>; a signed
-<code>tailor build</code>/<code>validate</code> without the opt-in stops with a clear error.</p>
+preview opt-in: add <code>previewFeatures: [signing]</code> to <code>tailor.yaml</code>. A signed <code>tailor build</code> or
+<code>validate</code> without the opt-in stops with a clear error. Because it is a preview feature, its schema
+and behavior may change before it is promoted (see <a href="https://github.com/frhuelsz/tailor/blob/main/COMPATIBILITY.md">Compatibility</a>).</p>
+<p><strong>Backend status.</strong> The <code>local-test-ca</code> and <code>keypair</code> backends are implemented end-to-end: a signed
+build extracts the declared artifacts, signs them on the host, and re-injects them so the final image
+is signed. The <code>azure-key-vault</code> backend is <strong>not yet implemented</strong> — its configuration validates and
+preflight reports it as unavailable.</p>
 </blockquote>
 <h2 id="1-enable-the-signing-preview-feature">1. Enable the signing preview feature<a class="headerlink" href="#1-enable-the-signing-preview-feature" title="Permanent link">&para;</a></h2>
 <p>Signing is gated behind a preview opt-in. Add it to <code>tailor.yaml</code>:</p>
@@ -1875,7 +1874,7 @@ preview opt-in. Enable it by adding <code>previewFeatures: [signing]</code> to <
 <tr>
 <td><code>local-test-ca</code></td>
 <td>none</td>
-<td>MVP / CI. Pure-Rust self-signed CA + leaf minted per build. Not a production trust root.</td>
+<td>MVP / CI. A self-signed CA + leaf minted per build. Not a production trust root.</td>
 </tr>
 <tr>
 <td><code>keypair</code></td>
@@ -1885,7 +1884,7 @@ preview opt-in. Enable it by adding <code>previewFeatures: [signing]</code> to <
 <tr>
 <td><code>azure-key-vault</code></td>
 <td><code>vault</code>, <code>certificate</code></td>
-<td>Remote signing (future milestone).</td>
+<td>Remote signing — configuration only; execution is a later milestone.</td>
 </tr>
 </tbody>
 </table>
@@ -1918,18 +1917,20 @@ every unmet prerequisite and the images that need it:</p>
 </code></pre></div>
 <p>What the preflight checks per backend:</p>
 <ul>
-<li><strong><code>local-test-ca</code></strong> — always ready (keys are minted in pure Rust at sign time).</li>
+<li><strong><code>local-test-ca</code></strong> — always ready (the CA + leaf are minted at sign time).</li>
 <li><strong><code>keypair</code></strong> — the <code>key</code> and <code>cert</code> files exist, are readable, and are PEM.</li>
-<li><strong><code>azure-key-vault</code></strong> — configuration completeness (a live credential probe arrives with the remote
-  backend milestone).</li>
+<li><strong><code>azure-key-vault</code></strong> — configuration completeness; preflight also reports that execution is not yet
+  available for this backend.</li>
 </ul>
 <h2 id="5-dry-run">5. Dry-run<a class="headerlink" href="#5-dry-run" title="Permanent link">&para;</a></h2>
-<p><code>tailor build --dry-run</code> never contacts an engine and reports the signing plan:</p>
+<p><code>tailor build --dry-run</code> never contacts an engine and reports the signing plan and its readiness
+without signing anything:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>tailor<span class="w"> </span>build<span class="w"> </span>--dry-run<span class="w"> </span>appliance
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># … the customize invocation …</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># ✓ signing profile `byo` ready (image(s): appliance)</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># note: signing execution is not yet implemented; this dry-run shows the unsigned customize invocation.</span>
 </code></pre></div>
+<p>A real <code>tailor build appliance</code> (with an implemented backend) then runs the full flow: extract the
+declared <code>output.artifacts</code>, sign them on the host, and re-inject them so the final image is signed.</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Private key material is always <strong>referenced</strong> by path, never inlined into the manifest or written
