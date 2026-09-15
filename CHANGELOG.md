@@ -9,6 +9,8 @@ earlier use the bare `v<version>` scheme.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-15
+
 ### Added
 
 - `images.autoDiscover` in `tailor.yaml`: a list of workspace-root-relative
@@ -151,7 +153,8 @@ First stable release. The `tailor` CLI is now covered by the
 
 - Initial tailor CLI, runtime, documentation, and tests.
 
-[Unreleased]: https://github.com/frhuelsz/tailor/compare/tailor-v1.0.2...HEAD
+[Unreleased]: https://github.com/frhuelsz/tailor/compare/tailor-v1.1.0...HEAD
+[1.1.0]: https://github.com/frhuelsz/tailor/compare/tailor-v1.0.2...tailor-v1.1.0
 [1.0.2]: https://github.com/frhuelsz/tailor/compare/tailor-v1.0.1...tailor-v1.0.2
 [1.0.1]: https://github.com/frhuelsz/tailor/compare/v1.0.0...tailor-v1.0.1
 [1.0.0]: https://github.com/frhuelsz/tailor/compare/v0.8.0...v1.0.0
