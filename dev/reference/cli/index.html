@@ -1607,6 +1607,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#color-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Color output
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2328,6 +2339,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#color-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Color output
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2675,6 +2697,36 @@ attributions:</p>
 </tbody>
 </table>
 <p>See <a href="../../how-to/handle-exit-codes/">Handle exit codes in scripts</a>.</p>
+<h2 id="color-output">Color output<a class="headerlink" href="#color-output" title="Permanent link">&para;</a></h2>
+<p>tailor colors its status output (the build status lines, <code>validate</code>'s <code>✓</code>, and <code>list</code>'s headings)
+and preserves Image Customizer's colored logs. Color is a single process-wide decision, resolved in
+this order:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NO_COLOR</code> is set (any value)</td>
+<td>Force color <strong>off</strong>.</td>
+</tr>
+<tr>
+<td><code>CLICOLOR_FORCE</code> is set (any value)</td>
+<td>Force color <strong>on</strong>, even when output is not a terminal.</td>
+</tr>
+<tr>
+<td>neither is set</td>
+<td>Color on only when stderr is a terminal.</td>
+</tr>
+</tbody>
+</table>
+<p>In CI, output is not a terminal, so set <code>CLICOLOR_FORCE=1</code> to keep tailor's (and IC's) colored logs —
+for example in an Azure DevOps pipeline, which renders ANSI:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">CLICOLOR_FORCE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>tailor<span class="w"> </span>build
+</code></pre></div>
 
 
 
