@@ -9,6 +9,8 @@ earlier use the bare `v<version>` scheme.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-15
+
 ### Fixed
 
 - `${inputs.<name>}` now resolves to a container-namespace path in the Image
@@ -170,7 +172,8 @@ First stable release. The `tailor` CLI is now covered by the
 
 - Initial tailor CLI, runtime, documentation, and tests.
 
-[Unreleased]: https://github.com/frhuelsz/tailor/compare/tailor-v1.1.0...HEAD
+[Unreleased]: https://github.com/frhuelsz/tailor/compare/tailor-v1.2.0...HEAD
+[1.2.0]: https://github.com/frhuelsz/tailor/compare/tailor-v1.1.0...tailor-v1.2.0
 [1.1.0]: https://github.com/frhuelsz/tailor/compare/tailor-v1.0.2...tailor-v1.1.0
 [1.0.2]: https://github.com/frhuelsz/tailor/compare/tailor-v1.0.1...tailor-v1.0.2
 [1.0.1]: https://github.com/frhuelsz/tailor/compare/v1.0.0...tailor-v1.0.1
