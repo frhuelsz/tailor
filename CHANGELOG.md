@@ -9,6 +9,21 @@ earlier use the bare `v<version>` scheme.
 
 ## [Unreleased]
 
+### Fixed
+
+- A registry (`oci`/`azureLinux`) base image now honors its **locked digest** at
+  build time. Previously `tailor build` after `tailor lock` re-resolved the
+  (possibly moving) tag and used the fresh digest, defeating the lockfile's base
+  pin; the plan now uses the locked digest when one is recorded.
+
+### Removed
+
+- The unused `outputs[].name` field. It was accepted and documented as an
+  output-basename template but never implemented (a no-op since the first
+  release) and set by no known config. Because `outputs` rejects unknown fields,
+  a config that still sets `name:` now gets a clear error instead of a silent
+  no-op. It can be reintroduced as a real feature later.
+
 ## [1.2.0] - 2026-09-15
 
 ### Fixed
