@@ -9,6 +9,12 @@ earlier use the bare `v<version>` scheme.
 
 ## [Unreleased]
 
+### Security
+
+- Bump `rustls` 0.23.40 → 0.23.45 to clear
+  [RUSTSEC-2026-0285](https://rustsec.org/advisories/RUSTSEC-2026-0285) (TLS 1.3
+  handshake messages accepted across encryption-level boundaries).
+
 ### Fixed
 
 - A registry (`oci`/`azureLinux`) base image now honors its **locked digest** at
