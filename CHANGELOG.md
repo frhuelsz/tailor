@@ -17,6 +17,16 @@ earlier use the bare `v<version>` scheme.
 
 ### Fixed
 
+- The build-directory safety guard now resolves **symlinks** on existing path
+  components before its checks. Previously a symlinked build/scratch dir (e.g.
+  `/tmp/tailor-build -> /`) passed the root/system-directory/`$HOME` checks
+  lexically, then `create_dir_all` and the read-write bind followed the symlink —
+  letting Image Customizer's recursive delete target the real location. The guard
+  now tests the symlink's true target.
+- A `base: { image }` that resolves to a **compressed** producer output
+  (`compression:`, a `.zst` artifact) is now rejected with a clear error instead
+  of handing Image Customizer a base it cannot read. (`${inputs.*}`, which embeds
+  the artifact as a plain file, is unaffected.)
 - A registry (`oci`/`azureLinux`) base image now honors its **locked digest** at
   build time. Previously `tailor build` after `tailor lock` re-resolved the
   (possibly moving) tag and used the fresh digest, defeating the lockfile's base
