@@ -1498,10 +1498,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-lock" class="md-nav__link">
+  <a href="#tailor-lock-preview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor lock
+        tailor lock (preview)
       
     </span>
   </a>
@@ -1509,10 +1509,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-update" class="md-nav__link">
+  <a href="#tailor-update-preview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor update
+        tailor update (preview)
       
     </span>
   </a>
@@ -2230,10 +2230,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-lock" class="md-nav__link">
+  <a href="#tailor-lock-preview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor lock
+        tailor lock (preview)
       
     </span>
   </a>
@@ -2241,10 +2241,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-update" class="md-nav__link">
+  <a href="#tailor-update-preview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor update
+        tailor update (preview)
       
     </span>
   </a>
@@ -2474,7 +2474,7 @@ name the image and pass <code>--cell</code> — <code>tailor build &lt;slug&gt;<
 </tr>
 <tr>
 <td><code>--locked</code></td>
-<td>Require a complete <code>tailor.lock</code>; fail on missing entries or registry drift.</td>
+<td><em>(preview, <code>lock-preview</code> feature)</em> Require a complete <code>tailor.lock</code>; fail on missing entries or registry drift. Absent from default builds — see <a href="#tailor-lock-preview"><code>tailor lock</code></a>.</td>
 </tr>
 <tr>
 <td><code>--force</code></td>
@@ -2636,13 +2636,20 @@ gate):</p>
 selected cell produces. Only static cells are exportable — the config YAML itself carries no
 tools-dir, base, rpm-source, or signing details (those are Image Customizer invocation arguments the
 consuming pipeline supplies).</p>
-<h2 id="tailor-lock"><code>tailor lock</code><a class="headerlink" href="#tailor-lock" title="Permanent link">&para;</a></h2>
+<h2 id="tailor-lock-preview"><code>tailor lock</code> <em>(preview)</em><a class="headerlink" href="#tailor-lock-preview" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Preview feature.</strong> <code>lock</code>, <code>update</code>, and <code>build --locked</code> are gated behind the <code>lock-preview</code>
+Cargo feature and are <strong>absent from default builds</strong> (lockfile <em>enforcement</em> is not yet
+implemented). Build with <code>cargo install --features lock-preview</code> (or <code>cargo build --features
+lock-preview</code>) to enable them.</p>
+</blockquote>
 <p>Resolve registry inputs and write <code>tailor.lock</code> without building. Inputs already pinned in the
 current lock <strong>keep their digests</strong> — only new or unpinned inputs are resolved, so re-running <code>lock</code>
 is idempotent and never silently moves an existing pin. Use it to freeze a reproducible set.</p>
-<h2 id="tailor-update"><code>tailor update</code><a class="headerlink" href="#tailor-update" title="Permanent link">&para;</a></h2>
+<h2 id="tailor-update-preview"><code>tailor update</code> <em>(preview)</em><a class="headerlink" href="#tailor-update-preview" title="Permanent link">&para;</a></h2>
 <p>Re-resolve <strong>every</strong> input to its latest digest and rewrite <code>tailor.lock</code>, ignoring the existing
-pins. Use it to deliberately refresh to newer base images / toolchains.</p>
+pins. Use it to deliberately refresh to newer base images / toolchains. Preview feature — see
+<a href="#tailor-lock-preview"><code>tailor lock</code></a>.</p>
 <h2 id="tailor-resolve-images"><code>tailor resolve [images...]</code><a class="headerlink" href="#tailor-resolve-images" title="Permanent link">&para;</a></h2>
 <p>Resolve digests/hashes and print the lockfile content without writing it.</p>
 <h2 id="tailor-clean-images"><code>tailor clean [images...]</code><a class="headerlink" href="#tailor-clean-images" title="Permanent link">&para;</a></h2>
