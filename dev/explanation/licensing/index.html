@@ -1912,16 +1912,16 @@ statically linked binary, every dependency it links is compiled into that binary
 travel with it. This page describes how tailor stays compliant.</p>
 <h2 id="policy-what-dependencies-are-allowed">Policy: what dependencies are allowed<a class="headerlink" href="#policy-what-dependencies-are-allowed" title="Permanent link">&para;</a></h2>
 <p>tailor restricts its dependency tree to <strong>permissive, attribution-style licenses</strong> — no copyleft.
-The policy lives in <a href="https://github.com/frhuelsz/tailor/blob/main/deny.toml"><code>deny.toml</code></a> and is enforced in CI by
-<a href="https://github.com/EmbarkStudios/cargo-deny"><code>cargo-deny</code></a>: a pull request that introduces a
-dependency under a license outside the allow-list fails the <code>cargo-deny</code> check until reviewed.</p>
+The policy lives in <a href="https://github.com/frhuelsz/tailor/blob/main/deny.toml"><code>deny.toml</code></a> and is enforced in CI by a dedicated
+<a href="https://github.com/EmbarkStudios/cargo-deny"><code>cargo-deny</code></a> job that runs on every pull request: a PR
+that introduces a dependency under a license outside the allow-list fails the <code>cargo-deny</code> check until reviewed.</p>
 <p>The allow-list is:</p>
 <p><code>MIT</code>, <code>Apache-2.0</code>, <code>Apache-2.0 WITH LLVM-exception</code>, <code>BSD-2-Clause</code>, <code>BSD-3-Clause</code>, <code>ISC</code>, <code>Zlib</code>,
 <code>Unicode-3.0</code>, <code>BSL-1.0</code>, <code>Unlicense</code>, <code>CDLA-Permissive-2.0</code>.</p>
 <p><code>cargo-deny</code> also checks for known security advisories, yanked releases, and off-registry sources.
-Run it locally with:</p>
+Run the same check locally with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>cargo-deny<span class="w"> </span>--locked
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>deny<span class="w"> </span>check
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>just<span class="w"> </span>deny<span class="w">   </span><span class="c1"># or: cargo deny check</span>
 </code></pre></div>
 <h2 id="attribution-the-tailor-notice-command">Attribution: the <code>tailor notice</code> command<a class="headerlink" href="#attribution-the-tailor-notice-command" title="Permanent link">&para;</a></h2>
 <p>Permissive licenses require reproducing each dependency's copyright and license text when you
