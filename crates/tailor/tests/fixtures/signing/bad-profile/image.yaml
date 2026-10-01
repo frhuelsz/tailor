@@ -1,9 +1,0 @@
-name: bad-profile
-signing: nope
-base:
-  path: ./base.img
-outputs:
-  - format: cosi
-config:
-  os:
-    hostname: bad-profile

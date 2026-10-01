@@ -1,3 +1,0 @@
-# by-channel/stable.yaml — the stable channel pins a concrete boot package name.
-params:
-  bootPkg: boot-stable

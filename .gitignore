@@ -1,16 +1,6 @@
-/target
-**/target/
-**/*.rs.bk
-
-# tailor runtime scratch / outputs
-/artifacts/
-.tailor/
-**/.tailor-render.*
-**/.tailor-work.*
-**/.tailor-farm-*/
-**/.rendered/
-
-comparison/**
-test/**
-# MkDocs build output (docs site is built in CI, deployed to gh-pages via mike)
+# MkDocs build output (the docs site is built in CI and deployed to gh-pages via mike).
 /site/
+
+# Python / tooling caches
+__pycache__/
+*.pyc

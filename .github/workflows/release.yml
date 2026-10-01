@@ -1,98 +1,101 @@
 name: Release
 
-# Triggered by pushing a component-scoped version tag (e.g. `tailor-v1.0.0`), or manually via the
-# Actions tab (provide the tag to release).
+# Build and publish signed `tailor` release artifacts from the upstream source
+# (microsoft/trident, `tools/tailor`). tailor's code lives upstream; this repo is
+# only its release-publishing home.
 #
-# The tag is component-scoped (`tailor-v*`, not `v*`) so this project can live inside a larger
-# monorepo without colliding with the monorepo's own tags. To relocate this workflow into a monorepo
-# where tailor is a subdirectory: move this file to the monorepo's `.github/workflows/`, set
-# `TAILOR_DIR` below to tailor's path (e.g. `tailor`), and add a `paths:` filter (e.g.
-# `paths: ['tailor/**']`) so it only runs on changes to the tailor subtree. See
-# `docs/how-to/embed-in-a-monorepo.md`.
+# Runs daily to pick up a new upstream version, and on demand. The `check` job
+# reads the upstream `tools/tailor/Cargo.toml` version and exits early unless it
+# is newer than the latest `v<version>` release here (override with `force`).
+#
+# Signing identity: these runs are triggered by `schedule`/`workflow_dispatch` on
+# the default branch, so the cosign/attestation identity is
+# `https://github.com/frhuelsz/tailor/.github/workflows/release.yml@refs/heads/main`
+# (see the verification steps in README.md).
 on:
-  push:
-    tags: ["tailor-v*"]
+  schedule:
+    - cron: "0 7 * * *"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to release (e.g. tailor-v1.0.0)"
-        required: true
+      ref:
+        description: "Upstream git ref (branch / tag / SHA) to build from"
+        default: "main"
+      force:
+        description: "Release even if this version already has a release"
+        type: boolean
+        default: false
 
-# Releases need write access to upload assets / create the release, mint OIDC
-# tokens for keyless signing, and publish artifact attestations.
 permissions:
   attestations: write
   contents: write
   id-token: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  # tailor's path within the repository. `.` when tailor is the repository root (this fork); set to
-  # tailor's subdirectory (e.g. `tailor`) when embedded in a monorepo — the only line to change.
-  TAILOR_DIR: "."
+  UPSTREAM: microsoft/trident
+  # tailor's path within the upstream repository.
+  TAILOR_DIR: tools/tailor
 
 jobs:
-  test:
-    name: release gates
+  check:
+    name: check upstream version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      should_release: ${{ steps.resolve.outputs.should_release }}
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-      - name: Verify workspace version matches tag
+      - name: Resolve upstream version and whether to release
+        id: resolve
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.event.inputs.ref || 'main' }}
+          FORCE: ${{ github.event.inputs.force || 'false' }}
         run: |
           set -euo pipefail
-          # Accept a component-scoped tag (`tailor-v1.2.3`); tolerate a bare `v1.2.3` too.
-          tag_version="${RELEASE_TAG#tailor-}"
-          if [[ "$tag_version" != v* ]]; then
-            echo "::error::Release tag '$RELEASE_TAG' must be of the form 'tailor-vX.Y.Z'."
-            exit 1
-          fi
-          tag_version="${tag_version#v}"
-          manifest_version="$(python3 - <<PY
-          import pathlib
-          import re
-          import sys
-
-          in_workspace_package = False
-          for line in pathlib.Path("${TAILOR_DIR}/Cargo.toml").read_text(encoding="utf-8").splitlines():
-              stripped = line.strip()
-              if stripped.startswith("[") and stripped.endswith("]"):
-                  in_workspace_package = stripped == "[workspace.package]"
+          # Resolve the upstream ref to a concrete commit so every job builds the same source.
+          sha="$(gh api "repos/${UPSTREAM}/commits/${REF}" --jq '.sha')"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          # Read the [workspace.package] version from the upstream Cargo.toml at that commit.
+          gh api "repos/${UPSTREAM}/contents/${TAILOR_DIR}/Cargo.toml?ref=${sha}" \
+            --jq '.content' | base64 -d > up_cargo.toml
+          version="$(python3 - <<'PY'
+          import pathlib, re, sys
+          in_wp = False
+          for line in pathlib.Path("up_cargo.toml").read_text(encoding="utf-8").splitlines():
+              s = line.strip()
+              if s.startswith("[") and s.endswith("]"):
+                  in_wp = s == "[workspace.package]"
                   continue
-              if in_workspace_package:
-                  match = re.match(r'^version\s*=\s*"([^"]+)"\s*$', stripped)
-                  if match:
-                      print(match.group(1))
-                      break
+              if in_wp:
+                  m = re.match(r'^version\s*=\s*"([^"]+)"\s*$', s)
+                  if m:
+                      print(m.group(1)); break
           else:
-              sys.exit("workspace.package version not found in Cargo.toml")
+              sys.exit("workspace.package version not found in upstream Cargo.toml")
           PY
           )"
-          if [[ "$manifest_version" != "$tag_version" ]]; then
-            echo "::error::Cargo.toml workspace.package version '$manifest_version' does not match release tag '$RELEASE_TAG' ('$tag_version')."
-            exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          tag="v${version}"
+          if [ "$FORCE" = "true" ]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Forcing a release of ${tag} from ${UPSTREAM}@${sha}."
+          elif gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${tag} is already released; nothing to do."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${tag} is new; building from ${UPSTREAM}@${sha}."
           fi
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-      - name: Run tests
-        working-directory: ${{ env.TAILOR_DIR }}
-        run: cargo test --workspace --locked
-      - name: Run clippy
-        working-directory: ${{ env.TAILOR_DIR }}
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Check formatting
-        working-directory: ${{ env.TAILOR_DIR }}
-        run: cargo fmt --all --check
 
   build:
     name: build (${{ matrix.target }})
-    needs: test
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     env:
       CC_x86_64_unknown_linux_musl: musl-gcc
@@ -103,24 +106,38 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-          # GitHub-hosted ARM64 Linux runner (see CI note on availability).
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - name: Check out upstream source
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check.outputs.sha }}
+      - name: Force public crates.io
+        run: |
+          # The monorepo root .cargo/config.toml replaces crates-io with an
+          # authenticated Azure DevOps feed; tailor depends only on public crates,
+          # so strip that inherited replacement before building.
+          set -eux
+          cfg=.cargo/config.toml
+          [ -f "$cfg" ] || cfg=.cargo/config
+          if [ -f "$cfg" ]; then
+            awk '
+              /^\[source\.crates-io\]/ { skip=1; next }
+              /^\[/                    { skip=0 }
+              !skip                    { print }
+            ' "$cfg" > "$cfg.tailor.tmp"
+            mv "$cfg.tailor.tmp" "$cfg"
+          fi
       - name: Install musl toolchain
         run: |
-          # The hosted runner ships third-party apt repos (e.g. google-chrome) whose indexes
-          # intermittently fail with "Hash Sum mismatch", making `apt-get update` exit non-zero.
-          # That is unrelated to musl-tools (an Ubuntu package whose index refreshes fine), so
-          # tolerate a partial update and let the install proceed from Ubuntu's own repos.
           sudo apt-get update || true
           sudo apt-get install -y musl-tools
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           target: ${{ matrix.target }}
+          cache-workspaces: ${{ env.TAILOR_DIR }}
       - name: Build static binary
         working-directory: ${{ env.TAILOR_DIR }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p tailor
@@ -144,12 +161,15 @@ jobs:
 
   release:
     name: publish release
-    needs: build
+    needs: [check, build]
+    if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - name: Check out upstream source (for the SBOM)
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check.outputs.sha }}
       - name: Download build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -196,9 +216,13 @@ jobs:
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: v${{ needs.check.outputs.version }}
+          name: v${{ needs.check.outputs.version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            Built from [`${{ env.UPSTREAM }}`](https://github.com/${{ env.UPSTREAM }}/tree/${{ needs.check.outputs.sha }}/${{ env.TAILOR_DIR }}) at commit `${{ needs.check.outputs.sha }}`.
+
+            Each binary ships a SHA256 checksum, a cosign keyless signature (`.sig`/`.pem`/`.bundle`), a CycloneDX SBOM, and a build-provenance attestation. See the README for verification steps.
           files: |
             dist/*

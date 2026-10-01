@@ -1,9 +1,9 @@
 site_name: tailor
 site_description: A build tool that wraps Microsoft Image Customizer.
 site_url: https://frhuelsz.github.io/tailor/
-repo_url: https://github.com/frhuelsz/tailor
-repo_name: frhuelsz/tailor
-edit_uri: edit/main/docs/
+repo_url: https://github.com/microsoft/trident
+repo_name: microsoft/trident
+edit_uri: edit/main/tools/tailor/docs/
 
 # This config lives in .github/docs/; the documentation content stays in the repo-root docs/ tree.
 docs_dir: ../../docs
