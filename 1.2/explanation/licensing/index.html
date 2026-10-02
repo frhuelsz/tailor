@@ -197,13 +197,13 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/frhuelsz/tailor" title="Go to repository" class="md-source" data-md-component="source">
+        <a href="https://github.com/microsoft/trident" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
   </div>
   <div class="md-source__repository">
-    frhuelsz/tailor
+    microsoft/trident
   </div>
 </a>
       </div>
@@ -242,13 +242,13 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/frhuelsz/tailor" title="Go to repository" class="md-source" data-md-component="source">
+      <a href="https://github.com/microsoft/trident" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
   </div>
   <div class="md-source__repository">
-    frhuelsz/tailor
+    microsoft/trident
   </div>
 </a>
     </div>
@@ -1151,7 +1151,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../how-to/embed-in-a-monorepo/" class="md-nav__link">
+      <a href="../../how-to/embed-in-a-monorepo.md" class="md-nav__link">
         
   
   
@@ -1907,21 +1907,21 @@
 
 
 <h1 id="licensing-and-third-party-notices">Licensing and third-party notices<a class="headerlink" href="#licensing-and-third-party-notices" title="Permanent link">&para;</a></h1>
-<p>tailor is licensed under the <a href="https://github.com/frhuelsz/tailor/blob/main/LICENSE">MIT License</a>. Because tailor is distributed as a
+<p>tailor is licensed under the <a href="../../LICENSE">MIT License</a>. Because tailor is distributed as a
 statically linked binary, every dependency it links is compiled into that binary, so their licenses
 travel with it. This page describes how tailor stays compliant.</p>
 <h2 id="policy-what-dependencies-are-allowed">Policy: what dependencies are allowed<a class="headerlink" href="#policy-what-dependencies-are-allowed" title="Permanent link">&para;</a></h2>
 <p>tailor restricts its dependency tree to <strong>permissive, attribution-style licenses</strong> — no copyleft.
-The policy lives in <a href="https://github.com/frhuelsz/tailor/blob/main/deny.toml"><code>deny.toml</code></a> and is enforced in CI by
-<a href="https://github.com/EmbarkStudios/cargo-deny"><code>cargo-deny</code></a>: a pull request that introduces a
-dependency under a license outside the allow-list fails the <code>cargo-deny</code> check until reviewed.</p>
+The policy lives in <a href="../../deny.toml"><code>deny.toml</code></a> and is enforced in CI by a dedicated
+<a href="https://github.com/EmbarkStudios/cargo-deny"><code>cargo-deny</code></a> job that runs on every pull request: a PR
+that introduces a dependency under a license outside the allow-list fails the <code>cargo-deny</code> check until reviewed.</p>
 <p>The allow-list is:</p>
 <p><code>MIT</code>, <code>Apache-2.0</code>, <code>Apache-2.0 WITH LLVM-exception</code>, <code>BSD-2-Clause</code>, <code>BSD-3-Clause</code>, <code>ISC</code>, <code>Zlib</code>,
 <code>Unicode-3.0</code>, <code>BSL-1.0</code>, <code>Unlicense</code>, <code>CDLA-Permissive-2.0</code>.</p>
 <p><code>cargo-deny</code> also checks for known security advisories, yanked releases, and off-registry sources.
-Run it locally with:</p>
+Run the same check locally with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>cargo-deny<span class="w"> </span>--locked
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>deny<span class="w"> </span>check
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>just<span class="w"> </span>deny<span class="w">   </span><span class="c1"># or: cargo deny check</span>
 </code></pre></div>
 <h2 id="attribution-the-tailor-notice-command">Attribution: the <code>tailor notice</code> command<a class="headerlink" href="#attribution-the-tailor-notice-command" title="Permanent link">&para;</a></h2>
 <p>Permissive licenses require reproducing each dependency's copyright and license text when you
@@ -1936,7 +1936,7 @@ distribute the software. tailor satisfies this with an embedded notice:</p>
 <p>Because the notice is generated from the resolved <code>Cargo.lock</code> on every build, it can never drift
 from the dependency set — there is no checked-in copy to keep in sync. The license-collection tool
 (<code>cargo_metadata</code>) is a <strong>build-only</strong> dependency, so it is not linked into the shipped binary.</p>
-<p>To archive the third-party attributions alongside a release:</p>
+<p>To archive the third-party attributions alongside a distribution:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>tailor<span class="w"> </span>notice<span class="w"> </span>&gt;<span class="w"> </span>THIRD-PARTY-NOTICES.txt
 </code></pre></div>
 <h2 id="changing-the-copyright-holder">Changing the copyright holder<a class="headerlink" href="#changing-the-copyright-holder" title="Permanent link">&para;</a></h2>

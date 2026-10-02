@@ -199,13 +199,13 @@
     
     
       <div class="md-header__source">
-        <a href="https://github.com/frhuelsz/tailor" title="Go to repository" class="md-source" data-md-component="source">
+        <a href="https://github.com/microsoft/trident" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
   </div>
   <div class="md-source__repository">
-    frhuelsz/tailor
+    microsoft/trident
   </div>
 </a>
       </div>
@@ -244,13 +244,13 @@
   </label>
   
     <div class="md-nav__source">
-      <a href="https://github.com/frhuelsz/tailor" title="Go to repository" class="md-source" data-md-component="source">
+      <a href="https://github.com/microsoft/trident" title="Go to repository" class="md-source" data-md-component="source">
   <div class="md-source__icon md-icon">
     
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
   </div>
   <div class="md-source__repository">
-    frhuelsz/tailor
+    microsoft/trident
   </div>
 </a>
     </div>
@@ -349,17 +349,6 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prebuilt-release-binary-recommended" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prebuilt release binary (recommended)
-      
-    </span>
-  </a>
-  
-</li>
       
         <li class="md-nav__item">
   <a href="#from-source" class="md-nav__link">
@@ -1255,7 +1244,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../how-to/embed-in-a-monorepo/" class="md-nav__link">
+      <a href="../how-to/embed-in-a-monorepo.md" class="md-nav__link">
         
   
   
@@ -1876,17 +1865,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prebuilt-release-binary-recommended" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prebuilt release binary (recommended)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#from-source" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1951,29 +1929,15 @@
 
 
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
-<p>tailor is a single static binary. Install a prebuilt release, or build it from source, then point it at a container engine.</p>
-<h2 id="prebuilt-release-binary-recommended">Prebuilt release binary (recommended)<a class="headerlink" href="#prebuilt-release-binary-recommended" title="Permanent link">&para;</a></h2>
-<p>Releases publish static Linux musl binaries for <code>x86_64</code> and <code>aarch64</code>, each with a <code>.sha256</code> checksum. This snippet always fetches the <strong>latest</strong> release:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">target</span><span class="o">=</span><span class="s2">"x86_64-unknown-linux-musl"</span><span class="w"> </span><span class="c1"># or aarch64-unknown-linux-musl</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">base</span><span class="o">=</span><span class="s2">"https://github.com/frhuelsz/tailor/releases/latest/download"</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>curl<span class="w"> </span>-L<span class="w"> </span>-O<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">base</span><span class="si">}</span><span class="s2">/tailor-</span><span class="si">${</span><span class="nv">target</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>curl<span class="w"> </span>-L<span class="w"> </span>-O<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">base</span><span class="si">}</span><span class="s2">/tailor-</span><span class="si">${</span><span class="nv">target</span><span class="si">}</span><span class="s2">.sha256"</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>sha256sum<span class="w"> </span>-c<span class="w"> </span><span class="s2">"tailor-</span><span class="si">${</span><span class="nv">target</span><span class="si">}</span><span class="s2">.sha256"</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">"tailor-</span><span class="si">${</span><span class="nv">target</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span><span class="s2">"tailor-</span><span class="si">${</span><span class="nv">target</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>/usr/local/bin/tailor
+<p>tailor is a single static binary. Build it from source, then point it at a container engine.</p>
+<h2 id="from-source">From source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
+<p>The crate is not published to crates.io yet. Install it straight from the monorepo:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>--git<span class="w"> </span>https://github.com/microsoft/trident<span class="w"> </span>tailor
+</code></pre></div>
+<p>Or from a local checkout of this directory:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>--path<span class="w"> </span>crates/tailor
 </code></pre></div>
 <p>The binary is fully static: it does not require glibc or OpenSSL on the target machine.</p>
-<p>Each release also publishes a cosign signature bundle, an SBOM, and build provenance. To verify the
-binary's signature and provenance (not just its checksum), follow the verification steps in the
-<a href="https://github.com/frhuelsz/tailor#verifying-releases">project README</a>.</p>
-<h2 id="from-source">From source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
-<p>The crate is not published to crates.io yet, so install from git (or a local checkout):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>--git<span class="w"> </span>https://github.com/frhuelsz/tailor<span class="w"> </span>tailor
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># From a local checkout:</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>cargo<span class="w"> </span>install<span class="w"> </span>--path<span class="w"> </span>crates/tailor
-</code></pre></div>
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>tailor<span class="w"> </span>--version
 </code></pre></div>
