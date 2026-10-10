@@ -1443,10 +1443,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-explain-image" class="md-nav__link">
+  <a href="#tailor-explain-imageslug" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor explain &lt;image&gt;
+        tailor explain &lt;image|slug&gt;
       
     </span>
   </a>
@@ -2175,10 +2175,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tailor-explain-image" class="md-nav__link">
+  <a href="#tailor-explain-imageslug" class="md-nav__link">
     <span class="md-ellipsis">
       
-        tailor explain &lt;image&gt;
+        tailor explain &lt;image|slug&gt;
       
     </span>
   </a>
@@ -2574,11 +2574,12 @@ config required. Writes the output beside the input by default (or to <code>-o</
 </table>
 <h2 id="tailor-slugs-images"><code>tailor slugs [images...]</code><a class="headerlink" href="#tailor-slugs-images" title="Permanent link">&para;</a></h2>
 <p>Print one selected cell slug per line. Equivalent to <code>tailor matrix --format slugs</code>.</p>
-<h2 id="tailor-explain-image"><code>tailor explain &lt;image&gt;</code><a class="headerlink" href="#tailor-explain-image" title="Permanent link">&para;</a></h2>
+<h2 id="tailor-explain-imageslug"><code>tailor explain &lt;image|slug&gt;</code><a class="headerlink" href="#tailor-explain-imageslug" title="Permanent link">&para;</a></h2>
 <p>Print the <strong>merge order</strong> for each selected cell: the ordered list of fragment files that merge into it
 (base first, later files win), each annotated with why it applies and any <code>$include</code>d libraries. This makes
 the fragment precedence model legible. Add <code>--with-config</code> to also print the merged Image Customizer
-config. Accepts <code>-s/--select</code> and <code>--cell</code>; read-only and offline.</p>
+config. Pass an image name to explain its selected cells, or a cell slug to explain that cell
+directly. Accepts <code>-s/--select</code> and <code>--cell</code>; read-only and offline.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$ tailor explain gizmo --cell gizmo_pro_arm64_stable_cosi
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cell  gizmo_pro_arm64_stable_cosi   (arch=arm64, channel=stable, edition=pro)
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
