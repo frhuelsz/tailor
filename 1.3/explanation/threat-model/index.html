@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../resources/icon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1979,9 +1979,16 @@ load-bearing — treat a regression in them as a serious bug:</p>
   artifact are written to a temporary file and renamed into place, so an
   interrupted build cannot leave torn state a later run would trust. See
   <code>crates/tailor-core/src/atomic.rs</code>.</li>
-<li><strong>Scoped privileged cleanup.</strong> The janitor only chowns/removes the specific
-  paths a build produced (the build directory's children, the image cache, the
-  per-cell log), never arbitrary locations.</li>
+<li><strong>Scoped cleanup.</strong> The janitor binds a target for chown or its parent for
+  removal; removal refuses a parent resolving to <code>/</code>. A bound parent can still
+  contain unrelated files. On SELinux hosts, janitors request <code>label=disable</code>
+  without relabeling host files; IC is unchanged and janitors remain
+  <code>Privileged: false</code>. A Fedora 43/Docker 29.8.2 probe with the janitor image
+  ran as <code>system_u:system_r:spc_t:s0</code>, not <code>unconfined_t</code>; other engines may
+  assign a different type. With a rootful daemon, container root can override
+  ordinary file permissions within these writable binds; use a trusted janitor
+  image. Tailor does not check for live loop devices or mounts before removal;
+  do not clean live build trees.</li>
 </ul>
 <h2 id="supply-chain-pinning">Supply-chain pinning<a class="headerlink" href="#supply-chain-pinning" title="Permanent link">&para;</a></h2>
 <p>Because a moving container tag is a reproducibility hazard (today's <code>:latest</code> is
@@ -2092,10 +2099,10 @@ outside tailor's model.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "content.code.copy", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "content.code.copy", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
